@@ -2,10 +2,12 @@ import { Agent } from "@mastra/core/agent";
 
 import {
   authorizePortalTool,
+  authorizeScheduleTool,
   captureCourseSessionTool,
   captureCourseSessionsTool,
   extractSlidesTool,
   findCourseSessionTool,
+  getScheduleTool,
   listCoursesTool,
   searchCoursesTool,
   summarizeCourseTool,
@@ -22,6 +24,7 @@ export const courseAgent = new Agent({
 
 工作原则：
 1. 先确认目标课程和所需产物；课程不明确时先列出或搜索课程。
+1.1 用户需要从个人课表选课时，优先调用课表工具读取本地缓存；首次同步或用户明确要求更新时才设置 refresh=true。返回 auth_required 时再调用课表授权工具。
 2. 定位课程时，课程名称、教师姓名、周内节次三项必须齐全；周内节次是实际的第几节，例如第 3–5 节应传 [3,4,5]，绝不能把详情页的列表序号当成节次。
 3. 日期是可选项。用户未提供日期时，选择与上述三项匹配的最新日期；用户提供日期时必须严格使用该日期，不能自行替换。
 4. 一个日期下可能有多段课时，必须抓取该日期下的全部段落，不能只抓其中一节。
@@ -40,6 +43,8 @@ export const courseAgent = new Agent({
   },
   tools: {
     authorizePortalTool,
+    authorizeScheduleTool,
+    getScheduleTool,
     listCoursesTool,
     searchCoursesTool,
     findCourseSessionTool,

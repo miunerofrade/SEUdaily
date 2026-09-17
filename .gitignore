@@ -17,6 +17,7 @@ node_modules/
 # --- 核心隐私与配置 ---
 config.json
 browser_data/
+.cvstream/
 
 # --- 任务产物与临时文件 ---
 exports/

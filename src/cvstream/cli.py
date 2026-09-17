@@ -12,6 +12,7 @@ from .service import (
     transcribe_cloud,
     transcribe_local,
 )
+from .schedule import ScheduleService
 
 
 def _course_service(payload: dict[str, Any]) -> CourseService:
@@ -24,17 +25,36 @@ def _course_service(payload: dict[str, Any]) -> CourseService:
     )
 
 
+def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
+    return ScheduleService(
+        target_url=payload.get(
+            "targetUrl",
+            "https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do",
+        ),
+        cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
+        cache_file=payload.get("cacheFile", ".cvstream/schedule.json"),
+    )
+
+
 def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
     if action == "health":
         return {"version": "0.3.0", "tools": [
-            "authorize", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
+            "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
+    if action == "authorize-schedule":
+        return _schedule_service(payload).authorize(
+            timeout_seconds=payload.get("timeoutSeconds", 300)
+        )
+    if action == "get-schedule":
+        return _schedule_service(payload).get_schedule(
+            refresh=payload.get("refresh", False)
+        )
     if action == "list-courses":
         return _course_service(payload).list_courses()
     if action == "search-courses":

@@ -9,12 +9,45 @@ const commonPortalFields = {
   exportDir: z.string().default("exports"),
 };
 
+const scheduleFields = {
+  targetUrl: z
+    .string()
+    .default("https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do"),
+  cookieFile: z.string().default(".cvstream/ehall-cookies.json"),
+  cacheFile: z.string().default(".cvstream/schedule.json"),
+};
+
 export const authorizePortalTool = createTool({
   id: "authorize-course-portal",
   description:
     "Open a visible browser and establish a course-portal session. Use only when authentication is missing or expired.",
   inputSchema: z.object(commonPortalFields),
   execute: async (context) => runPythonTool("authorize", context),
+});
+
+export const authorizeScheduleTool = createTool({
+  id: "authorize-schedule-portal",
+  description:
+    "Open a visible SEU eHall timetable window so the user can complete VPN, SSO, or captcha authentication. Call only when get-course-schedule returns auth_required.",
+  inputSchema: z.object({
+    ...scheduleFields,
+    timeoutSeconds: z.number().int().min(30).max(600).default(300),
+  }),
+  execute: async (context) => runPythonTool("authorize-schedule", context),
+});
+
+export const getScheduleTool = createTool({
+  id: "get-course-schedule",
+  description:
+    "Read the normalized local timetable cache. Set refresh=true only for the first sync or when the user explicitly requests an update. Returns course name, teacher, weekday, weekly periods, weeks, and classroom.",
+  inputSchema: z.object({
+    ...scheduleFields,
+    refresh: z
+      .boolean()
+      .default(false)
+      .describe("Fetch from SEU eHall instead of using the local cache"),
+  }),
+  execute: async (context) => runPythonTool("get-schedule", context),
 });
 
 export const listCourseDatesTool = createTool({
