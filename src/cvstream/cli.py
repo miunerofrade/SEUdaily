@@ -13,6 +13,7 @@ from .service import (
     transcribe_local,
 )
 from .schedule import ScheduleService
+from .jwc import JwcService
 
 
 def _course_service(payload: dict[str, Any]) -> CourseService:
@@ -35,6 +36,15 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
         cache_file=payload.get("cacheFile", ".cvstream/schedule.json"),
         username=payload.get("username"),
         password=payload.get("password"),
+    )
+
+
+def _jwc_service(payload: dict[str, Any]) -> JwcService:
+    return JwcService(
+        base_url=payload.get("baseUrl", "https://jwc.seu.edu.cn"),
+        cache_dir=payload.get("cacheDir", ".cvstream/jwc"),
+        timeout_seconds=payload.get("timeoutSeconds", 15),
+        background_sync=payload.get("backgroundSync", True),
     )
 
 
@@ -81,7 +91,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "health":
         return {"version": "0.3.0", "tools": [
             "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course",
+            "extract-slides", "summarize-course", "search-jwc", "get-jwc-article",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
@@ -92,6 +102,20 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "get-schedule":
         return _schedule_service(payload).get_schedule(
             refresh=payload.get("refresh", False)
+        )
+    if action == "search-jwc":
+        return _jwc_service(payload).search(
+            payload["query"],
+            keywords=payload.get("keywords"),
+            categories=payload.get("categories"),
+            freshness=payload.get("freshness", "balanced"),
+            time_scope=payload.get("timeScope", "any"),
+            recent_days=payload.get("recentDays", 7),
+            limit=payload.get("limit", 5),
+        )
+    if action == "get-jwc-article":
+        return _jwc_service(payload).get_article(
+            payload["articleId"], refresh=payload.get("refresh", True)
         )
     if action == "list-courses":
         return _course_service(payload).list_courses()
@@ -191,6 +215,11 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> None:
     try:
+        if len(sys.argv) >= 3 and sys.argv[1] == "jwc-worker":
+            payload = json.loads(sys.argv[2])
+            payload["backgroundSync"] = False
+            _jwc_service(payload).sync_pending()
+            return
         request = json.load(sys.stdin)
         result = dispatch(request)
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False))

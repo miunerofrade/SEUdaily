@@ -8,8 +8,10 @@ import {
   extractSlidesTool,
   findCourseSessionTool,
   getScheduleTool,
+  getJwcArticleTool,
   listCoursesTool,
   searchCoursesTool,
+  searchJwcTool,
   summarizeCourseTool,
   transcribeCloudAudioTool,
   transcribeMediaTool,
@@ -36,6 +38,7 @@ export const courseAgent = new Agent({
 9. 不要在回复中暴露账号、密码、Cookie、API Key 或带签名的媒体 URL。
 10. 工具失败时说明失败阶段与可执行的恢复方法，不要虚构成功结果。
 11. 只处理用户本人有合法访问权限的内容。
+12. 查询教务处通知时区分“结果时间范围”和“缓存新鲜度”：用户说“最新一条”时使用 timeScope=latest、freshness=latest；说“最近”时使用 timeScope=recent、freshness=latest，未说明范围则 recentDays=7；说“今天、刚发布、截至目前、有没有新通知”时同样必须 freshness=latest。普通主题查询用 balanced，历史资料用 archive。除 cache_only 外，搜索工具会先校验相关栏目列表并立即返回，同时在后台静默同步命中详情；用 keywords 和 categories 做语义路由，不扫描整个网站。只有回答确实需要正文或附件时，才用返回的 articleId 调用单条详情工具，也不要主动下载附件文件。
 `,
   model: {
     id: `deepseek/${process.env.DEEPSEEK_MODEL ?? "deepseek-flash"}`,
@@ -46,8 +49,10 @@ export const courseAgent = new Agent({
     authorizePortalTool,
     authorizeScheduleTool,
     getScheduleTool,
+    getJwcArticleTool,
     listCoursesTool,
     searchCoursesTool,
+    searchJwcTool,
     findCourseSessionTool,
     captureCourseSessionTool,
     captureCourseSessionsTool,

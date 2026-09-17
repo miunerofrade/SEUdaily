@@ -15,6 +15,7 @@ src/
     ├── cli.py                     # JSON 工具协议入口
     ├── auth.py                    # 门户认证与 Cookie 会话
     ├── schedule.py                # 校内课表同步、规范化与本地缓存
+    ├── jwc.py                     # 教务处公告分层查询与正文版本缓存
     ├── capture.py                 # 课程、字幕与媒体抓取
     ├── asr/                       # 本地/云端语音转写
     ├── ppt.py                     # 视频幻灯片提取
@@ -72,6 +73,8 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
 - `authorize-schedule-portal`：自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。
 - `get-course-schedule`：默认读取本地课表缓存；首次同步或明确更新时才重新访问校内系统。
+- `search-seu-academic-affairs`：先用条件请求校验相关公告列表并立即返回，命中详情交给后台并发同步；支持“最新一条”“最近 N 天”和历史查询。
+- `get-seu-academic-affairs-notice`：按搜索返回的稳定 ID 读取一条公告正文与附件链接，需要时可同步校验详情页。
 - `list-courses`：列出课程点播目录中的课程。
 - `search-courses`：按课程名、教室、教师或课程号搜索课程。
 - `find-course-session`：用课程名、教师名和周内节次定位课程；日期缺省时返回最新一次课。
@@ -87,3 +90,5 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 手动课程定位示例：课程每周安排在第 3–5 节时，传入 `weeklyPeriods: [3, 4, 5]`。手动目标必须提供 `courseName`、`teacherName`、`weeklyPeriods`；`courseDate` 可选，省略时自动选择符合排课节次的最新日期。同一日期下的所有课段会作为一个完整会话处理。
 
 抓取工具支持两种课程目标：课表内课程传入 `{ source: "schedule", scheduleId }`；课表外课程传入 `{ source: "manual", courseName, teacherName, weeklyPeriods }`。两种目标都可选传 `courseDate`，未传时默认抓取最新日期。
+
+教务处查询缓存位于 `.cvstream/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。

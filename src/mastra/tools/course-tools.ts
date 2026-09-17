@@ -50,6 +50,55 @@ export const getScheduleTool = createTool({
   execute: async (context) => runPythonTool("get-schedule", context),
 });
 
+export const searchJwcTool = createTool({
+  id: "search-seu-academic-affairs",
+  description:
+    "Search SEU Academic Affairs notice lists and return matching metadata immediately. Matching details are queued for silent background snapshot sync. Separate result time scope from cache freshness. For words such as 最新、最近、今天、截至目前, use freshness=latest.",
+  inputSchema: z.object({
+    baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
+    cacheDir: z.string().default(".cvstream/jwc"),
+    query: z.string().min(1).describe("The user's original information need"),
+    keywords: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(8)
+      .optional()
+      .describe("Concise search terms semantically extracted from the request"),
+    categories: z
+      .array(z.enum(["auto", "news", "academic", "student_status", "practice", "teaching_research", "downloads"]))
+      .min(1)
+      .max(3)
+      .default(["auto"])
+      .describe("Search only relevant columns; auto routes by semantics"),
+    freshness: z
+      .enum(["latest", "balanced", "archive", "cache_only"])
+      .default("balanced")
+      .describe("All modes except cache_only validate relevant list pages; latest is strict fresh intent, archive expands to older pages on miss"),
+    timeScope: z
+      .enum(["latest", "recent", "any"])
+      .default("any")
+      .describe("latest returns the newest matching notice; recent filters by recentDays"),
+    recentDays: z.number().int().min(1).max(3650).default(7),
+    limit: z.number().int().min(1).max(20).default(5),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }),
+  execute: async (context) => runPythonTool("search-jwc", context),
+});
+
+export const getJwcArticleTool = createTool({
+  id: "get-seu-academic-affairs-notice",
+  description:
+    "Read one SEU Academic Affairs notice by the stable article id returned from search. Use this only when the full body or attachment links are needed; refresh=true validates the selected detail page.",
+  inputSchema: z.object({
+    baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
+    cacheDir: z.string().default(".cvstream/jwc"),
+    articleId: z.string().min(10),
+    refresh: z.boolean().default(true),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }),
+  execute: async (context) => runPythonTool("get-jwc-article", context),
+});
+
 export const listCourseDatesTool = createTool({
   id: "list-course-dates",
   description: "List all available lecture dates from the authenticated course page.",
