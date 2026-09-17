@@ -32,6 +32,10 @@ export const authorizeScheduleTool = createTool({
   inputSchema: z.object({
     ...scheduleFields,
     timeoutSeconds: z.number().int().min(30).max(600).default(300),
+    resetSession: z
+      .boolean()
+      .default(true)
+      .describe("Clear the saved SEU eHall cookie and use a fresh visible browser session"),
   }),
   execute: async (context) => runPythonTool("authorize-schedule", context),
 });

@@ -89,7 +89,7 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 ## Available tools
 
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
-- `authorize-schedule-portal`：自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。
+- `authorize-schedule-portal`：默认清理旧的 eHall Cookie，在全新的可见窗口中自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。它只清理课表门户会话，不会删除 Mastra 对话或课表缓存；如需保留 Cookie，可传 `resetSession: false`。
 - `get-course-schedule`：默认读取本地课表缓存；首次同步或明确更新时才重新访问校内系统。
 - `search-seu-academic-affairs`：先用条件请求校验相关公告列表并立即返回，命中详情交给后台并发同步；支持“最新一条”“最近 N 天”和历史查询。
 - `get-seu-academic-affairs-notice`：按搜索返回的稳定 ID 读取一条公告正文与附件链接，需要时可同步校验详情页。

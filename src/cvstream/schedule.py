@@ -55,7 +55,7 @@ class ScheduleService:
         return self.target_url
 
     @contextmanager
-    def _page(self, *, visible: bool):
+    def _page(self, *, visible: bool, load_saved_cookies: bool = True):
         with sync_playwright() as playwright:
             args = ["--disable-blink-features=AutomationControlled"]
             if visible:
@@ -72,7 +72,7 @@ class ScheduleService:
                 locale="zh-CN",
                 timezone_id="Asia/Shanghai",
             )
-            if self.cookie_file.exists():
+            if load_saved_cookies and self.cookie_file.exists():
                 try:
                     cookies = json.loads(self.cookie_file.read_text(encoding="utf-8"))
                     context.add_cookies(cookies)
@@ -142,9 +142,23 @@ class ScheduleService:
     def _save_cookies(self, page) -> None:
         self._write_json_atomic(self.cookie_file, page.context.cookies())
 
-    def authorize(self, timeout_seconds: int = 300) -> dict[str, Any]:
+    def _clear_saved_session(self) -> bool:
+        try:
+            self.cookie_file.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
+
+    def authorize(
+        self, timeout_seconds: int = 300, *, reset_session: bool = True
+    ) -> dict[str, Any]:
         timeout_seconds = max(30, min(timeout_seconds, 600))
-        with self._page(visible=True) as page:
+        session_reset = False
+        if reset_session:
+            session_reset = self._clear_saved_session()
+        with self._page(
+            visible=True, load_saved_cookies=not reset_session
+        ) as page:
             try:
                 page.goto(self.entry_url, wait_until="domcontentloaded", timeout=30000)
                 deadline = time.monotonic() + timeout_seconds
@@ -170,6 +184,7 @@ class ScheduleService:
                             return {
                                 "status": "authorized",
                                 "cookieFile": str(self.cookie_file.resolve()),
+                                "sessionReset": session_reset,
                             }
 
                     if not login_attempted:
@@ -190,6 +205,7 @@ class ScheduleService:
                 return {
                     "status": "auth_timeout",
                     "manualReason": manual_reason,
+                    "sessionReset": session_reset,
                     "message": "认证窗口等待超时，请重新调用授权工具。",
                 }
             except PlaywrightError as exc:

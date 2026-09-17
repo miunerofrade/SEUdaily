@@ -104,7 +104,8 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _course_service(payload).authorize()
     if action == "authorize-schedule":
         return _schedule_service(payload).authorize(
-            timeout_seconds=payload.get("timeoutSeconds", 300)
+            timeout_seconds=payload.get("timeoutSeconds", 300),
+            reset_session=payload.get("resetSession", True),
         )
     if action == "get-schedule":
         return _schedule_service(payload).get_schedule(
