@@ -9,9 +9,11 @@ import {
   findCourseSessionTool,
   getScheduleTool,
   getJwcArticleTool,
+  getCseNoticeTool,
   listCoursesTool,
   searchCoursesTool,
   searchJwcTool,
+  searchCseNoticesTool,
   summarizeCourseTool,
   transcribeCloudAudioTool,
   transcribeMediaTool,
@@ -39,6 +41,7 @@ export const courseAgent = new Agent({
 10. 工具失败时说明失败阶段与可执行的恢复方法，不要虚构成功结果。
 11. 只处理用户本人有合法访问权限的内容。
 12. 查询教务处通知时区分“结果时间范围”和“缓存新鲜度”：用户说“最新一条”时使用 timeScope=latest、freshness=latest；说“最近”时使用 timeScope=recent、freshness=latest，未说明范围则 recentDays=7；说“今天、刚发布、截至目前、有没有新通知”时同样必须 freshness=latest。普通主题查询用 balanced，历史资料用 archive。除 cache_only 外，搜索工具会先校验相关栏目列表并立即返回，同时在后台静默同步命中详情；用 keywords 和 categories 做语义路由，不扫描整个网站。只有回答确实需要正文或附件时，才用返回的 articleId 调用单条详情工具，也不要主动下载附件文件。
+13. 用户查询计算机科学与工程学院、软件学院、人工智能学院（简称计软智、计算机学院）的通知、教学、学生工作、就业、科研或学术活动时，使用计软智网站工具。新鲜度和时间范围规则与教务处一致；优先 categories=auto，只有语义明确时才指定栏目。搜索后仅在回答需要正文或附件时调用单条计软智详情工具。
 `,
   model: {
     id: `deepseek/${process.env.DEEPSEEK_MODEL ?? "deepseek-flash"}`,
@@ -50,9 +53,11 @@ export const courseAgent = new Agent({
     authorizeScheduleTool,
     getScheduleTool,
     getJwcArticleTool,
+    getCseNoticeTool,
     listCoursesTool,
     searchCoursesTool,
     searchJwcTool,
+    searchCseNoticesTool,
     findCourseSessionTool,
     captureCourseSessionTool,
     captureCourseSessionsTool,

@@ -15,7 +15,7 @@ src/
     ├── cli.py                     # JSON 工具协议入口
     ├── auth.py                    # 门户认证与 Cookie 会话
     ├── schedule.py                # 校内课表同步、规范化与本地缓存
-    ├── jwc.py                     # 教务处公告分层查询与正文版本缓存
+    ├── jwc.py                     # WebPlus 查询抽象及教务处/计软智站点适配器
     ├── capture.py                 # 课程、字幕与媒体抓取
     ├── asr/                       # 本地/云端语音转写
     ├── ppt.py                     # 视频幻灯片提取
@@ -75,6 +75,8 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 - `get-course-schedule`：默认读取本地课表缓存；首次同步或明确更新时才重新访问校内系统。
 - `search-seu-academic-affairs`：先用条件请求校验相关公告列表并立即返回，命中详情交给后台并发同步；支持“最新一条”“最近 N 天”和历史查询。
 - `get-seu-academic-affairs-notice`：按搜索返回的稳定 ID 读取一条公告正文与附件链接，需要时可同步校验详情页。
+- `search-seu-cse-notices`：分栏查询计算机科学与工程学院、软件学院、人工智能学院官网，命中详情在后台并发同步。
+- `get-seu-cse-notice`：按 `seu-cse-*` 稳定 ID 读取计软智公告正文与附件链接。
 - `list-courses`：列出课程点播目录中的课程。
 - `search-courses`：按课程名、教室、教师或课程号搜索课程。
 - `find-course-session`：用课程名、教师名和周内节次定位课程；日期缺省时返回最新一次课。
@@ -92,3 +94,5 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 抓取工具支持两种课程目标：课表内课程传入 `{ source: "schedule", scheduleId }`；课表外课程传入 `{ source: "manual", courseName, teacherName, weeklyPeriods }`。两种目标都可选传 `courseDate`，未传时默认抓取最新日期。
 
 教务处查询缓存位于 `.cvstream/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。
+
+计软智官网使用同一套 WebPlus 查询与后台缓存机制，缓存隔离在 `.cvstream/cse`。适配层单独配置栏目、语义路由、详情标题与日期类名；当前覆盖本科通知、教学动态、学生工作、就业、科研、学术活动、人才招聘以及本科/研究生下载专区。

@@ -10,6 +10,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -23,7 +24,7 @@ _ARTICLE_PATH = re.compile(r"/(\d{4})/(\d{2})(\d{2})/c\d+a(\d+)/page\.htm$")
 _SPACE = re.compile(r"\s+")
 _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
-CATEGORIES = {
+JWC_CATEGORIES = {
     "news": ("最新动态", "/zxdt/list.htm"),
     "academic": ("教务信息", "/jwxx/list.htm"),
     "student_status": ("学籍管理", "/xjgl/list.htm"),
@@ -31,6 +32,69 @@ CATEGORIES = {
     "teaching_research": ("教学研究", "/jxyj/list.htm"),
     "downloads": ("下载专区", "/xzzq/list.htm"),
 }
+
+CSE_CATEGORIES = {
+    "undergraduate_notices": ("本科生通知公告", "/49469/list.htm"),
+    "teaching": ("教学动态", "/49470/list.htm"),
+    "student_affairs": ("学生工作通知公告", "/49447/list.htm"),
+    "employment": ("就业信息", "/jyxx/list.htm"),
+    "research": ("科研动态", "/49441/list.htm"),
+    "academic_events": ("学术活动", "/xshd_53564/list.htm"),
+    "recruitment": ("人才招聘", "/rczp/list.htm"),
+    "undergraduate_downloads": ("本科生下载专区", "/xzzq_53939/list.htm"),
+    "graduate_downloads": ("研究生下载专区", "/xzzq_52683/list.htm"),
+}
+
+
+@dataclass(frozen=True)
+class WebplusSiteConfig:
+    key: str
+    id_prefix: str
+    categories: dict[str, tuple[str, str]]
+    title_classes: frozenset[str]
+    date_classes: frozenset[str]
+    content_classes: frozenset[str]
+    route_rules: tuple[tuple[str, str], ...]
+    default_categories: tuple[str, ...]
+
+
+JWC_CONFIG = WebplusSiteConfig(
+    key="jwc",
+    id_prefix="seu-jwc",
+    categories=JWC_CATEGORIES,
+    title_classes=frozenset({"Article_Title"}),
+    date_classes=frozenset({"Article_PublishDate"}),
+    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
+    route_rules=(
+        ("news", "新闻 动态 工作安排 暑期 教务处"),
+        ("student_status", "学籍 转专业 推免 毕业 学位 降级 选拔"),
+        ("practice", "实践 实习 实验 竞赛 毕设"),
+        ("teaching_research", "教研 教材 教改 课程建设 教学成果"),
+        ("downloads", "下载 表格 模板 申请表"),
+    ),
+    default_categories=("academic",),
+)
+
+CSE_CONFIG = WebplusSiteConfig(
+    key="cse",
+    id_prefix="seu-cse",
+    categories=CSE_CATEGORIES,
+    title_classes=frozenset({"arti_title", "Article_Title"}),
+    date_classes=frozenset({"arti_update", "Article_PublishDate"}),
+    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
+    route_rules=(
+        ("undergraduate_notices", "本科 推免 保研 转专业 分流 选课 公示 免试"),
+        ("teaching", "教学 课程 培养 教务 考试"),
+        ("student_affairs", "学生 奖学金 助学 活动 评优 党建"),
+        ("employment", "就业 招聘 实习 宣讲"),
+        ("research", "科研 项目 基金 成果"),
+        ("academic_events", "学术 讲座 报告 论坛 会议"),
+        ("recruitment", "教师招聘 人才招聘 博士后"),
+        ("undergraduate_downloads", "本科下载 本科表格 本科模板 本科申请表"),
+        ("graduate_downloads", "研究生下载 研究生表格 研究生模板 研究生申请表"),
+    ),
+    default_categories=("undergraduate_notices", "student_affairs"),
+)
 
 
 def _now() -> datetime:
@@ -45,17 +109,18 @@ def _clean(text: str) -> str:
     return _SPACE.sub(" ", text).strip()
 
 
-def _article_id(url: str) -> str:
+def _article_id(url: str, prefix: str = "seu-jwc") -> str:
     match = _ARTICLE_PATH.search(urlparse(url).path)
     if match:
-        return f"seu-jwc-{match.group(4)}"
-    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+        return f"{prefix}-{match.group(4)}"
+    return f"{prefix}-{hashlib.sha256(url.encode('utf-8')).hexdigest()[:20]}"
 
 
 class _PageParser(HTMLParser):
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, config: WebplusSiteConfig = JWC_CONFIG) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
+        self.config = config
         self.anchors: list[dict[str, str]] = []
         self._anchor: dict[str, Any] | None = None
         self._capture_stack: list[set[str]] = []
@@ -70,7 +135,7 @@ class _PageParser(HTMLParser):
         classes = set((values.get("class") or "").split())
         if tag not in _VOID_TAGS:
             self._capture_stack.append(classes)
-        if "wp_articlecontent" in classes or "Article_Content" in classes:
+        if classes & self.config.content_classes:
             self._content_depth += 1
         elif self._content_depth and tag not in _VOID_TAGS:
             self._content_depth += 1
@@ -112,16 +177,16 @@ class _PageParser(HTMLParser):
             self._anchor = None
         if self._content_depth:
             self._content_depth -= 1
-        if "wp_articlecontent" in classes or "Article_Content" in classes:
+        if classes & self.config.content_classes:
             self._content_depth = 0
 
     def handle_data(self, data: str) -> None:
         if self._anchor is not None:
             self._anchor["parts"].append(data)
         active = set().union(*self._capture_stack) if self._capture_stack else set()
-        if "Article_Title" in active:
+        if active & self.config.title_classes:
             self._title_parts.append(data)
-        if "Article_PublishDate" in active:
+        if active & self.config.date_classes:
             self._date_parts.append(data)
         if self._content_depth:
             self._content_parts.append(data)
@@ -132,7 +197,9 @@ class _PageParser(HTMLParser):
 
     @property
     def published_at(self) -> str:
-        return _clean("".join(self._date_parts))
+        value = _clean("".join(self._date_parts))
+        match = re.search(r"\d{4}-\d{2}-\d{2}", value)
+        return match.group(0) if match else value
 
     @property
     def content(self) -> str:
@@ -148,11 +215,13 @@ class JwcService:
         cache_dir: str = ".cvstream/jwc",
         timeout_seconds: int = 15,
         background_sync: bool = True,
+        config: WebplusSiteConfig = JWC_CONFIG,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.cache_dir = Path(cache_dir)
         self.timeout_seconds = timeout_seconds
         self.background_sync = background_sync
+        self.config = config
         self.index_file = self.cache_dir / "index.json"
         self.articles_dir = self.cache_dir / "articles"
         self.versions_dir = self.cache_dir / "versions"
@@ -322,6 +391,7 @@ class JwcService:
             "cvstream.cli",
             "jwc-worker",
             json.dumps({
+                "site": self.config.key,
                 "baseUrl": self.base_url,
                 "cacheDir": str(self.cache_dir),
                 "timeoutSeconds": self.timeout_seconds,
@@ -386,7 +456,7 @@ class JwcService:
         normalized: dict[str, dict[str, Any]] = {}
         for article in data["articles"]:
             old_id = article.get("id", "")
-            new_id = _article_id(article["url"])
+            new_id = _article_id(article["url"], self.config.id_prefix)
             article["id"] = new_id
             if old_id and old_id != new_id:
                 old_detail = self.articles_dir / f"{old_id}.json"
@@ -455,7 +525,7 @@ class JwcService:
     ) -> None:
         articles = {item["url"]: item for item in state["articles"]}
         for category in categories:
-            label, path = CATEGORIES[category]
+            label, path = self.config.categories[category]
             category_state = state["categories"].setdefault(category, {})
             for page in range(1, pages + 1):
                 page_path = path if page == 1 else path.replace("list.htm", f"list{page}.htm")
@@ -469,7 +539,7 @@ class JwcService:
                 }
                 if response["notModified"]:
                     continue
-                parser = _PageParser(response["url"])
+                parser = _PageParser(response["url"], self.config)
                 parser.feed(response["html"])
                 for link in parser.anchors:
                     match = _ARTICLE_PATH.search(urlparse(link["href"]).path)
@@ -477,7 +547,7 @@ class JwcService:
                     if not match or not title:
                         continue
                     item = articles.setdefault(link["href"], {
-                        "id": _article_id(link["href"]),
+                        "id": _article_id(link["href"], self.config.id_prefix),
                         "url": link["href"],
                         "firstSeenAt": _iso_now(),
                     })
@@ -502,7 +572,7 @@ class JwcService:
         article["lastCheckedAt"] = _iso_now()
         if response["notModified"]:
             return False
-        parser = _PageParser(response["url"])
+        parser = _PageParser(response["url"], self.config)
         parser.feed(response["html"])
         title = parser.title or article.get("title", "")
         content = parser.content
@@ -568,27 +638,19 @@ class JwcService:
         terms = [_clean(query), *[_clean(item) for item in keywords or []]]
         return list(dict.fromkeys(item.casefold() for item in terms if item))
 
-    @staticmethod
-    def _categories(categories: list[str] | None, terms: list[str]) -> list[str]:
+    def _categories(self, categories: list[str] | None, terms: list[str]) -> list[str]:
         requested = categories or ["auto"]
-        invalid = set(requested) - {*CATEGORIES, "auto"}
+        invalid = set(requested) - {*self.config.categories, "auto"}
         if invalid:
             raise ValueError(f"未知教务处栏目: {', '.join(sorted(invalid))}")
         if "auto" not in requested:
             return list(dict.fromkeys(requested))
         text = " ".join(terms)
         routed: list[str] = []
-        rules = [
-            ("news", "新闻 动态 工作安排 暑期 教务处"),
-            ("student_status", "学籍 转专业 推免 毕业 学位 降级 选拔"),
-            ("practice", "实践 实习 实验 竞赛 毕设"),
-            ("teaching_research", "教研 教材 教改 课程建设 教学成果"),
-            ("downloads", "下载 表格 模板 申请表"),
-        ]
-        for category, words in rules:
+        for category, words in self.config.route_rules:
             if any(word in text for word in words.split()):
                 routed.append(category)
-        return routed[:2] or ["academic"]
+        return routed[:2] or list(self.config.default_categories)
 
     @staticmethod
     def _rank(
@@ -633,3 +695,22 @@ class JwcService:
             )
             if article.get(key) is not None
         }
+
+
+class CseService(JwcService):
+    """SEU Computer Science, Software and AI school WebPlus adapter."""
+
+    def __init__(
+        self,
+        base_url: str = "https://cse.seu.edu.cn",
+        cache_dir: str = ".cvstream/cse",
+        timeout_seconds: int = 15,
+        background_sync: bool = True,
+    ) -> None:
+        super().__init__(
+            base_url=base_url,
+            cache_dir=cache_dir,
+            timeout_seconds=timeout_seconds,
+            background_sync=background_sync,
+            config=CSE_CONFIG,
+        )

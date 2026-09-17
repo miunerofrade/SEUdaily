@@ -99,6 +99,54 @@ export const getJwcArticleTool = createTool({
   execute: async (context) => runPythonTool("get-jwc-article", context),
 });
 
+export const searchCseNoticesTool = createTool({
+  id: "search-seu-cse-notices",
+  description:
+    "Search the SEU Computer Science, Software and AI school website. It validates only semantically relevant list columns, returns matching metadata immediately, and queues detail snapshots in the background.",
+  inputSchema: z.object({
+    baseUrl: z.string().url().default("https://cse.seu.edu.cn"),
+    cacheDir: z.string().default(".cvstream/cse"),
+    query: z.string().min(1).describe("The user's original information need"),
+    keywords: z.array(z.string().min(1)).min(1).max(8).optional(),
+    categories: z
+      .array(z.enum([
+        "auto",
+        "undergraduate_notices",
+        "teaching",
+        "student_affairs",
+        "employment",
+        "research",
+        "academic_events",
+        "recruitment",
+        "undergraduate_downloads",
+        "graduate_downloads",
+      ]))
+      .min(1)
+      .max(3)
+      .default(["auto"]),
+    freshness: z.enum(["latest", "balanced", "archive", "cache_only"]).default("balanced"),
+    timeScope: z.enum(["latest", "recent", "any"]).default("any"),
+    recentDays: z.number().int().min(1).max(3650).default(7),
+    limit: z.number().int().min(1).max(20).default(5),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }),
+  execute: async (context) => runPythonTool("search-cse", context),
+});
+
+export const getCseNoticeTool = createTool({
+  id: "get-seu-cse-notice",
+  description:
+    "Read one Computer Science, Software and AI school notice by the stable article id returned from search, including normalized body and attachment links.",
+  inputSchema: z.object({
+    baseUrl: z.string().url().default("https://cse.seu.edu.cn"),
+    cacheDir: z.string().default(".cvstream/cse"),
+    articleId: z.string().startsWith("seu-cse-"),
+    refresh: z.boolean().default(true),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }),
+  execute: async (context) => runPythonTool("get-cse-article", context),
+});
+
 export const listCourseDatesTool = createTool({
   id: "list-course-dates",
   description: "List all available lecture dates from the authenticated course page.",

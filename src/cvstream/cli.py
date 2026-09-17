@@ -13,7 +13,7 @@ from .service import (
     transcribe_local,
 )
 from .schedule import ScheduleService
-from .jwc import JwcService
+from .jwc import CseService, JwcService
 
 
 def _course_service(payload: dict[str, Any]) -> CourseService:
@@ -40,6 +40,13 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
 
 
 def _jwc_service(payload: dict[str, Any]) -> JwcService:
+    if payload.get("site") == "cse":
+        return CseService(
+            base_url=payload.get("baseUrl", "https://cse.seu.edu.cn"),
+            cache_dir=payload.get("cacheDir", ".cvstream/cse"),
+            timeout_seconds=payload.get("timeoutSeconds", 15),
+            background_sync=payload.get("backgroundSync", True),
+        )
     return JwcService(
         base_url=payload.get("baseUrl", "https://jwc.seu.edu.cn"),
         cache_dir=payload.get("cacheDir", ".cvstream/jwc"),
@@ -91,7 +98,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "health":
         return {"version": "0.3.0", "tools": [
             "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course", "search-jwc", "get-jwc-article",
+            "extract-slides", "summarize-course", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
@@ -103,7 +110,9 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _schedule_service(payload).get_schedule(
             refresh=payload.get("refresh", False)
         )
-    if action == "search-jwc":
+    if action in {"search-jwc", "search-cse"}:
+        if action == "search-cse":
+            payload["site"] = "cse"
         return _jwc_service(payload).search(
             payload["query"],
             keywords=payload.get("keywords"),
@@ -113,7 +122,9 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             recent_days=payload.get("recentDays", 7),
             limit=payload.get("limit", 5),
         )
-    if action == "get-jwc-article":
+    if action in {"get-jwc-article", "get-cse-article"}:
+        if action == "get-cse-article":
+            payload["site"] = "cse"
         return _jwc_service(payload).get_article(
             payload["articleId"], refresh=payload.get("refresh", True)
         )
