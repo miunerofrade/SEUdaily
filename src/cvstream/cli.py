@@ -30,7 +30,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
     if action == "health":
         return {"version": "0.2.0", "tools": [
-            "authorize", "list-courses", "search-courses", "list-dates", "capture-course", "transcribe-local", "transcribe-cloud",
+            "authorize", "list-courses", "search-courses", "find-course-lesson", "list-dates", "capture-course", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course",
         ]}
     if action == "authorize":
@@ -39,6 +39,12 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _course_service(payload).list_courses()
     if action == "search-courses":
         return _course_service(payload).search_courses(payload["query"])
+    if action == "find-course-lesson":
+        return _course_service(payload).find_course_lesson(
+            course_name=payload["courseName"],
+            teacher_name=payload["teacherName"],
+            lesson_number=payload["lessonNumber"],
+        )
     if action == "list-dates":
         return _course_service(payload).list_dates()
     if action == "capture-course":

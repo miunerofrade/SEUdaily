@@ -24,3 +24,4 @@ def test_cli_health_lists_agent_tools():
     assert "capture-course" in result["tools"]
     assert "transcribe-cloud" in result["tools"]
     assert "search-courses" in result["tools"]
+    assert "find-course-lesson" in result["tools"]

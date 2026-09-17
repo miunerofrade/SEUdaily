@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -172,6 +173,111 @@ class CourseService:
             "query": query,
             "count": len(courses),
             "courses": courses,
+            "logs": logs,
+        }
+
+    @staticmethod
+    def _read_lessons(page) -> list[dict[str, Any]]:
+        lesson_nodes = page.locator(".list-item.student")
+        lessons: list[dict[str, Any]] = []
+        for index in range(lesson_nodes.count()):
+            node = lesson_nodes.nth(index)
+            sequence_text = node.locator(".index").first.inner_text().strip()
+            title = node.locator(".title.sle").first.inner_text().strip()
+            detail = node.locator(".bottom-left.sle").first.inner_text().strip()
+            detail_parts = detail.split(maxsplit=2)
+            period_match = re.search(r"第(\d+)节", title)
+            lessons.append(
+                {
+                    "sequence": int(sequence_text),
+                    "title": title,
+                    "periodNumber": int(period_match.group(1)) if period_match else None,
+                    "date": detail_parts[0] if detail_parts else "",
+                    "time": detail_parts[1] if len(detail_parts) > 1 else "",
+                    "classroom": detail_parts[2] if len(detail_parts) > 2 else "",
+                    "hasAiContent": "AI" in node.inner_text(),
+                }
+            )
+        return lessons
+
+    def find_course_lesson(
+        self, *, course_name: str, teacher_name: str, lesson_number: int
+    ) -> dict[str, Any]:
+        course_name = _required(course_name, "courseName")
+        teacher_name = _required(teacher_name, "teacherName")
+        if lesson_number < 1:
+            raise ValueError("lessonNumber 必须大于 0")
+
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            search_box = catalog.locator("input[placeholder*='课程名称']").first
+            search_box.fill(course_name)
+            catalog.locator("button.el-button--primary").first.click()
+            catalog.wait_for_url("**/#/advance-search", timeout=15000)
+            catalog.wait_for_timeout(2500)
+            courses = self._read_course_cards(catalog)
+
+            normalized_course = course_name.strip().casefold()
+            normalized_teacher = teacher_name.strip().casefold()
+            matches = [
+                course
+                for course in courses
+                if course["title"].strip().casefold() == normalized_course
+                and normalized_teacher
+                in [part.strip().casefold() for part in course["teacher"].split(",")]
+            ]
+
+            if not matches:
+                return {
+                    "status": "not_found",
+                    "courseName": course_name,
+                    "teacherName": teacher_name,
+                    "lessonNumber": lesson_number,
+                    "candidates": courses,
+                    "logs": logs,
+                }
+            if len(matches) > 1:
+                return {
+                    "status": "ambiguous",
+                    "courseName": course_name,
+                    "teacherName": teacher_name,
+                    "lessonNumber": lesson_number,
+                    "candidates": matches,
+                    "logs": logs,
+                }
+
+            course = matches[0]
+            card = catalog.locator(".lesson-card.card-item").nth(course["index"])
+            try:
+                with catalog.context.expect_page(timeout=10000) as page_info:
+                    card.locator(".img-top").click(no_wait_after=True)
+                detail_page = page_info.value
+            except PlaywrightTimeoutError:
+                detail_page = catalog.context.pages[-1]
+                if detail_page is catalog:
+                    raise RuntimeError("课程详情页未打开")
+
+            detail_page.locator(".list-item.student").first.wait_for(
+                state="visible", timeout=15000
+            )
+            lessons = self._read_lessons(detail_page)
+            lesson = next(
+                (item for item in lessons if item["sequence"] == lesson_number), None
+            )
+            if lesson is None:
+                return {
+                    "status": "lesson_not_found",
+                    "course": course,
+                    "lessonNumber": lesson_number,
+                    "availableLessons": lessons,
+                    "logs": logs,
+                }
+
+        return {
+            "status": "found",
+            "course": course,
+            "lesson": lesson,
             "logs": logs,
         }
 
