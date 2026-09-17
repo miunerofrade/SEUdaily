@@ -14,7 +14,11 @@ export async function runPythonTool<T>(
   return new Promise((resolve, reject) => {
     const child = spawn("uv", ["run", "cvstream-tool"], {
       cwd: projectRoot,
-      env: process.env,
+      env: {
+        ...process.env,
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });

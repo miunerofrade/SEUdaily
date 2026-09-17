@@ -225,6 +225,10 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
     try:
         if len(sys.argv) >= 3 and sys.argv[1] == "jwc-worker":
             payload = json.loads(sys.argv[2])
