@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import tempfile
@@ -206,9 +207,38 @@ class ScheduleService:
             cached = json.loads(self.cache_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        if cached.get("version") != 1 or not isinstance(cached.get("courses"), list):
+        if cached.get("version") not in {1, 2} or not isinstance(
+            cached.get("courses"), list
+        ):
             return None
+        changed = cached.get("version") != 2
+        for course in cached["courses"]:
+            if not course.get("scheduleId"):
+                course["scheduleId"] = self._schedule_id(course)
+                changed = True
+        if changed:
+            cached["version"] = 2
+            self._write_json_atomic(self.cache_file, cached)
         return cached
+
+    @staticmethod
+    def _schedule_id(course: dict[str, Any]) -> str:
+        identity = {
+            key: course.get(key)
+            for key in (
+                "courseName",
+                "teacherName",
+                "weekday",
+                "weeklyPeriods",
+                "weeks",
+                "classroom",
+                "courseCode",
+            )
+        }
+        encoded = json.dumps(
+            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return f"seu-{hashlib.sha256(encoded).hexdigest()[:16]}"
 
     @staticmethod
     def _integer(value: Any) -> int | None:
@@ -264,19 +294,19 @@ class ScheduleService:
             if key in seen:
                 continue
             seen.add(key)
-            courses.append(
-                {
-                    "courseName": course_name,
-                    "teacherName": teacher_name,
-                    "weekday": weekday,
-                    "startPeriod": start_period,
-                    "endPeriod": end_period,
-                    "weeklyPeriods": periods,
-                    "weeks": weeks,
-                    "classroom": classroom,
-                    "courseCode": str(row.get("KCH") or row.get("XSKCH") or "").strip(),
-                }
-            )
+            course = {
+                "courseName": course_name,
+                "teacherName": teacher_name,
+                "weekday": weekday,
+                "startPeriod": start_period,
+                "endPeriod": end_period,
+                "weeklyPeriods": periods,
+                "weeks": weeks,
+                "classroom": classroom,
+                "courseCode": str(row.get("KCH") or row.get("XSKCH") or "").strip(),
+            }
+            course["scheduleId"] = cls._schedule_id(course)
+            courses.append(course)
         return sorted(
             courses,
             key=lambda item: (
@@ -415,7 +445,7 @@ class ScheduleService:
             self._save_cookies(page)
 
         result = {
-            "version": 1,
+            "version": 2,
             "status": "fresh",
             "fetchedAt": datetime.now(timezone.utc).isoformat(),
             "source": source,
@@ -442,3 +472,18 @@ class ScheduleService:
                 "cachedFetchedAt": cached.get("fetchedAt"),
             }
         return result
+
+    def resolve_course(self, schedule_id: str) -> dict[str, Any]:
+        cached = self._load_cache()
+        if cached is None:
+            raise ValueError("本地课表缓存不存在，请先调用 get-course-schedule。")
+        matches = [
+            course
+            for course in cached["courses"]
+            if course.get("scheduleId") == schedule_id
+        ]
+        if not matches:
+            raise ValueError("scheduleId 不存在或课表已经更新，请重新读取课表。")
+        if len(matches) > 1:
+            raise ValueError("scheduleId 对应多条排课，请刷新课表后重试。")
+        return matches[0]

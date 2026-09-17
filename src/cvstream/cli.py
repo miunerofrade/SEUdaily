@@ -38,6 +38,42 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
     )
 
 
+def _resolve_course_target(
+    payload: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    source = target.get("source", "manual")
+    course_date = target.get("courseDate")
+    if source == "schedule":
+        schedule_id = target.get("scheduleId")
+        if not schedule_id:
+            raise ValueError("schedule 目标必须提供 scheduleId")
+        course = ScheduleService(
+            cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json")
+        ).resolve_course(schedule_id)
+        return {
+            "courseName": course["courseName"],
+            "teacherName": course["teacherName"],
+            "weeklyPeriods": course["weeklyPeriods"],
+            "courseDate": course_date,
+            "scheduleId": schedule_id,
+        }
+    if source == "manual":
+        missing = [
+            name
+            for name in ("courseName", "teacherName", "weeklyPeriods")
+            if not target.get(name)
+        ]
+        if missing:
+            raise ValueError(f"manual 目标缺少字段: {', '.join(missing)}")
+        return {
+            "courseName": target["courseName"],
+            "teacherName": target["teacherName"],
+            "weeklyPeriods": target["weeklyPeriods"],
+            "courseDate": course_date,
+        }
+    raise ValueError("target.source 必须是 schedule 或 manual")
+
+
 def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
@@ -62,18 +98,20 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "search-courses":
         return _course_service(payload).search_courses(payload["query"])
     if action == "find-course-session":
+        target = _resolve_course_target(payload, payload.get("target", payload))
         return _course_service(payload).find_course_session(
-            course_name=payload["courseName"],
-            teacher_name=payload["teacherName"],
-            weekly_periods=payload["weeklyPeriods"],
-            course_date=payload.get("courseDate"),
+            course_name=target["courseName"],
+            teacher_name=target["teacherName"],
+            weekly_periods=target["weeklyPeriods"],
+            course_date=target.get("courseDate"),
         )
     if action == "capture-course-session":
+        target = _resolve_course_target(payload, payload.get("target", payload))
         return _course_service(payload).capture_course_session(
-            course_name=payload["courseName"],
-            teacher_name=payload["teacherName"],
-            weekly_periods=payload["weeklyPeriods"],
-            course_date=payload.get("courseDate"),
+            course_name=target["courseName"],
+            teacher_name=target["teacherName"],
+            weekly_periods=target["weeklyPeriods"],
+            course_date=target.get("courseDate"),
             need_subtitle=payload.get("needSubtitle", True),
             need_ppt=payload.get("needPpt", False),
             keep_media=payload.get("keepMedia", False),
@@ -83,8 +121,12 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             asr_model=payload.get("asrModel", "paraformer-realtime-v2"),
         )
     if action == "capture-course-sessions":
+        raw_targets = payload.get("targets", payload.get("sessions", []))
+        sessions = [
+            _resolve_course_target(payload, target) for target in raw_targets
+        ]
         return _course_service(payload).capture_course_sessions(
-            sessions=payload["sessions"],
+            sessions=sessions,
             max_concurrency=payload.get("maxConcurrency", 2),
             need_subtitle=payload.get("needSubtitle", True),
             need_ppt=payload.get("needPpt", False),

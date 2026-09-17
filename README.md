@@ -84,4 +84,6 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 
 请仅处理本人具有合法访问权限的课程内容。
 
-课程定位示例：课程每周安排在第 3–5 节时，传入 `weeklyPeriods: [3, 4, 5]`。`courseName`、`teacherName`、`weeklyPeriods` 三项必填；`courseDate` 可选，省略时自动选择符合排课节次的最新日期。同一日期下的所有课段会作为一个完整会话处理。
+手动课程定位示例：课程每周安排在第 3–5 节时，传入 `weeklyPeriods: [3, 4, 5]`。手动目标必须提供 `courseName`、`teacherName`、`weeklyPeriods`；`courseDate` 可选，省略时自动选择符合排课节次的最新日期。同一日期下的所有课段会作为一个完整会话处理。
+
+抓取工具支持两种课程目标：课表内课程传入 `{ source: "schedule", scheduleId }`；课表外课程传入 `{ source: "manual", courseName, teacherName, weeklyPeriods }`。两种目标都可选传 `courseDate`，未传时默认抓取最新日期。

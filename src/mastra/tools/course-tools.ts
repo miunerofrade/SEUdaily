@@ -76,18 +76,29 @@ export const searchCoursesTool = createTool({
 });
 
 const courseSessionIdentity = {
-  courseName: z.string().min(1).describe("Exact course name"),
-  teacherName: z.string().min(1).describe("Exact teacher name"),
-  weeklyPeriods: z
-    .array(z.number().int().min(1))
-    .min(1)
-    .describe("All scheduled period numbers, for example [3, 4, 5]"),
-  courseDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .describe("Lecture date; omit it to select the latest matching date"),
+  courseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 };
+
+const courseTarget = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("schedule"),
+    scheduleId: z
+      .string()
+      .startsWith("seu-")
+      .describe("Stable id returned by get-course-schedule"),
+    ...courseSessionIdentity,
+  }),
+  z.object({
+    source: z.literal("manual"),
+    courseName: z.string().min(1).describe("Exact course name inferred from the request"),
+    teacherName: z.string().min(1).describe("Exact teacher name inferred from the request"),
+    weeklyPeriods: z
+      .array(z.number().int().min(1))
+      .min(1)
+      .describe("All scheduled period numbers, for example [3, 4, 5]"),
+    ...courseSessionIdentity,
+  }),
+]);
 
 const captureOptions = {
   needSubtitle: z.boolean().default(true),
@@ -101,10 +112,11 @@ const captureOptions = {
 export const findCourseSessionTool = createTool({
   id: "find-course-session",
   description:
-    "Resolve a course using its exact name, teacher, and weekly period numbers. If no date is supplied, selects the latest matching lecture date and returns every lesson segment on that date.",
+    "Resolve a course target. Use source=schedule with a scheduleId for timetable courses; use source=manual with model-filled course name, teacher, and periods for courses outside the timetable.",
   inputSchema: z.object({
     ...commonPortalFields,
-    ...courseSessionIdentity,
+    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    target: courseTarget,
   }),
   execute: async (context) => runPythonTool("find-course-session", context),
 });
@@ -112,10 +124,11 @@ export const findCourseSessionTool = createTool({
 export const captureCourseSessionTool = createTool({
   id: "capture-course-session",
   description:
-    "Capture every lesson segment for one course date. Course name, teacher, and weekly periods are required; the date defaults to the latest matching date.",
+    "Capture every lesson segment for one target date. Timetable targets use scheduleId; courses outside the timetable use a manual target filled from the user's semantic request. Date defaults to latest.",
   inputSchema: z.object({
     ...commonPortalFields,
-    ...courseSessionIdentity,
+    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    target: courseTarget,
     ...captureOptions,
   }),
   execute: async (context) => runPythonTool("capture-course-session", context),
@@ -127,7 +140,8 @@ export const captureCourseSessionsTool = createTool({
     "Capture a queue of course sessions. Subtitle-only work runs with up to two workers; video, ASR fallback, and slide processing are serialized to control memory use.",
   inputSchema: z.object({
     ...commonPortalFields,
-    sessions: z.array(z.object(courseSessionIdentity)).min(1),
+    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    targets: z.array(courseTarget).min(1),
     maxConcurrency: z.number().int().min(1).max(2).default(2),
     ...captureOptions,
   }),
