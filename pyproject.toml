@@ -1,19 +1,28 @@
 [project]
-name = "catch"
-version = "0.1.0"
-description = "Add your description here"
+name = "cvstream-agent-core"
+version = "0.2.0"
+description = "Python tool runtime for the CVStream Mastra agent"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cryptography>=46.0.6",
     "dashscope>=1.25.15",
     "img2pdf>=0.6.3",
     "numpy>=2.4.3",
     "openai>=2.30.0",
     "opencv-python>=4.13.0.92",
-    "playwright-stealth>=2.0.2",
-    "psutil>=7.2.2",
-    "streamlit>=1.55.0",
-    "streamlit-autorefresh>=1.0.1",
-    "streamlit-option-menu>=0.4.0",
+    "playwright>=1.55.0",
+    "faster-whisper>=1.2.1",
 ]
+
+[project.scripts]
+cvstream-tool = "cvstream.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cvstream"]
+
+[dependency-groups]
+dev = ["pytest>=8.4.0"]

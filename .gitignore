@@ -10,6 +10,9 @@ uv.lock
 .venv/
 venv/
 env/
+node_modules/
+.mastra/
+.env
 
 # --- 核心隐私与配置 ---
 config.json

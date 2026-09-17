@@ -1,82 +1,79 @@
-# CVStream 
+# CVStream Agent
 
-一个极简、无界、全自动的网课抓取与 AI 知识提炼流媒体工具。
+CVStream Agent 将课程门户抓取、字幕获取、语音转写、PPT 提取和课程总结封装为 Agent 可调用的工具。项目使用 Mastra 负责编排，原有 Python 实现继续承担浏览器自动化和媒体处理。
 
-CVStream 采用现代化的单页 UI 设计，集成了无感拦截、本地/云端语音转写（ASR）、视觉切片（PPT 提取）以及基于大语言模型（LLM）的自动化总结功能。
+## Architecture
 
-## 核心特性
+```text
+src/
+├── mastra/
+│   ├── agents/course-agent.ts     # Agent 行为与工具授权
+│   ├── tools/course-tools.ts      # Mastra 工具及输入 Schema
+│   └── tools/python-bridge.ts     # TypeScript → Python JSON 桥
+└── cvstream/
+    ├── service.py                 # 与 UI 无关的业务服务
+    ├── cli.py                     # JSON 工具协议入口
+    ├── auth.py                    # 门户认证与 Cookie 会话
+    ├── capture.py                 # 课程、字幕与媒体抓取
+    ├── asr/                       # 本地/云端语音转写
+    ├── ppt.py                     # 视频幻灯片提取
+    ├── summary.py                 # 课程讲义生成
+    └── ramdisk.py                 # Windows Ramdisk 支持
+```
 
-- **无感流媒体拦截**：基于 Playwright 的底层网络嗅探，突破常规下载限制。
-- **极简无界 UI**：抛弃传统软件的厚重感，采用类似 macOS/iOS 的全白背板与极细边框排版。
-- **本地内存加速 (Ramdisk)**：内置 ImDisk 虚拟盘调度，高频 I/O 数据直接走内存，大幅延长物理 SSD 寿命。
-- **全栈 AI 赋能**：
-  - **ASR 转写**：支持 Faster-Whisper 本地离线转写，或对接阿里、讯飞、百度等云端 API。
-  - **LLM 知识提炼**：支持 DeepSeek、Kimi、智谱、豆包等大模型，自动将碎片化转录转化为结构化 Markdown 讲义。
-- **多模态提取**：支持智能抽帧提取 PPT 画面，过滤重复帧并自动合成 PDF。
+Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量读取，不进入 Agent 提示词。
 
-##  安装与运行
+## Setup
 
-### 1. 环境准备
-确保已安装 Python 3.8+，建议使用虚拟环境（venv 或 conda）。
+要求：Node.js 22.13+、Python 3.13、uv、FFmpeg。
 
-### 2. 安装依赖
 ```bash
-pip install -r requirements.txt
+npm install
+uv sync
+uv run playwright install chromium
 ```
 
-### 3. 初始化浏览器内核
+复制 `.env.example` 为 `.env`，按需填写：
 
-本项目依赖 Playwright 进行网络嗅探，首次运行前必须安装 Chromium 内核：
-
-
-```Bash
-playwright install chromium
+```dotenv
+DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_API_KEY=
+CVSTREAM_PROJECT_ROOT=
+CVSTREAM_USERNAME=
+CVSTREAM_PASSWORD=
+CVSTREAM_WHISPER_MODEL=
+CVSTREAM_ASR_API_KEY=
 ```
 
-### 4. 启动项目
+## Development
 
+启动 Mastra Studio：
 
-```Bash
-streamlit run main.py
+```bash
+npm run dev
 ```
-## 首次使用与配置排障指南
 
-1. **授权初始化（重要）**： 初次运行或修改密码后，请进入左侧【参数配置】页面，输入账号密码后点击 **“初始化授权环境”**。请在弹出的可视化浏览器中手动完成验证码校验。系统会自动提取 `cookies.json` 作为登录凭证保存。需要注意的是，由于学校修改成了session认证机制，现在只要关闭了浏览器（注意不是窗口）就需要重新使用验证码登录。cookie的有效期未知。所以可能需要在每次使用前输入一次验证码。
-    
-2. **本地 ASR 模型路径**： 若使用本地 Faster-Whisper 进行语音识别，请提前下载好模型（如 `faster-whisper-tiny`），并在【任务中心】的“模型调度配置”区域指定该模型所在的本地目录。
-    
-3. **LLM API 密钥配置**： AI 总结功能需要用到大模型 API。请在配置区域填入对应的 Base URL 和 API Key。
-    
-    - _注意：若使用火山引擎（豆包），需在“自定义模型版本”中手动添加并选择你生成的 `ep-xxxx` 格式的接入点 ID。_
-        
-4. **数据安全**： 所有凭据及 API Key 均会通过系统底层硬件特征进行混合加密，并保存在本地的 `config.json` 中。
-    
+检查项目：
 
-## 第三方鸣谢声明
+```bash
+npm run typecheck
+uv run pytest
+```
 
-本项目的运行依赖或调用了以下优秀的开源/免费工具，特此鸣谢：
+检查 Python 工具桥：
 
-- [Streamlit](https://streamlit.io/) - 极简的纯 Python Web 框架
-    
-- [Playwright](https://playwright.dev/) - 强大的端到端浏览器自动化工具
-    
-- [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) - 高效的本地语音识别引擎
-    
-- [ImDisk Toolkit](https://sourceforge.net/projects/imdisk-toolkit/) - 虚拟内存盘驱动核心（Windows 系统级 IO 加速）
-    
+```bash
+echo '{"action":"health","payload":{}}' | uv run cvstream-tool
+```
 
+## Available tools
 
-##  严正免责声明 (Disclaimer)
+- `authorize-course-portal`：打开可见浏览器并更新登录会话。
+- `list-course-dates`：读取当前课程可用日期。
+- `capture-course`：获取官方字幕，并按需抓取媒体、转写或提取 PPT。
+- `transcribe-local-media`：用 Faster Whisper 转写本地媒体。
+- `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
+- `extract-course-slides`：从视频检测页面变化并生成 PDF。
+- `summarize-course-transcripts`：把一批字幕整理成 Markdown 讲义。
 
-**本项目代码仅作为网络协议分析、浏览器自动化及 AI 文本处理的工程学研究案例，请使用者务必仔细阅读以下条款：**
-
-1. **合法合规使用**：本工具不提供任何破解、绕过校园网或教务系统身份验证的功能。所有数据获取均建立在使用者本人拥有合法访问权限（需提供本人的真实账号与密码）的基础之上。
-    
-2. **禁止高频滥用**：请合理设置访问频率。严禁使用本工具对任何服务器（包括但不限于学校内部教务/课程资源服务器）发起高频并发请求、恶意扫描或实施任何形式的拒绝服务攻击（DDoS）。
-    
-3. **知识产权保护**：通过本工具获取的任何课程视频、音频、PPT 及相关资料，其版权均归属原学校或授课教师所有。下载的数据仅限个人复习与学术研究使用，**严禁上传至第三方平台、二次剪辑或用于任何商业及盈利性目的**。
-    
-4. **责任物理隔离**：本项目的开发者不参与任何具体的使用行为。因使用者操作不当、违规分享、滥用爬虫机制等行为引发的任何校园纪律处分、法律纠纷或经济赔偿，**全部责任由使用者自行承担，本项目及开发者概不负责**。
-    
-
-**下载、复制、编译或运行本项目代码，即表示您已阅读、理解并无条件同意本免责声明的全部内容。**
+请仅处理本人具有合法访问权限的课程内容。

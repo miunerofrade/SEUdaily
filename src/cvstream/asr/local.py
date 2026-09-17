@@ -23,6 +23,7 @@ class LocalASRWorker:
         self.export_base_dir = Path(export_base_dir)
         self.temp_video_path = self._determine_temp_path()
         self.current_process = None  
+        self.cleanup_temp_media = True
 
     def _determine_temp_path(self):
         if os.path.exists("R:\\"): return "R:/temp_video.mp4"
@@ -56,7 +57,7 @@ class LocalASRWorker:
         
 
         cmd = [
-            sys.executable, __file__, 
+            sys.executable, "-m", "cvstream.asr.local",
             "--model", self.model_path,
             "--video", self.temp_video_path,
             "--txt", str(txt_file)
@@ -92,7 +93,7 @@ class LocalASRWorker:
         self._cleanup()
 
     def _cleanup(self):
-        if os.path.exists(self.temp_video_path):
+        if self.cleanup_temp_media and os.path.exists(self.temp_video_path):
             try: os.remove(self.temp_video_path)
             except OSError: pass
 
@@ -133,4 +134,4 @@ if __name__ == "__main__":
         os._exit(0) 
     except Exception as e:
         sys.stderr.write(str(e))
-        os._exit(1) 
+        os._exit(1)

@@ -1,5 +1,3 @@
-# ai_summary.py
-import os
 from pathlib import Path
 from openai import OpenAI
 
@@ -28,7 +26,7 @@ class AISummarizer:
         
         if "aliyuncs" in url_lower: return "qwen-plus" 
         
-        if "deepseek" in url_lower: return "deepseek-chat"
+        if "deepseek" in url_lower: return "deepseek-flash"
         
         if "moonshot" in url_lower: return "kimi-k2.5" 
         
@@ -132,4 +130,14 @@ class AISummarizer:
             if chunk.choices and chunk.choices[0].delta.content is not None:
                 yield chunk.choices[0].delta.content
 
-        
+    def generate_and_save(self, export_base_dir, course_name, date_teacher):
+        """Generate one Markdown note and persist it in the knowledge directory."""
+        content = "".join(
+            self.generate_daily_summary(export_base_dir, course_name, date_teacher)
+        )
+        output_dir = Path(export_base_dir) / "knowledge" / course_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{date_teacher}.md"
+        output_path.write_text(content, encoding="utf-8")
+        return output_path
+

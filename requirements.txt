@@ -1,10 +1,6 @@
-streamlit>=1.30.0
-streamlit-option-menu
 playwright
 faster-whisper
 openai
-psutil
-cryptography
 opencv-python
 img2pdf
 dashscope

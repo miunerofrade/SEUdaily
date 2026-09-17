@@ -3,7 +3,7 @@ import re
 import json
 import shutil
 from pathlib import Path
-from ppt_extractor import PPTExtractor
+from .ppt import PPTExtractor
 
 def sanitize_filename(name):
     if not name: return ""
