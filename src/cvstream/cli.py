@@ -33,6 +33,8 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
         ),
         cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
         cache_file=payload.get("cacheFile", ".cvstream/schedule.json"),
+        username=payload.get("username"),
+        password=payload.get("password"),
     )
 
 

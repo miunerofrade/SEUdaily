@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cvstream.schedule import ScheduleService
+from cvstream.schedule import DEFAULT_SCHEDULE_LAUNCH_URL, ScheduleService
 
 
 def test_normalize_schedule_rows_exposes_capture_identity():
@@ -70,3 +70,13 @@ def test_dom_schedule_records_are_normalized():
     assert courses[0]["weekday"] == 2
     assert courses[0]["weeklyPeriods"] == [6, 7]
     assert courses[0]["weeks"] == list(range(1, 17))
+
+
+def test_seu_auth_and_vpn_pages_are_detected():
+    assert ScheduleService._is_auth_page("https://auth.seu.edu.cn/dist/#/login")
+    assert ScheduleService._is_auth_page("https://vpn.seu.edu.cn/portal/shortcut.html")
+
+
+def test_seu_schedule_uses_portal_launch_url():
+    service = ScheduleService()
+    assert service.entry_url == DEFAULT_SCHEDULE_LAUNCH_URL

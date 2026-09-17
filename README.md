@@ -70,7 +70,7 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 ## Available tools
 
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
-- `authorize-schedule-portal`：打开东大办事大厅课表页，供用户完成 VPN、统一认证或验证码。
+- `authorize-schedule-portal`：自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。
 - `get-course-schedule`：默认读取本地课表缓存；首次同步或明确更新时才重新访问校内系统。
 - `list-courses`：列出课程点播目录中的课程。
 - `search-courses`：按课程名、教室、教师或课程号搜索课程。

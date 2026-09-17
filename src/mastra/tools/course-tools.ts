@@ -28,7 +28,7 @@ export const authorizePortalTool = createTool({
 export const authorizeScheduleTool = createTool({
   id: "authorize-schedule-portal",
   description:
-    "Open a visible SEU eHall timetable window so the user can complete VPN, SSO, or captcha authentication. Call only when get-course-schedule returns auth_required.",
+    "Open a visible SEU eHall timetable window, automatically fill credentials from CVSTREAM_USERNAME/CVSTREAM_PASSWORD, and submit ordinary login. The user only handles captcha or secondary VPN confirmation. Call when get-course-schedule returns auth_required.",
   inputSchema: z.object({
     ...scheduleFields,
     timeoutSeconds: z.number().int().min(30).max(600).default(300),

@@ -10,12 +10,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 
 DEFAULT_SCHEDULE_URL = (
     "https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do"
+)
+DEFAULT_SCHEDULE_APP_ID = "4770397878132218"
+DEFAULT_SCHEDULE_LAUNCH_URL = (
+    f"https://ehall.seu.edu.cn/appShow?appId={DEFAULT_SCHEDULE_APP_ID}"
 )
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -33,10 +38,20 @@ class ScheduleService:
         target_url: str = DEFAULT_SCHEDULE_URL,
         cookie_file: str | Path = ".cvstream/ehall-cookies.json",
         cache_file: str | Path = ".cvstream/schedule.json",
+        username: str | None = None,
+        password: str | None = None,
     ) -> None:
         self.target_url = target_url
         self.cookie_file = Path(cookie_file)
         self.cache_file = Path(cache_file)
+        self.username = username or os.getenv("CVSTREAM_USERNAME", "")
+        self.password = password or os.getenv("CVSTREAM_PASSWORD", "")
+
+    @property
+    def entry_url(self) -> str:
+        if "ehall.seu.edu.cn/jwapp/sys/wdkb/" in self.target_url:
+            return DEFAULT_SCHEDULE_LAUNCH_URL
+        return self.target_url
 
     @contextmanager
     def _page(self, *, visible: bool):
@@ -79,11 +94,34 @@ class ScheduleService:
             marker in lowered
             for marker in (
                 "/controller/v1/public/verify",
+                "auth.seu.edu.cn/dist/",
+                "vpn.seu.edu.cn/portal/shortcut",
                 "authserver/login",
                 "/login",
                 "cas/login",
             )
         )
+
+    def _try_fill_login(self, page) -> str | None:
+        username_field = page.locator(
+            "input[placeholder*='一卡通'], input[placeholder*='唯一ID'], .input-username-pc"
+        ).first
+        password_field = page.locator(
+            "input[type='password'], input[placeholder*='密码']"
+        ).first
+        if username_field.count() == 0 or not username_field.is_visible():
+            return None
+        if not self.username or not self.password:
+            return "credentials_missing"
+
+        username_field.fill(self.username)
+        password_field.fill(self.password)
+        captcha = page.locator("input[placeholder*='验证码']").first
+        if captcha.count() and captcha.is_visible():
+            return "captcha_required"
+
+        page.locator("button:has-text('登 录'), .login-button-pc").first.click()
+        return "submitted"
 
     @staticmethod
     def _write_json_atomic(path: Path, payload: Any) -> None:
@@ -106,30 +144,60 @@ class ScheduleService:
     def authorize(self, timeout_seconds: int = 300) -> dict[str, Any]:
         timeout_seconds = max(30, min(timeout_seconds, 600))
         with self._page(visible=True) as page:
-            page.goto(self.target_url, wait_until="domcontentloaded", timeout=30000)
-            deadline = time.monotonic() + timeout_seconds
-            while time.monotonic() < deadline:
-                if (
-                    "ehall.seu.edu.cn/jwapp/sys/wdkb/" in page.url
-                    and not self._is_auth_page(page.url)
-                ):
-                    try:
-                        page.locator(".wut_table, #kcb_container").first.wait_for(
-                            state="attached", timeout=10000
-                        )
-                    except PlaywrightTimeoutError:
-                        pass
-                    self._save_cookies(page)
+            try:
+                page.goto(self.entry_url, wait_until="domcontentloaded", timeout=30000)
+                deadline = time.monotonic() + timeout_seconds
+                login_attempted = False
+                manual_reason: str | None = None
+                while time.monotonic() < deadline:
+                    if (
+                        "ehall.seu.edu.cn/jwapp/sys/wdkb/" in page.url
+                        and not self._is_auth_page(page.url)
+                    ):
+                        try:
+                            page.locator(".wut_table, #kcb_container").first.wait_for(
+                                state="attached", timeout=10000
+                            )
+                        except PlaywrightTimeoutError:
+                            if page.title().strip() == "403":
+                                return {
+                                    "status": "launch_failed",
+                                    "message": "统一认证已完成，但课表应用启动链接无效。",
+                                }
+                        else:
+                            self._save_cookies(page)
+                            return {
+                                "status": "authorized",
+                                "cookieFile": str(self.cookie_file.resolve()),
+                            }
+
+                    if not login_attempted:
+                        login_state = self._try_fill_login(page)
+                        if login_state == "credentials_missing":
+                            return {
+                                "status": "credentials_missing",
+                                "message": "请在 .env 配置 CVSTREAM_USERNAME 和 CVSTREAM_PASSWORD。",
+                            }
+                        if login_state in {"submitted", "captcha_required"}:
+                            login_attempted = True
+                            manual_reason = (
+                                "captcha" if login_state == "captcha_required" else None
+                            )
+                    page.wait_for_timeout(1000)
+
+                self._save_cookies(page)
+                return {
+                    "status": "auth_timeout",
+                    "manualReason": manual_reason,
+                    "message": "认证窗口等待超时，请重新调用授权工具。",
+                }
+            except PlaywrightError as exc:
+                if "closed" in str(exc).lower():
                     return {
-                        "status": "authorized",
-                        "cookieFile": str(self.cookie_file.resolve()),
+                        "status": "auth_cancelled",
+                        "message": "认证窗口已关闭。",
                     }
-                page.wait_for_timeout(1000)
-            self._save_cookies(page)
-            return {
-                "status": "auth_timeout",
-                "message": "认证窗口等待超时，请重新调用授权工具。",
-            }
+                raise
 
     def _load_cache(self) -> dict[str, Any] | None:
         if not self.cache_file.exists():
@@ -296,12 +364,23 @@ class ScheduleService:
                     payloads.append(payload)
 
             page.on("response", collect)
-            page.goto(self.target_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(5000)
+            page.goto(self.entry_url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.locator(".wut_table, #kcb_container").first.wait_for(
+                    state="attached", timeout=15000
+                )
+            except PlaywrightTimeoutError:
+                pass
+            page.wait_for_timeout(3000)
             if self._is_auth_page(page.url) or "ehall.seu.edu.cn" not in page.url:
                 return {
                     "status": "auth_required",
                     "message": "课表登录会话不存在或已失效，请调用课表授权工具。",
+                }
+            if page.title().strip() == "403":
+                return {
+                    "status": "launch_failed",
+                    "message": "课表应用启动失败，请重新执行课表授权。",
                 }
 
             rows: list[dict[str, Any]] = []
