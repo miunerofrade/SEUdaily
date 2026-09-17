@@ -2,8 +2,11 @@ import time
 import re
 import json
 import shutil
+import threading
 from pathlib import Path
 from .ppt import PPTExtractor
+
+_HEAVY_PROCESSING_LOCK = threading.Lock()
 
 def sanitize_filename(name):
     if not name: return ""
@@ -399,59 +402,61 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
         audio_only_mode = (not need_ppt) and (not keep_media) and (need_subtitle and not got_official_sub)
 
         if need_media:
-            if final_url:
-                msg = "轻量级提取 (仅音频)" if audio_only_mode else "全量抓取 (音视频)"
-                yield f"[{get_time()}] 启动媒体处理引擎 {msg}..."
-                
-                try:
-                    asr_worker.export_base_dir = item_sub_dir 
-                    asr_worker.extract_media(final_url, target_url, audio_only=audio_only_mode)
+            yield f"[{get_time()}] 等待独占媒体处理资源..."
+            with _HEAVY_PROCESSING_LOCK:
+                if final_url:
+                    msg = "轻量级提取 (仅音频)" if audio_only_mode else "全量抓取 (音视频)"
+                    yield f"[{get_time()}] 启动媒体处理引擎 {msg}..."
                     
-                    ext = ".m4a" if audio_only_mode else ".mp4"
-                    dest_media_path = media_dir / f"{task_name}{ext}"
+                    try:
+                        asr_worker.export_base_dir = item_sub_dir
+                        asr_worker.extract_media(final_url, target_url, audio_only=audio_only_mode)
 
-                    if keep_media:
-                        media_dir.mkdir(parents=True, exist_ok=True)  
-                        if dest_media_path.exists(): dest_media_path.unlink()
-                        shutil.copy2(asr_worker.temp_video_path, dest_media_path)
+                        ext = ".m4a" if audio_only_mode else ".mp4"
+                        dest_media_path = media_dir / f"{task_name}{ext}"
 
-                    if need_subtitle and not got_official_sub:
-                        yield f"[{get_time()}] 启动本地 ASR 音频转写..."
-                        for progress_data in asr_worker.transcribe_and_export(task_name):
-                            if "progress" in progress_data:
-                                yield f"[ASR_PROGRESS] {json.dumps(progress_data)}"
-                    
-                    if need_ppt:
-                        media_dir.mkdir(parents=True, exist_ok=True)
-                        yield f"[{get_time()}] 初始化 PPT 视觉抽帧队列..."
-                        try:
-                            source_video_path = dest_media_path if dest_media_path.exists() else asr_worker.temp_video_path
-                            ppt_worker = PPTExtractor(
-                                video_path=str(source_video_path), 
-                                output_dir=str(media_dir),  
-                                task_name=task_name,
-                                interval_sec=10,
-                                diff_threshold=1.0 
-                            )
-                            yield from ppt_worker.extract_and_build_pdf(ignore_bottom_right_ratio=0.25)
-                        except Exception as e:
-                            yield f"[{get_time()}] PPT 提取级联崩溃: {e}"
-                    
-                    asr_worker._cleanup() 
+                        if keep_media:
+                            media_dir.mkdir(parents=True, exist_ok=True)
+                            if dest_media_path.exists(): dest_media_path.unlink()
+                            shutil.copy2(asr_worker.temp_video_path, dest_media_path)
 
-                except Exception as e:
-                    yield f"[{get_time()}] 媒体处理异常终止: {e}"
+                        if need_subtitle and not got_official_sub:
+                            yield f"[{get_time()}] 启动 ASR 音频转写..."
+                            for progress_data in asr_worker.transcribe_and_export(task_name):
+                                if "progress" in progress_data:
+                                    yield f"[ASR_PROGRESS] {json.dumps(progress_data)}"
 
-                if stop_event.is_set():
-                    yield f"[{get_time()}] 任务打断，清理当前残骸..."
-                    asr_worker.abort()
-                    for f in expected_files:
-                        if f.exists():
-                            try: f.unlink()
-                            except: pass
-                    return
-            else:
-                yield f"[{get_time()}] 未检测到有效流，跳过媒体任务。"
+                        if need_ppt:
+                            media_dir.mkdir(parents=True, exist_ok=True)
+                            yield f"[{get_time()}] 初始化 PPT 视觉抽帧队列..."
+                            try:
+                                source_video_path = dest_media_path if dest_media_path.exists() else asr_worker.temp_video_path
+                                ppt_worker = PPTExtractor(
+                                    video_path=str(source_video_path),
+                                    output_dir=str(media_dir),
+                                    task_name=task_name,
+                                    interval_sec=10,
+                                    diff_threshold=1.0
+                                )
+                                yield from ppt_worker.extract_and_build_pdf(ignore_bottom_right_ratio=0.25)
+                            except Exception as e:
+                                yield f"[{get_time()}] PPT 提取级联崩溃: {e}"
+
+                        asr_worker._cleanup()
+
+                    except Exception as e:
+                        yield f"[{get_time()}] 媒体处理异常终止: {e}"
+
+                    if stop_event.is_set():
+                        yield f"[{get_time()}] 任务打断，清理当前残骸..."
+                        asr_worker.abort()
+                        for f in expected_files:
+                            if f.exists():
+                                try: f.unlink()
+                                except: pass
+                        return
+                else:
+                    yield f"[{get_time()}] 未检测到有效流，跳过媒体任务。"
 
         yield f"[{get_time()}] ----------------------------------------"
 

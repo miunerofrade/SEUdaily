@@ -1,8 +1,13 @@
 import time
 import random
 import json
+import os
+import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
+
+_COOKIE_IO_LOCK = threading.Lock()
 
 def execute_login(page, target_url, username, password, cookie_file="cookies.json"):
     def get_time(): return time.strftime('%H:%M:%S')
@@ -14,9 +19,10 @@ def execute_login(page, target_url, username, password, cookie_file="cookies.jso
         
         if cookie_path.exists():
             try:
-                with cookie_path.open('r', encoding='utf-8') as f:
-                    cookies = json.load(f)
-                    context.add_cookies(cookies)
+                with _COOKIE_IO_LOCK:
+                    with cookie_path.open('r', encoding='utf-8') as f:
+                        cookies = json.load(f)
+                context.add_cookies(cookies)
                 yield f"[{get_time()}] 已载入历史 Cookie..."
             except Exception as e:
                 yield f"[{get_time()}] 载入 Cookie 失败: {e}"
@@ -32,7 +38,8 @@ def execute_login(page, target_url, username, password, cookie_file="cookies.jso
         else:
             if cookie_path.exists():
                 try:
-                    cookie_path.unlink()
+                    with _COOKIE_IO_LOCK:
+                        cookie_path.unlink(missing_ok=True)
                 except:
                     pass
                 yield f"[{get_time()}] 历史 Cookie 已失效，将重新登录..."
@@ -63,8 +70,18 @@ def execute_login(page, target_url, username, password, cookie_file="cookies.jso
         try:
             fresh_cookies = context.cookies()
             cookie_path.parent.mkdir(parents=True, exist_ok=True)
-            with cookie_path.open('w', encoding='utf-8') as f:
-                json.dump(fresh_cookies, f)
+            with _COOKIE_IO_LOCK:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=cookie_path.parent,
+                    prefix=f".{cookie_path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as temp_file:
+                    json.dump(fresh_cookies, temp_file)
+                    temp_name = temp_file.name
+                os.replace(temp_name, cookie_path)
             yield f"[{get_time()}] 最新会话凭证 (Cookies) 已保存。"
         except Exception as e:
             yield f"[{get_time()}] 保存 Cookies 失败: {e}"

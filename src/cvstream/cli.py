@@ -29,8 +29,8 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     payload = request.get("payload") or {}
 
     if action == "health":
-        return {"version": "0.2.0", "tools": [
-            "authorize", "list-courses", "search-courses", "find-course-lesson", "capture-course-lesson", "list-dates", "capture-course", "transcribe-local", "transcribe-cloud",
+        return {"version": "0.3.0", "tools": [
+            "authorize", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course",
         ]}
     if action == "authorize":
@@ -39,17 +39,31 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _course_service(payload).list_courses()
     if action == "search-courses":
         return _course_service(payload).search_courses(payload["query"])
-    if action == "find-course-lesson":
-        return _course_service(payload).find_course_lesson(
+    if action == "find-course-session":
+        return _course_service(payload).find_course_session(
             course_name=payload["courseName"],
             teacher_name=payload["teacherName"],
-            lesson_number=payload["lessonNumber"],
+            weekly_periods=payload["weeklyPeriods"],
+            course_date=payload.get("courseDate"),
         )
-    if action == "capture-course-lesson":
-        return _course_service(payload).capture_course_lesson(
+    if action == "capture-course-session":
+        return _course_service(payload).capture_course_session(
             course_name=payload["courseName"],
             teacher_name=payload["teacherName"],
-            lesson_number=payload["lessonNumber"],
+            weekly_periods=payload["weeklyPeriods"],
+            course_date=payload.get("courseDate"),
+            need_subtitle=payload.get("needSubtitle", True),
+            need_ppt=payload.get("needPpt", False),
+            keep_media=payload.get("keepMedia", False),
+            asr_engine=payload.get("asrEngine", "local"),
+            model_path=payload.get("modelPath"),
+            asr_api_key=payload.get("asrApiKey"),
+            asr_model=payload.get("asrModel", "paraformer-realtime-v2"),
+        )
+    if action == "capture-course-sessions":
+        return _course_service(payload).capture_course_sessions(
+            sessions=payload["sessions"],
+            max_concurrency=payload.get("maxConcurrency", 2),
             need_subtitle=payload.get("needSubtitle", True),
             need_ppt=payload.get("needPpt", False),
             keep_media=payload.get("keepMedia", False),

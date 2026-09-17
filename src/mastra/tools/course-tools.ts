@@ -42,36 +42,63 @@ export const searchCoursesTool = createTool({
   execute: async (context) => runPythonTool("search-courses", context),
 });
 
-export const findCourseLessonTool = createTool({
-  id: "find-course-lesson",
+const courseSessionIdentity = {
+  courseName: z.string().min(1).describe("Exact course name"),
+  teacherName: z.string().min(1).describe("Exact teacher name"),
+  weeklyPeriods: z
+    .array(z.number().int().min(1))
+    .min(1)
+    .describe("All scheduled period numbers, for example [3, 4, 5]"),
+  courseDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe("Lecture date; omit it to select the latest matching date"),
+};
+
+const captureOptions = {
+  needSubtitle: z.boolean().default(true),
+  needPpt: z.boolean().default(false),
+  keepMedia: z.boolean().default(false),
+  asrEngine: z.enum(["local", "cloud"]).default("local"),
+  modelPath: z.string().optional(),
+  asrModel: z.string().default("paraformer-realtime-v2"),
+};
+
+export const findCourseSessionTool = createTool({
+  id: "find-course-session",
   description:
-    "Find one exact course lesson from a course name, teacher name, and displayed lesson sequence number. Returns metadata only and never exposes signed URLs.",
+    "Resolve a course using its exact name, teacher, and weekly period numbers. If no date is supplied, selects the latest matching lecture date and returns every lesson segment on that date.",
   inputSchema: z.object({
     ...commonPortalFields,
-    courseName: z.string().min(1),
-    teacherName: z.string().min(1),
-    lessonNumber: z.number().int().min(1),
+    ...courseSessionIdentity,
   }),
-  execute: async (context) => runPythonTool("find-course-lesson", context),
+  execute: async (context) => runPythonTool("find-course-session", context),
 });
 
-export const captureCourseLessonTool = createTool({
-  id: "capture-course-lesson",
+export const captureCourseSessionTool = createTool({
+  id: "capture-course-session",
   description:
-    "Capture one exact lesson selected by course name, teacher, and lesson sequence. Official subtitles are preferred; media is retained only when requested.",
+    "Capture every lesson segment for one course date. Course name, teacher, and weekly periods are required; the date defaults to the latest matching date.",
   inputSchema: z.object({
     ...commonPortalFields,
-    courseName: z.string().min(1),
-    teacherName: z.string().min(1),
-    lessonNumber: z.number().int().min(1),
-    needSubtitle: z.boolean().default(true),
-    needPpt: z.boolean().default(false),
-    keepMedia: z.boolean().default(false),
-    asrEngine: z.enum(["local", "cloud"]).default("local"),
-    modelPath: z.string().optional(),
-    asrModel: z.string().default("paraformer-realtime-v2"),
+    ...courseSessionIdentity,
+    ...captureOptions,
   }),
-  execute: async (context) => runPythonTool("capture-course-lesson", context),
+  execute: async (context) => runPythonTool("capture-course-session", context),
+});
+
+export const captureCourseSessionsTool = createTool({
+  id: "capture-course-sessions",
+  description:
+    "Capture a queue of course sessions. Subtitle-only work runs with up to two workers; video, ASR fallback, and slide processing are serialized to control memory use.",
+  inputSchema: z.object({
+    ...commonPortalFields,
+    sessions: z.array(z.object(courseSessionIdentity)).min(1),
+    maxConcurrency: z.number().int().min(1).max(2).default(2),
+    ...captureOptions,
+  }),
+  execute: async (context) => runPythonTool("capture-course-sessions", context),
 });
 
 export const captureCourseTool = createTool({

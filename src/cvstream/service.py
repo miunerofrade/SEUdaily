@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -199,6 +201,384 @@ class CourseService:
                 }
             )
         return lessons
+
+    @staticmethod
+    def _normalize_periods(weekly_periods: list[int]) -> list[int]:
+        periods = sorted(set(weekly_periods))
+        if not periods or any(period < 1 for period in periods):
+            raise ValueError("weeklyPeriods 必须包含至少一个大于 0 的节次")
+        return periods
+
+    @staticmethod
+    def _sessions_from_lessons(lessons: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for lesson in lessons:
+            lesson_date = lesson.get("date", "")
+            if lesson_date:
+                grouped.setdefault(lesson_date, []).append(lesson)
+
+        sessions = []
+        for lesson_date, date_lessons in grouped.items():
+            ordered_lessons = sorted(
+                date_lessons,
+                key=lambda item: (
+                    item.get("periodNumber") is None,
+                    item.get("periodNumber") or 0,
+                    item.get("time", ""),
+                ),
+            )
+            sessions.append(
+                {
+                    "date": lesson_date,
+                    "periodNumbers": sorted(
+                        {
+                            item["periodNumber"]
+                            for item in ordered_lessons
+                            if item.get("periodNumber") is not None
+                        }
+                    ),
+                    "lessons": ordered_lessons,
+                }
+            )
+        return sorted(sessions, key=lambda item: item["date"], reverse=True)
+
+    @classmethod
+    def _select_session(
+        cls,
+        lessons: list[dict[str, Any]],
+        weekly_periods: list[int],
+        course_date: str | None = None,
+    ) -> dict[str, Any]:
+        periods = cls._normalize_periods(weekly_periods)
+        if course_date:
+            try:
+                date.fromisoformat(course_date)
+            except ValueError as exc:
+                raise ValueError("courseDate 必须使用 YYYY-MM-DD 格式") from exc
+
+        sessions = cls._sessions_from_lessons(lessons)
+        if course_date:
+            dated = next(
+                (session for session in sessions if session["date"] == course_date),
+                None,
+            )
+            if dated is None:
+                return {
+                    "status": "date_not_found",
+                    "requestedDate": course_date,
+                    "weeklyPeriods": periods,
+                    "availableSessions": sessions,
+                }
+            if dated["periodNumbers"] != periods:
+                return {
+                    "status": "period_mismatch",
+                    "requestedDate": course_date,
+                    "weeklyPeriods": periods,
+                    "availableSession": dated,
+                    "availableSessions": sessions,
+                }
+            return {"status": "found", "session": dated}
+
+        matching = [
+            session for session in sessions if session["periodNumbers"] == periods
+        ]
+        if not matching:
+            return {
+                "status": "period_not_found",
+                "weeklyPeriods": periods,
+                "availableSessions": sessions,
+            }
+        return {"status": "found", "session": matching[0]}
+
+    @staticmethod
+    def _exact_course_matches(
+        courses: list[dict[str, Any]], course_name: str, teacher_name: str
+    ) -> list[dict[str, Any]]:
+        normalized_course = course_name.casefold()
+        normalized_teacher = teacher_name.casefold()
+        return [
+            course
+            for course in courses
+            if course["title"].strip().casefold() == normalized_course
+            and normalized_teacher
+            in [
+                part.strip().casefold()
+                for part in re.split(r"[,，、]", course["teacher"])
+            ]
+        ]
+
+    @staticmethod
+    def _open_course_detail(catalog, course: dict[str, Any]):
+        card = catalog.locator(".lesson-card.card-item").nth(course["index"])
+        previous_pages = set(catalog.context.pages)
+        try:
+            with catalog.context.expect_page(timeout=10000) as page_info:
+                card.locator(".img-top").click(no_wait_after=True)
+            detail_page = page_info.value
+        except PlaywrightTimeoutError:
+            new_pages = [
+                page for page in catalog.context.pages if page not in previous_pages
+            ]
+            if not new_pages:
+                raise RuntimeError("课程详情页未打开")
+            detail_page = new_pages[-1]
+        detail_page.locator(".list-item.student").first.wait_for(
+            state="visible", timeout=15000
+        )
+        return detail_page
+
+    def _resolve_course_session(
+        self,
+        catalog,
+        *,
+        course_name: str,
+        teacher_name: str,
+        weekly_periods: list[int],
+        course_date: str | None,
+    ) -> dict[str, Any]:
+        search_box = catalog.locator("input[placeholder*='课程名称']").first
+        search_box.fill(course_name)
+        catalog.locator("button.el-button--primary").first.click()
+        catalog.wait_for_url("**/#/advance-search", timeout=15000)
+        catalog.wait_for_timeout(2500)
+        courses = self._read_course_cards(catalog)
+        matches = self._exact_course_matches(courses, course_name, teacher_name)
+
+        if not matches:
+            return {
+                "status": "course_not_found",
+                "courseName": course_name,
+                "teacherName": teacher_name,
+                "weeklyPeriods": weekly_periods,
+                "candidates": courses,
+            }
+
+        resolved: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        for course in matches:
+            detail_page = self._open_course_detail(catalog, course)
+            lessons = self._read_lessons(detail_page)
+            selection = self._select_session(
+                lessons, weekly_periods, course_date=course_date
+            )
+            if selection["status"] == "found":
+                resolved.append(
+                    {
+                        "course": course,
+                        "session": selection["session"],
+                        "detailPage": detail_page,
+                    }
+                )
+            else:
+                rejected.append({"course": course, **selection})
+                detail_page.close()
+
+        if not resolved:
+            return {
+                "status": rejected[0]["status"] if len(rejected) == 1 else "session_not_found",
+                "courseName": course_name,
+                "teacherName": teacher_name,
+                "weeklyPeriods": self._normalize_periods(weekly_periods),
+                "requestedDate": course_date,
+                "candidates": rejected,
+            }
+        if len(resolved) > 1:
+            for item in resolved:
+                item["detailPage"].close()
+            return {
+                "status": "ambiguous",
+                "courseName": course_name,
+                "teacherName": teacher_name,
+                "weeklyPeriods": self._normalize_periods(weekly_periods),
+                "requestedDate": course_date,
+                "candidates": [
+                    {"course": item["course"], "session": item["session"]}
+                    for item in resolved
+                ],
+            }
+        return {"status": "found", **resolved[0]}
+
+    def find_course_session(
+        self,
+        *,
+        course_name: str,
+        teacher_name: str,
+        weekly_periods: list[int],
+        course_date: str | None = None,
+    ) -> dict[str, Any]:
+        course_name = _required(course_name, "courseName")
+        teacher_name = _required(teacher_name, "teacherName")
+        periods = self._normalize_periods(weekly_periods)
+
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            result = self._resolve_course_session(
+                catalog,
+                course_name=course_name,
+                teacher_name=teacher_name,
+                weekly_periods=periods,
+                course_date=course_date,
+            )
+            result.pop("detailPage", None)
+        return {**result, "logs": logs}
+
+    def capture_course_session(
+        self,
+        *,
+        course_name: str,
+        teacher_name: str,
+        weekly_periods: list[int],
+        course_date: str | None = None,
+        need_subtitle: bool = True,
+        need_ppt: bool = False,
+        keep_media: bool = False,
+        asr_engine: str = "local",
+        model_path: str | None = None,
+        asr_api_key: str | None = None,
+        asr_model: str = "paraformer-realtime-v2",
+    ) -> dict[str, Any]:
+        course_name = _required(course_name, "courseName")
+        teacher_name = _required(teacher_name, "teacherName")
+        periods = self._normalize_periods(weekly_periods)
+        worker = self._build_asr_worker(
+            engine=asr_engine,
+            model_path=model_path,
+            api_key=asr_api_key,
+            model=asr_model,
+        )
+
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            result = self._resolve_course_session(
+                catalog,
+                course_name=course_name,
+                teacher_name=teacher_name,
+                weekly_periods=periods,
+                course_date=course_date,
+            )
+            if result["status"] != "found":
+                return {**result, "logs": logs}
+
+            course = result["course"]
+            session = result["session"]
+            detail_page = result["detailPage"]
+            logs.extend(
+                execute_video_task(
+                    detail_page,
+                    detail_page.url,
+                    worker,
+                    self.export_dir,
+                    threading.Event(),
+                    target_date=session["date"],
+                    need_subtitle=need_subtitle,
+                    need_ppt=need_ppt,
+                    keep_media=keep_media,
+                )
+            )
+
+        artifacts = self._collect_session_artifacts(course, session)
+        return {
+            "status": "completed" if artifacts else "completed_without_artifact",
+            "course": course,
+            "session": session,
+            "artifacts": artifacts,
+            "logs": logs,
+        }
+
+    def _collect_session_artifacts(
+        self, course: dict[str, Any], session: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        date_key = session["date"].replace("-", "")
+        safe_course = sanitize_filename(course["title"])
+        safe_teacher = sanitize_filename(course["teacher"])
+        batch_name = f"{date_key}-{safe_teacher}"
+        paths: list[Path] = []
+        for lesson in session["lessons"]:
+            period_number = lesson.get("periodNumber") or lesson["sequence"]
+            task_name = f"{date_key}-{period_number}"
+            paths.extend(
+                [
+                    self.export_dir / "subtitle" / safe_course / batch_name / f"{task_name}_transcript.txt",
+                    self.export_dir / "media" / safe_course / batch_name / f"{task_name}.mp4",
+                    self.export_dir / "media" / safe_course / batch_name / f"{task_name}.m4a",
+                    self.export_dir / "media" / safe_course / batch_name / f"{task_name}_PPT.pdf",
+                ]
+            )
+        return [
+            {
+                "path": str(path.resolve()),
+                "size": path.stat().st_size,
+                "kind": (
+                    "transcript" if path.name.endswith("_transcript.txt")
+                    else "slides" if path.name.endswith("_PPT.pdf")
+                    else "media"
+                ),
+            }
+            for path in paths
+            if path.exists()
+        ]
+
+    def capture_course_sessions(
+        self,
+        *,
+        sessions: list[dict[str, Any]],
+        max_concurrency: int = 2,
+        **capture_options: Any,
+    ) -> dict[str, Any]:
+        if not sessions:
+            raise ValueError("sessions 至少需要一个课程")
+        if not 1 <= max_concurrency <= 2:
+            raise ValueError("maxConcurrency 必须在 1 到 2 之间")
+
+        subtitle_only = (
+            capture_options.get("need_subtitle", True)
+            and not capture_options.get("need_ppt", False)
+            and not capture_options.get("keep_media", False)
+        )
+        effective_concurrency = min(max_concurrency, 2 if subtitle_only else 1)
+
+        results: list[dict[str, Any] | None] = [None] * len(sessions)
+
+        def run_one(index: int, session: dict[str, Any]):
+            return index, self.capture_course_session(
+                course_name=session["courseName"],
+                teacher_name=session["teacherName"],
+                weekly_periods=session["weeklyPeriods"],
+                course_date=session.get("courseDate"),
+                **capture_options,
+            )
+
+        with ThreadPoolExecutor(max_workers=effective_concurrency) as executor:
+            futures = [
+                executor.submit(run_one, index, session)
+                for index, session in enumerate(sessions)
+            ]
+            for future in as_completed(futures):
+                try:
+                    index, result = future.result()
+                except Exception as exc:
+                    index = futures.index(future)
+                    result = {
+                        "status": "failed",
+                        "error": str(exc),
+                        "errorType": type(exc).__name__,
+                    }
+                results[index] = result
+
+        completed = sum(
+            result is not None and result.get("status", "").startswith("completed")
+            for result in results
+        )
+        return {
+            "status": "completed" if completed == len(results) else "partial",
+            "count": len(results),
+            "completed": completed,
+            "requestedConcurrency": max_concurrency,
+            "effectiveConcurrency": effective_concurrency,
+            "results": results,
+        }
 
     def find_course_lesson(
         self, *, course_name: str, teacher_name: str, lesson_number: int

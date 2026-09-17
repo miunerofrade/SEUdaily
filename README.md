@@ -71,11 +71,14 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
 - `list-courses`：列出课程点播目录中的课程。
 - `search-courses`：按课程名、教室、教师或课程号搜索课程。
-- `find-course-lesson`：用课程名、教师名和课时序号精确定位一节课。
-- `capture-course-lesson`：精确抓取一节课的官方字幕及按需媒体/PPT。
+- `find-course-session`：用课程名、教师名和周内节次定位课程；日期缺省时返回最新一次课。
+- `capture-course-session`：抓取选中日期下的全部课段，而不是详情页中的单个列表序号。
+- `capture-course-sessions`：批量抓取多门课程；纯字幕最多并发 2，视频、PPT、ASR 等重任务并发 1。
 - `transcribe-local-media`：用 Faster Whisper 转写本地媒体。
 - `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
 - `extract-course-slides`：从视频检测页面变化并生成 PDF。
 - `summarize-course-transcripts`：把一批字幕整理成 Markdown 讲义。
 
 请仅处理本人具有合法访问权限的课程内容。
+
+课程定位示例：课程每周安排在第 3–5 节时，传入 `weeklyPeriods: [3, 4, 5]`。`courseName`、`teacherName`、`weeklyPeriods` 三项必填；`courseDate` 可选，省略时自动选择符合排课节次的最新日期。同一日期下的所有课段会作为一个完整会话处理。
