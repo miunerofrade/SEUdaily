@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from cvstream.capture import find_mp4_url, process_official_json, sanitize_filename
 from cvstream.cli import dispatch
 from cvstream.service import CourseService
+from cvstream.summary import AISummarizer
 
 
 def test_sanitize_filename_removes_windows_reserved_characters():
@@ -90,3 +93,41 @@ def test_batch_capture_uses_two_workers_only_for_subtitle_only_work(monkeypatch)
 
     assert subtitle_result["effectiveConcurrency"] == 2
     assert heavy_result["effectiveConcurrency"] == 1
+
+
+def test_summary_can_read_only_selected_transcript_files(tmp_path: Path):
+    export_dir = tmp_path / "exports"
+    batch_dir = export_dir / "subtitle" / "测试课程" / "20260902-教师"
+    batch_dir.mkdir(parents=True)
+    first = batch_dir / "20260902-3_transcript.txt"
+    second = batch_dir / "20260902-4_transcript.txt"
+    first.write_text("第一段课程内容" * 20, encoding="utf-8")
+    second.write_text("第二段课程内容" * 20, encoding="utf-8")
+    summarizer = AISummarizer({"api_key": "test", "llm_engine": "DeepSeek (api.deepseek.com)"})
+
+    text, sources, output_name = summarizer.prepare_source(
+        export_base_dir=export_dir,
+        course_name="测试课程",
+        source_type="files",
+        transcript_paths=[str(first)],
+    )
+
+    assert "第一段课程内容" in text
+    assert "第二段课程内容" not in text
+    assert sources == [str(first.resolve())]
+    assert output_name == "selected-transcripts"
+
+
+def test_summary_rejects_files_outside_subtitle_directory(tmp_path: Path):
+    export_dir = tmp_path / "exports"
+    outside = tmp_path / "outside_transcript.txt"
+    outside.write_text("不应读取的内容" * 20, encoding="utf-8")
+    summarizer = AISummarizer({"api_key": "test", "llm_engine": "DeepSeek (api.deepseek.com)"})
+
+    with pytest.raises(ValueError, match="只能读取"):
+        summarizer.prepare_source(
+            export_base_dir=export_dir,
+            course_name="测试课程",
+            source_type="files",
+            transcript_paths=[str(outside)],
+        )

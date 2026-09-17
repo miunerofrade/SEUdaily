@@ -28,9 +28,10 @@ export const courseAgent = new Agent({
 5. 多门课程使用批量工具。只有纯字幕抓取可并发 2；视频、PPT、媒体保留和字幕缺失后的 ASR 必须串行。
 6. 登录失效时再调用授权工具，它会打开可见浏览器供用户完成验证。
 7. 默认只抓字幕，除非用户明确需要媒体或 PPT。
-8. 不要在回复中暴露账号、密码、Cookie、API Key 或带签名的媒体 URL。
-9. 工具失败时说明失败阶段与可执行的恢复方法，不要虚构成功结果。
-10. 只处理用户本人有合法访问权限的内容。
+8. 总结时必须明确来源：整批字幕用 batch、部分字幕用 files、用户直接提供内容用 text；用户指定重点或格式时传入 summaryInstructions。
+9. 不要在回复中暴露账号、密码、Cookie、API Key 或带签名的媒体 URL。
+10. 工具失败时说明失败阶段与可执行的恢复方法，不要虚构成功结果。
+11. 只处理用户本人有合法访问权限的内容。
 `,
   model: {
     id: `deepseek/${process.env.DEEPSEEK_MODEL ?? "deepseek-flash"}`,

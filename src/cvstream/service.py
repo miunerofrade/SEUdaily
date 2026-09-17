@@ -911,10 +911,16 @@ def summarize_course(
     *,
     export_dir: str,
     course_name: str,
-    date_teacher: str,
+    source_type: str = "batch",
+    date_teacher: str | None = None,
+    transcript_paths: list[str] | None = None,
+    content: str | None = None,
+    summary_instructions: str | None = None,
+    output_name: str | None = None,
     api_key: str | None = None,
     llm_engine: str = "DeepSeek (api.deepseek.com)",
     base_url: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     config: dict[str, Any] = {
         "api_key": (
@@ -923,9 +929,25 @@ def summarize_course(
             or os.getenv("CVSTREAM_LLM_API_KEY", "")
         ),
         "llm_engine": llm_engine,
+        "model": model or os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
     }
     if base_url:
         config["custom_llm_endpoints"] = {llm_engine: base_url}
     summarizer = AISummarizer(config)
-    output_path = summarizer.generate_and_save(export_dir, course_name, date_teacher)
-    return {"notePath": str(output_path.resolve())}
+    output_path, sources = summarizer.generate_and_save(
+        export_base_dir=export_dir,
+        course_name=course_name,
+        source_type=source_type,
+        date_teacher=date_teacher,
+        transcript_paths=transcript_paths,
+        content=content,
+        summary_instructions=summary_instructions,
+        output_name=output_name,
+    )
+    return {
+        "status": "completed",
+        "sourceType": source_type,
+        "sources": sources,
+        "model": summarizer.model_name,
+        "notePath": str(output_path.resolve()),
+    }

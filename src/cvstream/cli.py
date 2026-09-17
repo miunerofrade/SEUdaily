@@ -111,10 +111,16 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return summarize_course(
             export_dir=payload.get("exportDir", "exports"),
             course_name=payload["courseName"],
-            date_teacher=payload["dateTeacher"],
+            source_type=payload.get("sourceType", "batch"),
+            date_teacher=payload.get("dateTeacher"),
+            transcript_paths=payload.get("transcriptPaths"),
+            content=payload.get("content"),
+            summary_instructions=payload.get("summaryInstructions"),
+            output_name=payload.get("outputName"),
             api_key=payload.get("apiKey"),
             llm_engine=payload.get("llmEngine", "DeepSeek (api.deepseek.com)"),
             base_url=payload.get("baseUrl"),
+            model=payload.get("model"),
         )
     raise ValueError(f"未知工具动作: {action}")
 

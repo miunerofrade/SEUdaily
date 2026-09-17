@@ -157,13 +157,35 @@ export const extractSlidesTool = createTool({
 export const summarizeCourseTool = createTool({
   id: "summarize-course-transcripts",
   description:
-    "Read a captured transcript batch and generate a structured Markdown course note with the configured DeepSeek model.",
+    "Generate a Markdown course note from one captured batch, selected transcript files, or direct text. Use summaryInstructions to specify the desired focus or output format.",
   inputSchema: z.object({
     exportDir: z.string().default("exports"),
-    courseName: z.string(),
-    dateTeacher: z.string(),
+    courseName: z.string().min(1).describe("Course name used for note organization"),
+    sourceType: z.enum(["batch", "files", "text"]).default("batch"),
+    dateTeacher: z
+      .string()
+      .optional()
+      .describe("Required for batch: captured date-teacher directory name"),
+    transcriptPaths: z
+      .array(z.string())
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Required for files: selected paths under exportDir/subtitle"),
+    content: z
+      .string()
+      .max(1_000_000)
+      .optional()
+      .describe("Required for text: direct course content to summarize"),
+    summaryInstructions: z
+      .string()
+      .max(10_000)
+      .optional()
+      .describe("Requested focus and format, such as exam points or an outline"),
+    outputName: z.string().optional().describe("Markdown filename without a path"),
     llmEngine: z.string().default("DeepSeek (api.deepseek.com)"),
     baseUrl: z.string().url().optional(),
+    model: z.string().default("deepseek-flash"),
   }),
   execute: async (context) => runPythonTool("summarize-course", context),
 });

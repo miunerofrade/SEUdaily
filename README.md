@@ -77,7 +77,7 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 - `transcribe-local-media`：用 Faster Whisper 转写本地媒体。
 - `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
 - `extract-course-slides`：从视频检测页面变化并生成 PDF。
-- `summarize-course-transcripts`：把一批字幕整理成 Markdown 讲义。
+- `summarize-course-transcripts`：可总结整批字幕、指定字幕文件或直接文本，并可指定总结重点与输出格式。
 
 请仅处理本人具有合法访问权限的课程内容。
 
