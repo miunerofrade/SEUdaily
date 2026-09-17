@@ -94,7 +94,7 @@ class RouteIsolationCapture:
             pass
 
 
-def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event, target_date=None, need_subtitle=True, need_ppt=False, keep_media=False):
+def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event, target_date=None, target_sequence=None, need_subtitle=True, need_ppt=False, keep_media=False):
     def get_time(): return time.strftime('%H:%M:%S')
     
     captured_subtitles = {}
@@ -152,6 +152,7 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                 if (match) {
                     playlist.push({
                         index: index,              
+                        lesson_sequence: index + 1,
                         date: match[1],            
                         time: match[2],            
                         title: titleText,
@@ -170,9 +171,21 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
 
         all_dates = sorted(list(set([item['date'] for item in playlist])))
 
-        is_all_dates = (target_date == "全部日期")
-        
-        if not target_date or target_date == "自动获取最新":
+        is_all_dates = (target_date == "全部日期") and target_sequence is None
+
+        if target_sequence is not None:
+            selected_items = [
+                item for item in playlist
+                if item.get("lesson_sequence") == target_sequence
+            ]
+            if not selected_items:
+                yield f"[{get_time()}] 未找到课时序号 [{target_sequence}]，已取消抓取。"
+                return
+            target_items = selected_items
+            target_date = selected_items[0]["date"]
+            date_formatted = target_date.replace('-', '')
+            yield f"[{get_time()}] 已精确锁定课时序号: {target_sequence} ({target_date})"
+        elif not target_date or target_date == "自动获取最新":
             target_date = all_dates[-1] 
             yield f"[{get_time()}] 未指定特定日期，系统自动锁定最新课程日: {target_date}"
         elif is_all_dates:
@@ -184,7 +197,9 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                 yield f"[{get_time()}] 🛑 拦截生效，已取消后续所有抓取动作以避免资源浪费。"
                 return  
 
-        if is_all_dates:
+        if target_sequence is not None:
+            pass
+        elif is_all_dates:
             target_items = sorted(playlist, key=lambda x: (x['date'], x['time'], x['period_seq']))
         else:
             target_items = [item for item in playlist if item['date'] == target_date]

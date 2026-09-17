@@ -69,11 +69,10 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 ## Available tools
 
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
-- `list-course-dates`：读取当前课程可用日期。
 - `list-courses`：列出课程点播目录中的课程。
 - `search-courses`：按课程名、教室、教师或课程号搜索课程。
 - `find-course-lesson`：用课程名、教师名和课时序号精确定位一节课。
-- `capture-course`：获取官方字幕，并按需抓取媒体、转写或提取 PPT。
+- `capture-course-lesson`：精确抓取一节课的官方字幕及按需媒体/PPT。
 - `transcribe-local-media`：用 Faster Whisper 转写本地媒体。
 - `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
 - `extract-course-slides`：从视频检测页面变化并生成 PDF。

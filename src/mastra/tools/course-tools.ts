@@ -55,6 +55,25 @@ export const findCourseLessonTool = createTool({
   execute: async (context) => runPythonTool("find-course-lesson", context),
 });
 
+export const captureCourseLessonTool = createTool({
+  id: "capture-course-lesson",
+  description:
+    "Capture one exact lesson selected by course name, teacher, and lesson sequence. Official subtitles are preferred; media is retained only when requested.",
+  inputSchema: z.object({
+    ...commonPortalFields,
+    courseName: z.string().min(1),
+    teacherName: z.string().min(1),
+    lessonNumber: z.number().int().min(1),
+    needSubtitle: z.boolean().default(true),
+    needPpt: z.boolean().default(false),
+    keepMedia: z.boolean().default(false),
+    asrEngine: z.enum(["local", "cloud"]).default("local"),
+    modelPath: z.string().optional(),
+    asrModel: z.string().default("paraformer-realtime-v2"),
+  }),
+  execute: async (context) => runPythonTool("capture-course-lesson", context),
+});
+
 export const captureCourseTool = createTool({
   id: "capture-course",
   description:

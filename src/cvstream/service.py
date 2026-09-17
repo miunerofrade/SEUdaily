@@ -12,7 +12,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .asr import CloudASRWorker, LocalASRWorker
 from .auth import execute_login
-from .capture import execute_video_task, fetch_dates_only
+from .capture import execute_video_task, fetch_dates_only, sanitize_filename
 from .ppt import PPTExtractor
 from .summary import AISummarizer
 
@@ -278,6 +278,131 @@ class CourseService:
             "status": "found",
             "course": course,
             "lesson": lesson,
+            "logs": logs,
+        }
+
+    def capture_course_lesson(
+        self,
+        *,
+        course_name: str,
+        teacher_name: str,
+        lesson_number: int,
+        need_subtitle: bool = True,
+        need_ppt: bool = False,
+        keep_media: bool = False,
+        asr_engine: str = "local",
+        model_path: str | None = None,
+        asr_api_key: str | None = None,
+        asr_model: str = "paraformer-realtime-v2",
+    ) -> dict[str, Any]:
+        course_name = _required(course_name, "courseName")
+        teacher_name = _required(teacher_name, "teacherName")
+        if lesson_number < 1:
+            raise ValueError("lessonNumber 必须大于 0")
+
+        worker = self._build_asr_worker(
+            engine=asr_engine,
+            model_path=model_path,
+            api_key=asr_api_key,
+            model=asr_model,
+        )
+        stop_event = threading.Event()
+
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            search_box = catalog.locator("input[placeholder*='课程名称']").first
+            search_box.fill(course_name)
+            catalog.locator("button.el-button--primary").first.click()
+            catalog.wait_for_url("**/#/advance-search", timeout=15000)
+            catalog.wait_for_timeout(2500)
+            courses = self._read_course_cards(catalog)
+
+            normalized_course = course_name.strip().casefold()
+            normalized_teacher = teacher_name.strip().casefold()
+            matches = [
+                course
+                for course in courses
+                if course["title"].strip().casefold() == normalized_course
+                and normalized_teacher
+                in [part.strip().casefold() for part in course["teacher"].split(",")]
+            ]
+            if not matches:
+                return {"status": "not_found", "candidates": courses, "logs": logs}
+            if len(matches) > 1:
+                return {"status": "ambiguous", "candidates": matches, "logs": logs}
+
+            course = matches[0]
+            card = catalog.locator(".lesson-card.card-item").nth(course["index"])
+            try:
+                with catalog.context.expect_page(timeout=10000) as page_info:
+                    card.locator(".img-top").click(no_wait_after=True)
+                detail_page = page_info.value
+            except PlaywrightTimeoutError:
+                detail_page = catalog.context.pages[-1]
+                if detail_page is catalog:
+                    raise RuntimeError("课程详情页未打开")
+
+            detail_page.locator(".list-item.student").first.wait_for(
+                state="visible", timeout=15000
+            )
+            lessons = self._read_lessons(detail_page)
+            lesson = next(
+                (item for item in lessons if item["sequence"] == lesson_number), None
+            )
+            if lesson is None:
+                return {
+                    "status": "lesson_not_found",
+                    "course": course,
+                    "lessonNumber": lesson_number,
+                    "availableLessons": lessons,
+                    "logs": logs,
+                }
+
+            logs.extend(
+                execute_video_task(
+                    detail_page,
+                    detail_page.url,
+                    worker,
+                    self.export_dir,
+                    stop_event,
+                    target_sequence=lesson_number,
+                    need_subtitle=need_subtitle,
+                    need_ppt=need_ppt,
+                    keep_media=keep_media,
+                )
+            )
+
+        date_key = lesson["date"].replace("-", "")
+        period_number = lesson["periodNumber"] or lesson_number
+        safe_course = sanitize_filename(course["title"])
+        safe_teacher = sanitize_filename(course["teacher"])
+        batch_name = f"{date_key}-{safe_teacher}"
+        task_name = f"{date_key}-{period_number}"
+        candidate_paths = [
+            self.export_dir / "subtitle" / safe_course / batch_name / f"{task_name}_transcript.txt",
+            self.export_dir / "media" / safe_course / batch_name / f"{task_name}.mp4",
+            self.export_dir / "media" / safe_course / batch_name / f"{task_name}.m4a",
+            self.export_dir / "media" / safe_course / batch_name / f"{task_name}_PPT.pdf",
+        ]
+        artifacts = [
+            {
+                "path": str(path.resolve()),
+                "size": path.stat().st_size,
+                "kind": (
+                    "transcript" if path.name.endswith("_transcript.txt")
+                    else "slides" if path.name.endswith("_PPT.pdf")
+                    else "media"
+                ),
+            }
+            for path in candidate_paths
+            if path.exists()
+        ]
+        return {
+            "status": "completed" if artifacts else "completed_without_artifact",
+            "course": course,
+            "lesson": lesson,
+            "artifacts": artifacts,
             "logs": logs,
         }
 
