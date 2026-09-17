@@ -30,11 +30,15 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
     if action == "health":
         return {"version": "0.2.0", "tools": [
-            "authorize", "list-dates", "capture-course", "transcribe-local", "transcribe-cloud",
+            "authorize", "list-courses", "search-courses", "list-dates", "capture-course", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
+    if action == "list-courses":
+        return _course_service(payload).list_courses()
+    if action == "search-courses":
+        return _course_service(payload).search_courses(payload["query"])
     if action == "list-dates":
         return _course_service(payload).list_dates()
     if action == "capture-course":

@@ -23,3 +23,4 @@ def test_cli_health_lists_agent_tools():
     result = dispatch({"action": "health", "payload": {}})
     assert "capture-course" in result["tools"]
     assert "transcribe-cloud" in result["tools"]
+    assert "search-courses" in result["tools"]

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .asr import CloudASRWorker, LocalASRWorker
 from .auth import execute_login
@@ -99,6 +100,80 @@ class CourseService:
             page.wait_for_load_state("load", timeout=15000)
             dates = fetch_dates_only(page)
         return {"dates": dates, "logs": logs}
+
+    def _open_course_catalog(self, portal_page):
+        """Navigate from the unified portal to the course replay catalog."""
+        if "jy-application-resourcemanage-ui" in portal_page.url:
+            catalog_page = portal_page
+        else:
+            entry = portal_page.locator(".app-item-hover-link").first
+            entry.wait_for(state="attached", timeout=15000)
+            try:
+                with portal_page.context.expect_page(timeout=10000) as page_info:
+                    entry.evaluate("element => element.click()")
+                catalog_page = page_info.value
+            except PlaywrightTimeoutError:
+                pages = portal_page.context.pages
+                catalog_page = pages[-1]
+                if catalog_page is portal_page:
+                    raise RuntimeError("云课堂入口未打开课程平台")
+
+        catalog_page.wait_for_load_state("domcontentloaded", timeout=15000)
+        replay_menu = catalog_page.locator(".el-menu-item", has_text="课程点播")
+        replay_menu.first.wait_for(state="visible", timeout=15000)
+        replay_menu.first.click()
+        catalog_page.wait_for_url("**/#/list-video", timeout=15000)
+        catalog_page.locator("input[placeholder*='课程名称']").wait_for(
+            state="visible", timeout=15000
+        )
+        return catalog_page
+
+    @staticmethod
+    def _read_course_cards(page) -> list[dict[str, Any]]:
+        cards = page.locator(".lesson-card.card-item")
+        courses: list[dict[str, Any]] = []
+        for index in range(cards.count()):
+            card = cards.nth(index)
+            lines = [line.strip() for line in card.inner_text().splitlines() if line.strip()]
+            title_node = card.locator(".course-title").first
+            title = title_node.get_attribute("title") or title_node.inner_text().strip()
+            courses.append(
+                {
+                    "index": index,
+                    "title": title,
+                    "semester": lines[2] if len(lines) > 2 else "",
+                    "teacher": lines[3] if len(lines) > 3 else "",
+                    "lessonCount": lines[4] if len(lines) > 4 else "",
+                    "playCount": lines[5] if len(lines) > 5 else "",
+                }
+            )
+        return courses
+
+    def list_courses(self) -> dict[str, Any]:
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            catalog.wait_for_timeout(2500)
+            courses = self._read_course_cards(catalog)
+        return {"count": len(courses), "courses": courses, "logs": logs}
+
+    def search_courses(self, query: str) -> dict[str, Any]:
+        query = _required(query, "query")
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            search_box = catalog.locator("input[placeholder*='课程名称']").first
+            search_box.fill(query)
+            catalog.locator("button.el-button--primary").first.click()
+            catalog.wait_for_url("**/#/advance-search", timeout=15000)
+            catalog.wait_for_timeout(2500)
+            courses = self._read_course_cards(catalog)
+        return {
+            "query": query,
+            "count": len(courses),
+            "courses": courses,
+            "logs": logs,
+        }
 
     def capture_course(
         self,

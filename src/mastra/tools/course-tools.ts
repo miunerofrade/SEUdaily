@@ -24,6 +24,24 @@ export const listCourseDatesTool = createTool({
   execute: async (context) => runPythonTool("list-dates", context),
 });
 
+export const listCoursesTool = createTool({
+  id: "list-courses",
+  description: "List courses currently visible in the authenticated course replay catalog.",
+  inputSchema: z.object(commonPortalFields),
+  execute: async (context) => runPythonTool("list-courses", context),
+});
+
+export const searchCoursesTool = createTool({
+  id: "search-courses",
+  description:
+    "Search the course replay catalog by course name, classroom, teacher, or course number.",
+  inputSchema: z.object({
+    ...commonPortalFields,
+    query: z.string().min(1).describe("Course name, classroom, teacher, or course number"),
+  }),
+  execute: async (context) => runPythonTool("search-courses", context),
+});
+
 export const captureCourseTool = createTool({
   id: "capture-course",
   description:

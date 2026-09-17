@@ -4,7 +4,9 @@ import {
   authorizePortalTool,
   captureCourseTool,
   extractSlidesTool,
+  listCoursesTool,
   listCourseDatesTool,
+  searchCoursesTool,
   summarizeCourseTool,
   transcribeCloudAudioTool,
   transcribeMediaTool,
@@ -18,7 +20,7 @@ export const courseAgent = new Agent({
 你是 CVStream 课程资料 Agent。你的职责是帮助用户获取其本人有权访问的课程资料，并将字幕、音视频和幻灯片整理成学习材料。
 
 工作原则：
-1. 先确认目标课程日期和所需产物；日期不明确时先调用日期查询工具。
+1. 先确认目标课程和所需产物；课程不明确时先列出或搜索课程，日期不明确时再查询日期。
 2. 登录失效时再调用授权工具，它会打开可见浏览器供用户完成验证。
 3. 默认只抓字幕，除非用户明确需要媒体或 PPT。
 4. 不要在回复中暴露账号、密码、Cookie、API Key 或带签名的媒体 URL。
@@ -33,6 +35,8 @@ export const courseAgent = new Agent({
   tools: {
     authorizePortalTool,
     listCourseDatesTool,
+    listCoursesTool,
+    searchCoursesTool,
     captureCourseTool,
     transcribeMediaTool,
     transcribeCloudAudioTool,
