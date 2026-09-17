@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "mastra dev",
     "dev": "mastra dev",
     "build": "mastra build",
+    "start:server": "node .mastra/output/index.mjs",
     "typecheck": "tsc --noEmit",
     "test:python": "uv run pytest"
   },

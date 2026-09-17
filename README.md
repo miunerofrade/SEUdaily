@@ -49,10 +49,28 @@ CVSTREAM_ASR_API_KEY=
 
 ## Development
 
-启动 Mastra Studio：
+首次安装依赖后，日常启动 Mastra Studio 和 Agent API：
+
+```bash
+npm start
+```
+
+启动完成后访问：
+
+- Studio Agent 页面：`http://localhost:4111/agents`
+- Agent API：`http://localhost:4111/api`
+
+`npm run dev` 与 `npm start` 等价，适合开发时使用：
 
 ```bash
 npm run dev
+```
+
+如需运行构建后的服务：
+
+```bash
+npm run build
+npm run start:server
 ```
 
 检查项目：
