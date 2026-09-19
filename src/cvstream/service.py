@@ -9,11 +9,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .asr import CloudASRWorker, LocalASRWorker
 from .auth import execute_login
+from .browser_runtime import browser_runtime
+from .cancellation import current_cancel_event
 from .capture import execute_video_task, fetch_dates_only, sanitize_filename
 from .ppt import PPTExtractor
 from .summary import AISummarizer
@@ -53,33 +54,22 @@ class CourseService:
 
     @contextmanager
     def _page(self, *, visible: bool = False):
-        with sync_playwright() as playwright:
-            args = ["--disable-blink-features=AutomationControlled"]
-            if visible:
-                args.extend(["--window-position=0,0", "--start-maximized"])
-            else:
-                # The target portal has historically rejected Chromium's true
-                # headless mode, so use an off-screen normal window.
-                args.extend(["--window-position=-32000,-32000", "--window-size=1920,1080"])
-
-            browser = playwright.chromium.launch(headless=False, args=args)
-            context = browser.new_context(
-                no_viewport=visible,
-                viewport=None if visible else {"width": 1920, "height": 1080},
-                user_agent=DEFAULT_USER_AGENT,
-                locale="zh-CN",
-                timezone_id="Asia/Shanghai",
-                permissions=["geolocation"],
-            )
-            page = context.new_page()
+        with browser_runtime().page(
+            "course-portal",
+            visible=visible,
+            context_options={
+                "no_viewport": visible,
+                "viewport": None if visible else {"width": 1920, "height": 1080},
+                "user_agent": DEFAULT_USER_AGENT,
+                "locale": "zh-CN",
+                "timezone_id": "Asia/Shanghai",
+                "permissions": ["geolocation"],
+            },
+        ) as page:
             page.add_init_script(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
-            try:
-                yield page
-            finally:
-                context.close()
-                browser.close()
+            yield page
 
     def _login(self, page) -> list[str]:
         return list(
@@ -152,15 +142,168 @@ class CourseService:
             )
         return courses
 
+    @staticmethod
+    def _normalize_semester(value: str) -> str:
+        normalized = value.strip().casefold()
+        aliases = (
+            ("暑期学校", "第1学期"),
+            ("暑校", "第1学期"),
+            ("暑期", "第1学期"),
+            ("秋季学期", "第2学期"),
+            ("秋季", "第2学期"),
+            ("春季学期", "第3学期"),
+            ("春季", "第3学期"),
+            ("第一学期", "第1学期"),
+            ("第二学期", "第2学期"),
+            ("第三学期", "第3学期"),
+        )
+        for alias, canonical in aliases:
+            normalized = normalized.replace(alias, canonical)
+        return re.sub(r"[\s_\-学年第期]+", "", normalized)
+
+    @classmethod
+    def _filter_courses_by_semester(
+        cls, courses: list[dict[str, Any]], semester: str | None
+    ) -> list[dict[str, Any]]:
+        requested = (semester or "").strip()
+        if not requested or requested.casefold() in {"current", "当前", "当前学期"}:
+            return courses
+        normalized_requested = cls._normalize_semester(requested)
+        return [
+            course
+            for course in courses
+            if cls._normalize_semester(str(course.get("semester") or ""))
+            == normalized_requested
+        ]
+
+    @classmethod
+    def _match_semester_option(
+        cls, options: list[str], semester: str
+    ) -> str | None:
+        normalized = cls._normalize_semester(semester)
+        matches = [
+            option
+            for option in options
+            if cls._normalize_semester(option) == normalized
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @classmethod
+    def _select_search_filters(
+        cls, page, semester: str | None
+    ) -> dict[str, Any]:
+        status_group = page.locator(".search-bar-item").filter(
+            has_text="课程状态"
+        ).first
+        on_demand = status_group.locator(".options-item").filter(
+            has_text="点播课程"
+        ).first
+        if on_demand.count() and "active" not in (on_demand.get_attribute("class") or ""):
+            on_demand.click()
+            page.wait_for_timeout(1000)
+
+        semester_group = page.locator(".search-bar-item.xmxq").first
+        options = semester_group.locator(".options-item")
+        available = [
+            options.nth(index).inner_text().strip()
+            for index in range(options.count())
+            if options.nth(index).inner_text().strip()
+        ]
+        active = semester_group.locator(".options-item.active").first
+        selected = active.inner_text().strip() if active.count() else None
+        requested = (semester or "").strip()
+        if not requested or requested.casefold() in {"current", "当前", "当前学期"}:
+            return {
+                "found": True,
+                "requestedSemester": semester,
+                "selectedSemester": selected,
+                "availableSemesters": available,
+            }
+
+        matched = cls._match_semester_option(available, requested)
+        if matched is None:
+            return {
+                "found": False,
+                "requestedSemester": semester,
+                "selectedSemester": selected,
+                "availableSemesters": available,
+            }
+
+        target = semester_group.locator(".options-item").filter(
+            has_text=matched
+        ).first
+        if not target.is_visible():
+            show_all = semester_group.locator(".show-all").first
+            if show_all.count():
+                show_all.click()
+        if "active" not in (target.get_attribute("class") or ""):
+            cards = page.locator(".lesson-card.card-item")
+            previous_signature = "\n---\n".join(
+                cards.nth(index).inner_text() for index in range(cards.count())
+            )
+            target.click()
+            try:
+                page.wait_for_function(
+                    """
+                    previous => {
+                      const cards = [...document.querySelectorAll('.lesson-card.card-item')];
+                      const separator = String.fromCharCode(10) + '---' + String.fromCharCode(10);
+                      const signature = cards.map(card => card.innerText).join(separator);
+                      const body = document.body.innerText || '';
+                      return (signature.length > 0 && signature !== previous)
+                        || body.includes('当前没有课程点播');
+                    }
+                    """,
+                    arg=previous_signature,
+                    timeout=15000,
+                )
+            except PlaywrightTimeoutError:
+                pass
+            page.wait_for_timeout(500)
+        return {
+            "found": True,
+            "requestedSemester": semester,
+            "selectedSemester": matched,
+            "availableSemesters": available,
+        }
+
+    @staticmethod
+    def _available_semesters(courses: list[dict[str, Any]]) -> list[str]:
+        return list(
+            dict.fromkeys(
+                str(course.get("semester") or "").strip()
+                for course in courses
+                if str(course.get("semester") or "").strip()
+            )
+        )
+
+    @staticmethod
+    def _course_not_found_hint() -> str:
+        return (
+            "课程可能位于其他学期；也可能用户并不要求抓取课表内课程，"
+            "此时应改用 source=manual，并根据用户描述填写课程名、教师、节次和可选学期。"
+        )
+
     def list_courses(self) -> dict[str, Any]:
         with self._page() as page:
             logs = self._login(page)
             catalog = self._open_course_catalog(page)
             catalog.wait_for_timeout(2500)
             courses = self._read_course_cards(catalog)
-        return {"count": len(courses), "courses": courses, "logs": logs}
+        result = {
+            "status": "completed" if courses else "empty",
+            "availableSemesters": self._available_semesters(courses),
+            "count": len(courses),
+            "courses": courses,
+            "logs": logs,
+        }
+        if not courses:
+            result["hint"] = self._course_not_found_hint()
+        return result
 
-    def search_courses(self, query: str) -> dict[str, Any]:
+    def search_courses(
+        self, query: str, semester: str | None = None
+    ) -> dict[str, Any]:
         query = _required(query, "query")
         with self._page() as page:
             logs = self._login(page)
@@ -170,13 +313,24 @@ class CourseService:
             catalog.locator("button.el-button--primary").first.click()
             catalog.wait_for_url("**/#/advance-search", timeout=15000)
             catalog.wait_for_timeout(2500)
-            courses = self._read_course_cards(catalog)
-        return {
+            semester_info = self._select_search_filters(catalog, semester)
+            if semester_info["found"]:
+                courses = self._read_course_cards(catalog)
+                if semester:
+                    courses = self._filter_courses_by_semester(courses, semester)
+            else:
+                courses = []
+        result = {
+            "status": "completed" if courses else "empty",
             "query": query,
+            **semester_info,
             "count": len(courses),
             "courses": courses,
             "logs": logs,
         }
+        if not courses:
+            result["hint"] = self._course_not_found_hint()
+        return result
 
     @staticmethod
     def _read_lessons(page) -> list[dict[str, Any]]:
@@ -290,13 +444,16 @@ class CourseService:
             }
         return {"status": "found", "session": matching[0]}
 
-    @staticmethod
+    @classmethod
     def _exact_course_matches(
-        courses: list[dict[str, Any]], course_name: str, teacher_name: str
+        cls,
+        courses: list[dict[str, Any]],
+        course_name: str,
+        teacher_name: str,
     ) -> list[dict[str, Any]]:
         normalized_course = course_name.casefold()
         normalized_teacher = teacher_name.casefold()
-        return [
+        matches = [
             course
             for course in courses
             if course["title"].strip().casefold() == normalized_course
@@ -306,6 +463,7 @@ class CourseService:
                 for part in re.split(r"[,，、]", course["teacher"])
             ]
         ]
+        return matches
 
     @staticmethod
     def _open_course_detail(catalog, course: dict[str, Any]):
@@ -335,13 +493,28 @@ class CourseService:
         teacher_name: str,
         weekly_periods: list[int],
         course_date: str | None,
+        semester: str | None = None,
     ) -> dict[str, Any]:
         search_box = catalog.locator("input[placeholder*='课程名称']").first
         search_box.fill(course_name)
         catalog.locator("button.el-button--primary").first.click()
         catalog.wait_for_url("**/#/advance-search", timeout=15000)
         catalog.wait_for_timeout(2500)
+        semester_info = self._select_search_filters(catalog, semester)
+        if not semester_info["found"]:
+            return {
+                "status": "course_not_found",
+                "courseName": course_name,
+                "teacherName": teacher_name,
+                "semester": semester,
+                "weeklyPeriods": weekly_periods,
+                **semester_info,
+                "candidates": [],
+                "hint": self._course_not_found_hint(),
+            }
         courses = self._read_course_cards(catalog)
+        if semester:
+            courses = self._filter_courses_by_semester(courses, semester)
         matches = self._exact_course_matches(courses, course_name, teacher_name)
 
         if not matches:
@@ -349,8 +522,11 @@ class CourseService:
                 "status": "course_not_found",
                 "courseName": course_name,
                 "teacherName": teacher_name,
+                "semester": semester,
                 "weeklyPeriods": weekly_periods,
                 "candidates": courses,
+                **semester_info,
+                "hint": self._course_not_found_hint(),
             }
 
         resolved: list[dict[str, Any]] = []
@@ -381,6 +557,8 @@ class CourseService:
                 "weeklyPeriods": self._normalize_periods(weekly_periods),
                 "requestedDate": course_date,
                 "candidates": rejected,
+                **semester_info,
+                "hint": self._course_not_found_hint(),
             }
         if len(resolved) > 1:
             for item in resolved:
@@ -405,6 +583,7 @@ class CourseService:
         teacher_name: str,
         weekly_periods: list[int],
         course_date: str | None = None,
+        semester: str | None = None,
     ) -> dict[str, Any]:
         course_name = _required(course_name, "courseName")
         teacher_name = _required(teacher_name, "teacherName")
@@ -419,6 +598,7 @@ class CourseService:
                 teacher_name=teacher_name,
                 weekly_periods=periods,
                 course_date=course_date,
+                semester=semester,
             )
             result.pop("detailPage", None)
         return {**result, "logs": logs}
@@ -430,6 +610,7 @@ class CourseService:
         teacher_name: str,
         weekly_periods: list[int],
         course_date: str | None = None,
+        semester: str | None = None,
         need_subtitle: bool = True,
         need_ppt: bool = False,
         keep_media: bool = False,
@@ -457,6 +638,7 @@ class CourseService:
                 teacher_name=teacher_name,
                 weekly_periods=periods,
                 course_date=course_date,
+                semester=semester,
             )
             if result["status"] != "found":
                 return {**result, "logs": logs}
@@ -470,7 +652,7 @@ class CourseService:
                     detail_page.url,
                     worker,
                     self.export_dir,
-                    threading.Event(),
+                    current_cancel_event(),
                     target_date=session["date"],
                     need_subtitle=need_subtitle,
                     need_ppt=need_ppt,
@@ -538,6 +720,8 @@ class CourseService:
             and not capture_options.get("keep_media", False)
         )
         effective_concurrency = min(max_concurrency, 2 if subtitle_only else 1)
+        if os.getenv("CVSTREAM_SHARED_BROWSER") == "1":
+            effective_concurrency = 1
 
         results: list[dict[str, Any] | None] = [None] * len(sessions)
 
@@ -550,27 +734,44 @@ class CourseService:
                 **capture_options,
             )
 
-        with ThreadPoolExecutor(max_workers=effective_concurrency) as executor:
-            futures = [
-                executor.submit(run_one, index, session)
-                for index, session in enumerate(sessions)
-            ]
-            for future in as_completed(futures):
+        if effective_concurrency == 1:
+            for index, session in enumerate(sessions):
                 try:
-                    index, result = future.result()
+                    _, result = run_one(index, session)
                 except Exception as exc:
-                    index = futures.index(future)
                     result = {
                         "status": "failed",
                         "error": str(exc),
                         "errorType": type(exc).__name__,
                     }
                 results[index] = result
+        else:
+            with ThreadPoolExecutor(max_workers=effective_concurrency) as executor:
+                futures = [
+                    executor.submit(run_one, index, session)
+                    for index, session in enumerate(sessions)
+                ]
+                for future in as_completed(futures):
+                    try:
+                        index, result = future.result()
+                    except Exception as exc:
+                        index = futures.index(future)
+                        result = {
+                            "status": "failed",
+                            "error": str(exc),
+                            "errorType": type(exc).__name__,
+                        }
+                    results[index] = result
 
         completed = sum(
             result is not None and result.get("status", "").startswith("completed")
             for result in results
         )
+        warnings: list[str] = []
+        if effective_concurrency < max_concurrency:
+            warnings.append(
+                "常驻共享浏览器使用同步 Playwright，本批次已自动串行执行以保证线程安全。"
+            )
         return {
             "status": "completed" if completed == len(results) else "partial",
             "count": len(results),
@@ -578,6 +779,7 @@ class CourseService:
             "requestedConcurrency": max_concurrency,
             "effectiveConcurrency": effective_concurrency,
             "results": results,
+            "warnings": warnings,
         }
 
     def find_course_lesson(
@@ -686,7 +888,7 @@ class CourseService:
             api_key=asr_api_key,
             model=asr_model,
         )
-        stop_event = threading.Event()
+        stop_event = current_cancel_event()
 
         with self._page() as page:
             logs = self._login(page)
@@ -804,7 +1006,7 @@ class CourseService:
             api_key=asr_api_key,
             model=asr_model,
         )
-        stop_event = threading.Event()
+        stop_event = current_cancel_event()
         with self._page() as page:
             logs = self._login(page)
             page.wait_for_load_state("load", timeout=15000)
@@ -950,4 +1152,5 @@ def summarize_course(
         "sources": sources,
         "model": summarizer.model_name,
         "notePath": str(output_path.resolve()),
+        "warnings": summarizer.last_warnings,
     }

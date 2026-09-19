@@ -4,7 +4,6 @@ __pycache__/
 .obsidian/
 .python-version
 .streamlit/
-uv.lock
 
 # --- 虚拟环境 ---
 .venv/
@@ -36,3 +35,5 @@ fmp42txt-novad.py
 catch.py
 PROBLEMS.md
 cookies.json
+src/mastra/public/temp_workspace/
+tmp/

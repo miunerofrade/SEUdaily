@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -16,8 +17,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, unquote, urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
+from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
 
 _ARTICLE_PATH = re.compile(r"/(\d{4})/(\d{2})(\d{2})/c\d+a(\d+)/page\.htm$")
@@ -27,6 +28,7 @@ _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link"
 JWC_CATEGORIES = {
     "news": ("最新动态", "/zxdt/list.htm"),
     "academic": ("教务信息", "/jwxx/list.htm"),
+    "lectures": ("文化素质教育（讲座预告）", "/cbxx/list.htm"),
     "student_status": ("学籍管理", "/xjgl/list.htm"),
     "practice": ("实践教学", "/sjjx/list.htm"),
     "teaching_research": ("教学研究", "/jxyj/list.htm"),
@@ -54,8 +56,6 @@ class WebplusSiteConfig:
     title_classes: frozenset[str]
     date_classes: frozenset[str]
     content_classes: frozenset[str]
-    route_rules: tuple[tuple[str, str], ...]
-    default_categories: tuple[str, ...]
 
 
 JWC_CONFIG = WebplusSiteConfig(
@@ -65,14 +65,6 @@ JWC_CONFIG = WebplusSiteConfig(
     title_classes=frozenset({"Article_Title"}),
     date_classes=frozenset({"Article_PublishDate"}),
     content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
-    route_rules=(
-        ("news", "新闻 动态 工作安排 暑期 教务处"),
-        ("student_status", "学籍 转专业 推免 毕业 学位 降级 选拔"),
-        ("practice", "实践 实习 实验 竞赛 毕设"),
-        ("teaching_research", "教研 教材 教改 课程建设 教学成果"),
-        ("downloads", "下载 表格 模板 申请表"),
-    ),
-    default_categories=("academic",),
 )
 
 CSE_CONFIG = WebplusSiteConfig(
@@ -82,18 +74,6 @@ CSE_CONFIG = WebplusSiteConfig(
     title_classes=frozenset({"arti_title", "Article_Title"}),
     date_classes=frozenset({"arti_update", "Article_PublishDate"}),
     content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
-    route_rules=(
-        ("undergraduate_notices", "本科 推免 保研 转专业 分流 选课 公示 免试"),
-        ("teaching", "教学 课程 培养 教务 考试"),
-        ("student_affairs", "学生 奖学金 助学 活动 评优 党建"),
-        ("employment", "就业 招聘 实习 宣讲"),
-        ("research", "科研 项目 基金 成果"),
-        ("academic_events", "学术 讲座 报告 论坛 会议"),
-        ("recruitment", "教师招聘 人才招聘 博士后"),
-        ("undergraduate_downloads", "本科下载 本科表格 本科模板 本科申请表"),
-        ("graduate_downloads", "研究生下载 研究生表格 研究生模板 研究生申请表"),
-    ),
-    default_categories=("undergraduate_notices", "student_affairs"),
 )
 
 
@@ -226,6 +206,7 @@ class JwcService:
         self.articles_dir = self.cache_dir / "articles"
         self.versions_dir = self.cache_dir / "versions"
         self.queue_file = self.cache_dir / "pending-details.json"
+        self.failures_file = self.cache_dir / "detail-failures.json"
         self.queue_lock_file = self.cache_dir / "pending-details.lock"
         self.worker_lock_file = self.cache_dir / "detail-worker.lock"
 
@@ -233,50 +214,43 @@ class JwcService:
         self,
         query: str,
         *,
-        keywords: list[str] | None = None,
         categories: list[str] | None = None,
+        paths: list[str] | None = None,
         freshness: str = "balanced",
         time_scope: str = "any",
         recent_days: int = 7,
         limit: int = 5,
     ) -> dict[str, Any]:
-        if freshness not in {"latest", "balanced", "archive", "cache_only"}:
-            raise ValueError("freshness 必须是 latest、balanced、archive 或 cache_only")
-        if time_scope not in {"latest", "recent", "any"}:
-            raise ValueError("timeScope 必须是 latest、recent 或 any")
-        if not 1 <= recent_days <= 3650:
-            raise ValueError("recentDays 必须在 1 到 3650 之间")
-        terms = self._terms(query, keywords)
-        selected = self._categories(categories, terms)
+        selected = self._categories(categories, paths, allow_all=True)
+        remote_by_url: dict[str, dict[str, Any]] = {}
+        for category in selected or [None]:
+            for item in self._search_remote(query, category):
+                if category is not None:
+                    item.setdefault("_sourceCategory", category)
+                remote_by_url.setdefault(item["url"], item)
         state = self._load_index()
-        hits = self._rank(state["articles"], terms, selected, time_scope=time_scope, recent_days=recent_days)
-        refresh_reasons: list[str] = []
-
-        warnings: list[str] = []
-        network_checked = False
-        if freshness != "cache_only":
-            refresh_reasons.append("validate_relevant_lists")
-            try:
-                self._refresh_index(state, selected, pages=1)
-                network_checked = True
-                hits = self._rank(
-                    state["articles"], terms, selected,
-                    time_scope=time_scope, recent_days=recent_days,
-                )
-                if freshness == "archive" and not hits:
-                    refresh_reasons.append("archive_expand_after_miss")
-                    self._refresh_index(state, selected, pages=3)
-                    hits = self._rank(
-                        state["articles"], terms, selected,
-                        time_scope=time_scope, recent_days=recent_days,
-                    )
-            except Exception as exc:  # Keep stale cache useful during site outages.
-                warnings.append(f"远端刷新失败，返回本地结果: {exc}")
-
-        chosen = hits[:1] if time_scope == "latest" else hits[:limit]
+        articles = {item["url"]: item for item in state["articles"]}
+        chosen: list[dict[str, Any]] = []
+        for item in list(remote_by_url.values())[:limit]:
+            source_category = item.get("_sourceCategory")
+            stored_item = {
+                key: value for key, value in item.items()
+                if not key.startswith("_")
+            }
+            article = articles.setdefault(
+                item["url"],
+                {"id": item["id"], "url": item["url"], "firstSeenAt": _iso_now()},
+            )
+            article.update(stored_item)
+            article["category"] = self._category_for_label(
+                item.get("categoryLabel", ""), selected, fallback=source_category
+            )
+            chosen.append(article)
+        state["articles"] = list(articles.values())
         self._save_index(state)
+        warnings: list[str] = []
         queued_ids: list[str] = []
-        if freshness != "cache_only" and chosen:
+        if chosen:
             queued_ids = self._enqueue_details(chosen)
             if self.background_sync:
                 try:
@@ -292,14 +266,16 @@ class JwcService:
         return {
             "status": "completed",
             "query": query,
-            "freshness": freshness,
-            "timeScope": time_scope,
-            "recentDays": recent_days if time_scope == "recent" else None,
-            "freshnessGuaranteed": network_checked and not warnings,
-            "source": "network_validated" if network_checked else "local_cache",
-            "networkChecked": network_checked,
-            "refreshReasons": refresh_reasons,
+            "freshness": "remote_search",
+            "timeScope": "any",
+            "recentDays": None,
+            "freshnessGuaranteed": True,
+            "source": "site_search",
+            "networkChecked": True,
+            "refreshReasons": ["site_search_api"],
             "categories": selected,
+            "paths": [self.config.categories[key][1] for key in selected],
+            "searchScope": "site" if not selected else "categories",
             "results": results,
             "backgroundSync": {
                 "queuedIds": queued_ids,
@@ -313,6 +289,73 @@ class JwcService:
                     for key in selected
                 },
             },
+        }
+
+    def list_articles(
+        self,
+        *,
+        categories: list[str] | None = None,
+        paths: list[str] | None = None,
+        freshness: str = "latest",
+        time_scope: str = "any",
+        recent_days: int = 7,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        if freshness not in {"latest", "balanced", "archive", "cache_only"}:
+            raise ValueError("freshness 必须是 latest、balanced、archive 或 cache_only")
+        if time_scope not in {"latest", "recent", "any"}:
+            raise ValueError("timeScope 必须是 latest、recent 或 any")
+        if not 1 <= recent_days <= 3650:
+            raise ValueError("recentDays 必须在 1 到 3650 之间")
+        selected = self._categories(categories, paths)
+        state = self._load_index()
+        network_checked = False
+        warnings: list[str] = []
+        if freshness != "cache_only":
+            try:
+                self._refresh_index(state, selected, pages=3 if freshness == "archive" else 1)
+                network_checked = True
+            except Exception as exc:
+                warnings.append(f"远端刷新失败，返回本地结果: {exc}")
+        cutoff = (_now() - timedelta(days=recent_days)).date().isoformat()
+        articles = [
+            item for item in state["articles"]
+            if item.get("category") in selected
+            and (time_scope != "recent" or item.get("publishedAt", "") >= cutoff)
+        ]
+        articles.sort(key=lambda item: item.get("publishedAt", ""), reverse=True)
+        chosen = articles[:limit]
+        self._save_index(state)
+        queued_ids: list[str] = []
+        if freshness != "cache_only" and chosen:
+            queued_ids = self._enqueue_details(chosen)
+            if self.background_sync:
+                try:
+                    self._start_worker()
+                except Exception as exc:
+                    warnings.append(f"后台详情同步启动失败: {exc}")
+        return {
+            "status": "completed",
+            "freshness": freshness,
+            "timeScope": time_scope,
+            "recentDays": recent_days if time_scope == "recent" else None,
+            "freshnessGuaranteed": network_checked and not warnings,
+            "source": "network_validated" if network_checked else "local_cache",
+            "networkChecked": network_checked,
+            "categories": selected,
+            "paths": [self.config.categories[key][1] for key in selected],
+            "results": [
+                {
+                    **self._public_article(item),
+                    "detailStatus": "cached" if item.get("contentHash") else "queued",
+                }
+                for item in chosen
+            ],
+            "backgroundSync": {
+                "queuedIds": queued_ids,
+                "status": "scheduled" if queued_ids else "not_needed",
+            },
+            "warnings": warnings,
         }
 
     def get_article(self, article_id: str, *, refresh: bool = True) -> dict[str, Any]:
@@ -348,7 +391,7 @@ class JwcService:
             if not jobs:
                 return {"status": "empty", "completed": 0}
             completed: set[str] = set()
-            errors: list[str] = []
+            failures: list[dict[str, str]] = []
             with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs))) as executor:
                 futures = {
                     executor.submit(self._refresh_article, dict(job)): job
@@ -360,14 +403,22 @@ class JwcService:
                         future.result()
                         completed.add(job["id"])
                     except Exception as exc:
-                        errors.append(f"{job['id']}: {exc}")
+                        failures.append({
+                            "id": job["id"],
+                            "url": job.get("url", ""),
+                            "error": str(exc),
+                            "failedAt": _iso_now(),
+                        })
+            attempted = {job["id"] for job in jobs}
             with self._queue_lock():
                 current = self._read_queue()
-                self._write_queue([job for job in current if job.get("id") not in completed])
+                self._write_queue([job for job in current if job.get("id") not in attempted])
+            self._update_failures(completed, failures)
             return {
-                "status": "completed" if not errors else "partial",
+                "status": "completed" if not failures else "partial",
                 "completed": len(completed),
-                "errors": errors,
+                "failed": len(failures),
+                "errors": [f"{item['id']}: {item['error']}" for item in failures],
             }
         finally:
             self.worker_lock_file.unlink(missing_ok=True)
@@ -381,6 +432,7 @@ class JwcService:
                     key: article.get(key)
                     for key in ("id", "url", "title", "publishedAt", "category", "categoryLabel")
                 }
+                existing[article["id"]]["url"] = self._normalize_url(article["url"])
             self._write_queue(list(existing.values()))
         return queued_ids
 
@@ -401,7 +453,6 @@ class JwcService:
         if os.name == "nt":
             creationflags = (
                 subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.DETACHED_PROCESS
                 | subprocess.CREATE_NO_WINDOW
             )
         subprocess.Popen(
@@ -438,12 +489,40 @@ class JwcService:
     def _read_queue(self) -> list[dict[str, Any]]:
         if not self.queue_file.exists():
             return []
-        return json.loads(self.queue_file.read_text(encoding="utf-8"))
+        jobs = json.loads(self.queue_file.read_text(encoding="utf-8"))
+        for job in jobs:
+            if job.get("url"):
+                job["url"] = self._normalize_url(job["url"])
+        return jobs
 
     def _write_queue(self, jobs: list[dict[str, Any]]) -> None:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         temp = self.queue_file.with_suffix(".tmp")
         temp.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(self.queue_file)
+
+    def _update_failures(
+        self,
+        completed: set[str],
+        failures: list[dict[str, str]],
+    ) -> None:
+        existing: dict[str, dict[str, str]] = {}
+        if self.failures_file.exists():
+            existing = {
+                item["id"]: item
+                for item in json.loads(self.failures_file.read_text(encoding="utf-8"))
+            }
+        for article_id in completed:
+            existing.pop(article_id, None)
+        for failure in failures:
+            existing[failure["id"]] = failure
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        temp = self.failures_file.with_suffix(".tmp")
+        temp.write_text(
+            json.dumps(list(existing.values()), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temp.replace(self.failures_file)
 
     def _load_index(self) -> dict[str, Any]:
         if not self.index_file.exists():
@@ -455,6 +534,7 @@ class JwcService:
         data.setdefault("articles", [])
         normalized: dict[str, dict[str, Any]] = {}
         for article in data["articles"]:
+            article["url"] = self._normalize_url(article["url"])
             old_id = article.get("id", "")
             new_id = _article_id(article["url"], self.config.id_prefix)
             article["id"] = new_id
@@ -542,13 +622,14 @@ class JwcService:
                 parser = _PageParser(response["url"], self.config)
                 parser.feed(response["html"])
                 for link in parser.anchors:
-                    match = _ARTICLE_PATH.search(urlparse(link["href"]).path)
+                    link_url = self._normalize_url(link["href"])
+                    match = _ARTICLE_PATH.search(urlparse(link_url).path)
                     title = link["text"]
                     if not match or not title:
                         continue
-                    item = articles.setdefault(link["href"], {
-                        "id": _article_id(link["href"], self.config.id_prefix),
-                        "url": link["href"],
+                    item = articles.setdefault(link_url, {
+                        "id": _article_id(link_url, self.config.id_prefix),
+                        "url": link_url,
                         "firstSeenAt": _iso_now(),
                     })
                     item.update({
@@ -562,6 +643,7 @@ class JwcService:
         state["articles"] = list(articles.values())
 
     def _refresh_article(self, article: dict[str, Any]) -> bool:
+        article["url"] = self._normalize_url(article["url"])
         detail_file = self.articles_dir / f"{article['id']}.json"
         if detail_file.exists():
             cached = json.loads(detail_file.read_text(encoding="utf-8"))
@@ -633,56 +715,122 @@ class JwcService:
                 )
         return changed
 
-    @staticmethod
-    def _terms(query: str, keywords: list[str] | None) -> list[str]:
-        terms = [_clean(query), *[_clean(item) for item in keywords or []]]
-        return list(dict.fromkeys(item.casefold() for item in terms if item))
-
-    def _categories(self, categories: list[str] | None, terms: list[str]) -> list[str]:
-        requested = categories or ["auto"]
-        invalid = set(requested) - {*self.config.categories, "auto"}
+    def _categories(
+        self,
+        categories: list[str] | None,
+        paths: list[str] | None,
+        *,
+        allow_all: bool = False,
+    ) -> list[str]:
+        requested = list(categories or [])
+        invalid = set(requested) - set(self.config.categories)
         if invalid:
-            raise ValueError(f"未知教务处栏目: {', '.join(sorted(invalid))}")
-        if "auto" not in requested:
-            return list(dict.fromkeys(requested))
-        text = " ".join(terms)
-        routed: list[str] = []
-        for category, words in self.config.route_rules:
-            if any(word in text for word in words.split()):
-                routed.append(category)
-        return routed[:2] or list(self.config.default_categories)
+            raise ValueError(f"未知栏目: {', '.join(sorted(invalid))}")
+        if paths:
+            path_to_category = {
+                path: category for category, (_, path) in self.config.categories.items()
+            }
+            unknown_paths = [path for path in paths if path not in path_to_category]
+            if unknown_paths:
+                raise ValueError(f"未知栏目路径: {', '.join(unknown_paths)}")
+            requested.extend(path_to_category[path] for path in paths)
+        if not requested and allow_all:
+            return []
+        if not requested:
+            raise ValueError("必须显式提供 categories 或 paths，禁止自动栏目路由")
+        return list(dict.fromkeys(requested))
 
-    @staticmethod
-    def _rank(
-        articles: list[dict[str, Any]], terms: list[str], categories: list[str],
-        *, time_scope: str, recent_days: int,
-    ) -> list[dict[str, Any]]:
-        ranked: list[tuple[int, str, dict[str, Any]]] = []
-        cutoff = (_now() - timedelta(days=recent_days)).date().isoformat()
-        for article in articles:
-            if article.get("category") not in categories:
+    def _category_for_label(
+        self,
+        label: str,
+        selected: list[str],
+        *,
+        fallback: str | None = None,
+    ) -> str:
+        if not selected:
+            return label or "site_search"
+        for category in selected:
+            if self.config.categories[category][0] == label:
+                return category
+        return fallback if fallback in selected else selected[0]
+
+    def _normalize_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        base = urlparse(self.base_url)
+        if parsed.scheme == "http" and parsed.hostname == base.hostname and base.scheme == "https":
+            return parsed._replace(scheme="https", netloc=base.netloc).geturl()
+        return url
+
+    def _search_remote(self, query: str, category: str | None) -> list[dict[str, Any]]:
+        list_url = (
+            urljoin(self.base_url, self.config.categories[category][1])
+            if category is not None
+            else f"{self.base_url}/"
+        )
+        opener = build_opener(HTTPCookieProcessor())
+        headers = {"User-Agent": "Mozilla/5.0 (CVStream)", "Referer": list_url}
+        with opener.open(Request(list_url, headers=headers), timeout=self.timeout_seconds) as response:
+            encoding = response.headers.get_content_charset() or "utf-8"
+            listing_html = response.read().decode(encoding, errors="replace")
+        search_path_match = re.search(r'id="securl" value="([^"]+)"', listing_html)
+        if not search_path_match:
+            raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
+        search_page = urljoin(list_url, search_path_match.group(1))
+        with opener.open(Request(search_page, headers=headers), timeout=self.timeout_seconds) as response:
+            encoding = response.headers.get_content_charset() or "utf-8"
+            search_html = response.read().decode(encoding, errors="replace")
+        endpoint_match = re.search(r"url:'([^']*searchCon/create\.rst\?[^']+)'", search_html)
+        if not endpoint_match:
+            raise RuntimeError(f"无法解析站内搜索接口: {search_page}")
+        endpoint = urljoin(search_page, endpoint_match.group(1))
+        infos = [
+            {"field": "pageIndex", "value": 1},
+            {"field": "group", "value": 0},
+            {"field": "searchType", "value": ""},
+            {"field": "keyword", "value": query},
+            {"field": "recommend", "value": 1},
+            *({"field": field, "value": ""} for field in (4, 5, 6, 7)),
+        ]
+        encoded = base64.b64encode(
+            json.dumps(infos, ensure_ascii=False, separators=(",", ":")).encode()
+        ).decode()
+        request = Request(
+            f"{endpoint}&tt={time.time()}",
+            data=urlencode({"searchInfo": encoded}).encode(),
+            headers={
+                **headers,
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+            },
+            method="POST",
+        )
+        with opener.open(request, timeout=self.timeout_seconds) as response:
+            encoding = response.headers.get_content_charset() or "utf-8"
+            payload = json.loads(response.read().decode(encoding, errors="replace"))
+        return self._parse_search_results(payload.get("data", ""))
+
+    def _parse_search_results(self, html: str) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        blocks = re.findall(r'<div class="result_item clearfix">(.*?)(?=<div class="result_item clearfix">|$)', html, re.S)
+        for block in blocks:
+            article_id = re.search(r'name="id" value="(\d+)"', block)
+            link = re.search(r'<h3 class="item_title">\s*<a href=[\'\"]([^\'\"]+)', block)
+            title = re.search(r'<h3 class="item_title">.*?>(.*?)</a>', block, re.S)
+            date = re.search(r'发布时间\s*[:：]\s*(\d{4}-\d{2}-\d{2})', block)
+            category = re.search(r'目录\s*[:：]\s*([^<]+)', block)
+            if not article_id or not link or not title:
                 continue
-            if time_scope == "recent" and article.get("publishedAt", "") < cutoff:
-                continue
-            title = article.get("title", "").casefold()
-            content = article.get("content", "").casefold()
-            score = 0
-            for term in terms:
-                if term in title:
-                    score += 20
-                elif term in content:
-                    score += 6
-                else:
-                    parts = [part for part in re.split(r"[\s，。；、]+", term) if len(part) >= 2]
-                    score += sum(4 for part in parts if part in title)
-                    score += sum(1 for part in parts if part in content)
-            if score:
-                ranked.append((score, article.get("publishedAt", ""), article))
-        if time_scope == "latest":
-            ranked.sort(key=lambda item: (item[1], item[0]), reverse=True)
-        else:
-            ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return [item[2] for item in ranked]
+            result_url = self._normalize_url(urljoin(self.base_url, link.group(1)))
+            results.append({
+                "id": f"{self.config.id_prefix}-{article_id.group(1)}",
+                "url": result_url,
+                "title": _clean(re.sub(r"<[^>]+>", "", title.group(1))),
+                "publishedAt": date.group(1) if date else "",
+                "categoryLabel": _clean(category.group(1)) if category else "",
+                "firstSeenAt": _iso_now(),
+                "lastSeenAt": _iso_now(),
+            })
+        return results
 
     @staticmethod
     def _public_article(article: dict[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 [project]
 name = "cvstream-agent-core"
-version = "0.3.0"
+version = "1.0.0"
 description = "Python tool runtime for the CVStream Mastra agent"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 cvstream-tool = "cvstream.cli:main"
+cvstream-worker = "cvstream.worker:main"
 
 [build-system]
 requires = ["hatchling"]

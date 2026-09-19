@@ -1,24 +1,47 @@
 {
   "name": "cvstream-agent",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
+  "packageManager": "npm@11.9.0",
   "type": "module",
   "scripts": {
     "start": "mastra dev",
     "dev": "mastra dev",
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:all": "concurrently -k -n agent,web -c blue,green \"npm:start\" \"npm:dev:web\"",
     "build": "mastra build",
+    "build:web": "vite build --config apps/web/vite.config.ts",
     "start:server": "node .mastra/output/index.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
     "test:python": "uv run pytest"
   },
   "dependencies": {
     "@mastra/core": "^1.67.0",
+    "@mastra/libsql": "1.23.0",
+    "@mastra/mcp": "1.18.0",
+    "@mastra/memory": "1.30.0",
+    "@playwright/mcp": "0.0.81",
+    "dotenv": "16.6.1",
+    "highlight.js": "^11.12.0",
+    "katex": "^0.16.47",
+    "lucide-react": "^0.544.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "concurrently": "^9.2.1",
     "mastra": "^1.30.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite": "^7.1.7"
   },
   "engines": {
     "node": ">=22.13.0"

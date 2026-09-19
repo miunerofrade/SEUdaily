@@ -64,6 +64,31 @@ def test_select_session_requires_requested_date_to_match_weekly_periods():
     assert result["availableSession"]["periodNumbers"] == [3, 4]
 
 
+def test_course_search_matches_real_academic_semester_format():
+    options = [
+        "2025-2026学年第1学期",
+        "2025-2026学年第2学期",
+        "2025-2026学年第3学期",
+    ]
+
+    assert (
+        CourseService._match_semester_option(options, "2025-2026-3")
+        == "2025-2026学年第3学期"
+    )
+    assert (
+        CourseService._match_semester_option(options, "2025-2026学年暑期学校")
+        == "2025-2026学年第1学期"
+    )
+    assert CourseService._match_semester_option(options, "暑校") is None
+
+
+def test_course_not_found_hint_mentions_other_semesters_and_manual_target():
+    hint = CourseService._course_not_found_hint()
+
+    assert "其他学期" in hint
+    assert "source=manual" in hint
+
+
 def test_batch_capture_uses_two_workers_only_for_subtitle_only_work(monkeypatch):
     service = CourseService()
     monkeypatch.setattr(

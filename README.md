@@ -1,18 +1,47 @@
-# CVStream Agent
+# SEUdaily
 
-CVStream Agent 将课程门户抓取、字幕获取、语音转写、PPT 提取和课程总结封装为 Agent 可调用的工具。项目使用 Mastra 负责编排，原有 Python 实现继续承担浏览器自动化和媒体处理。
+SEUdaily 是一个面向日常学习与校园生活的本地优先 Web 助手。它以 Mastra 负责编排、记忆与流式事件，以 React/Vite 提供对话工作台，并复用 CVStream Python 核心完成课程门户、课表、教务通知、字幕、媒体和语音处理。
+
+当前版本为 **1.0.0**。这是从课程资料 Agent 到完整日常助手的首次稳定版本，主要能力包括：
+
+- ChatGPT 风格的多会话 Web UI，支持服务端历史、删除确认、编辑提示词、重新生成和复制。
+- GFM Markdown、浅色代码高亮、KaTeX 行内/块级公式以及代码和回答复制。
+- 工具执行与 reasoning 流式状态；最终回答产生后自动折叠工具过程。
+- 图片选择与 `Ctrl+V` 粘贴、输入框内预览、历史消息持久引用及文件删除 fallback。
+- 按当前周、单双周和节次展示的完整课表。
+- 按笔记、字幕、媒体和临时图片浏览的渐进式资料库，支持预览与手动删除。
+- 教务通知、运行设置、API Key 和环境变量管理。
+
+完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## Architecture
 
 ```text
+apps/
+└── web/
+    └── src/
+        ├── App.tsx               # 对话、会话、图片与工具流 UI
+        ├── workspace-pages.tsx   # 课表、资料库、通知和设置
+        ├── api.ts                # Agent、记忆与应用 API 客户端
+        └── markdown.ts           # Markdown/KaTeX 规范化
 src/
 ├── mastra/
-│   ├── agents/course-agent.ts     # Agent 行为与工具授权
+│   ├── agents/course-agent.ts     # SEUdaily 行为、提示词与工具授权
+│   ├── app-routes.ts              # 课表、资料、图片、通知与设置 API
+│   ├── image-reference-processor.ts # 历史图片引用解析与缺失 fallback
 │   ├── tools/course-tools.ts      # Mastra 工具及输入 Schema
-│   └── tools/python-bridge.ts     # TypeScript → Python JSON 桥
+│   ├── tools/task-result-tool.ts  # 完整任务结果的受限分页读取
+│   ├── tools/python-bridge.ts     # 常驻 Python Worker JSONL 桥
+│   ├── workspace.ts               # 项目文件、终端与后台进程工具
+│   ├── native-command-sandbox.ts  # WSL2/Bubblewrap 与宿主机 fallback
+│   ├── storage.ts                 # LibSQL 对话记忆与上下文压缩
+│   └── runtime-paths.ts           # 稳定的项目/运行时路径
 └── cvstream/
     ├── service.py                 # 与 UI 无关的业务服务
     ├── cli.py                     # JSON 工具协议入口
+    ├── worker.py                  # 无控制台窗口的常驻工具进程
+    ├── browser_runtime.py         # 后台 Chromium 与门户 Context 复用
+    ├── protocol.py                # 统一工具结果、产物与引用
     ├── auth.py                    # 门户认证与 Cookie 会话
     ├── schedule.py                # 校内课表同步、规范化与本地缓存
     ├── jwc.py                     # WebPlus 查询抽象及教务处/计软智站点适配器
@@ -27,20 +56,32 @@ Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量�
 
 ## Setup
 
-要求：Node.js 22.13+、Python 3.13、uv、FFmpeg。
+要求：Node.js 22.13+、Python 3.13、uv、FFmpeg。Windows 上推荐启用 WSL2 Ubuntu；终端沙盒不依赖 Docker Desktop。
 
 ```bash
-npm install
-uv sync
+npm ci
+uv sync --frozen
 uv run playwright install chromium
 ```
+
+仓库提交 `package-lock.json` 与 `uv.lock`。CI、部署和复现环境应使用 `npm ci` 与 `uv sync --frozen`，不要在未审查锁文件差异的情况下更新依赖。
 
 复制 `.env.example` 为 `.env`，按需填写：
 
 ```dotenv
 DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_API_KEY=
+TAVILY_API_KEY=
 CVSTREAM_PROJECT_ROOT=
+CVSTREAM_OBSERVATIONAL_MEMORY=true
+CVSTREAM_CONTEXT_WINDOW_TOKENS=512000
+CVSTREAM_OBSERVATION_COMPRESSION_RATIO=0.8
+CVSTREAM_MEMORY_LAST_MESSAGES=200
+CVSTREAM_PREVIOUS_OBSERVER_TOKENS=1500
+CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS=120000
+CVSTREAM_WSL_SANDBOX=true
+CVSTREAM_WSL_DISTRO=Ubuntu-24.04
+CVSTREAM_SANDBOX_NETWORK=false
 CVSTREAM_USERNAME=
 CVSTREAM_PASSWORD=
 CVSTREAM_WHISPER_MODEL=
@@ -59,6 +100,20 @@ npm start
 
 - Studio Agent 页面：`http://localhost:4111/agents`
 - Agent API：`http://localhost:4111/api`
+
+课程工作台前端位于 `apps/web`。另开一个终端启动：
+
+```bash
+npm run dev:web
+```
+
+然后访问 `http://127.0.0.1:4173`。也可以同时启动 Agent 和前端：
+
+```bash
+npm run dev:all
+```
+
+前端通过 Vite 代理访问本机 Agent API。会话和消息以 `.cvstream/mastra/mastra.db` 为主存储，不同浏览器读取同一服务端历史；浏览器本地存储只用于兼容旧记录与短暂 fallback。删除会话会同时清理服务端线程和本地镜像。
 
 `npm run dev` 与 `npm start` 等价，适合开发时使用：
 
@@ -80,11 +135,45 @@ npm run typecheck
 uv run pytest
 ```
 
+## Web workspace
+
+Web 工作台入口为 `http://127.0.0.1:4173`，包含以下页面：
+
+- **新对话 / 历史会话**：流式回答、Markdown、公式、代码高亮、图片消息、提示词编辑、重新生成与会话删除。
+- **课表**：读取本地缓存或显式同步，以当前教学周过滤课程，并正确处理单双周、起止周和大物实验等非每周课程。
+- **资料库**：按资料类型进入目录，再按课程与教师逐级浏览；支持图片、文本、Markdown、PDF、音视频预览以及二次确认删除。
+- **教务通知**：读取已适配站点的通知列表并打开原始来源。
+- **设置**：展示当前 Provider，维护 API Key 与允许写入的运行环境变量。敏感值由后端保存，不进入对话提示词。
+
+输入框的 `+` 按钮可选择图片，也可直接按 `Ctrl+V` 粘贴剪贴板图片。上传文件暂存在 `.cvstream/library/images`，消息只保存稳定引用、摘要和哈希，不保存整段 Base64。历史图片不存在时前端隐藏损坏缩略图并保留文字消息。
+
 检查 Python 工具桥：
 
 ```bash
 echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 ```
+
+检查常驻 Worker 协议：
+
+```bash
+echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload":{}}' | uv run cvstream-worker
+```
+
+## Runtime and memory
+
+运行数据统一写入项目根目录的 `.cvstream`。Mastra 对话、线程与 Observational Memory 保存在 `.cvstream/mastra/mastra.db`，不再受 Studio 当前工作目录变化影响。默认上下文预算为 512000 tokens，未压缩消息达到 80%（409600 tokens）时同步启动 Observation；提前后台 buffering 已关闭。最近消息数量上限设为 200，防止在达到 token 阈值前仅因消息条数过早丢失历史，并最多带入 1500 tokens 的既有观察。窗口、比例和消息数量均可通过环境变量调整，也可用 `CVSTREAM_OBSERVATIONAL_MEMORY=false` 临时关闭压缩。`CVSTREAM_OBSERVATION_MESSAGE_TOKENS` 仍可作为高级配置直接覆盖计算后的阈值。
+
+Mastra 启动一个长期运行的 Python Worker，而不是每次工具调用都打开 PowerShell 和 Chromium。普通抓取使用真正的 headless Chromium，并统一静音；同一门户复用 Browser Context，每个任务使用独立 Page。只有登录、验证码或二次确认会临时打开可见浏览器。Studio 的停止信号会先请求任务协作取消，未能及时退出时再清理 Worker 及其子进程树。
+
+Web 端通过 SSE 接收回答、reasoning 和工具事件。reasoning 仅展示 Provider 实际返回的 reasoning 流；工具过程使用紧凑行展示，在最终回答出现后默认折叠。工具完整结果仍以 `resultRef` 落盘，避免把大对象反复写入上下文。
+
+工具结果采用统一结构：`status`、`taskId`、`summary`、`data`、`artifacts`、`citations`、`warnings`、`metrics`。完整清洗结果写入 `.cvstream/tasks/<taskId>/result.json`，对话只保存经过列表、字符串和层级限制的结果及 `resultRef`；大段日志另存为 `diagnostics.json`。传给模型的关键数据最多约 6000 字符，并继续执行敏感信息脱敏。课程总结正文使用 `[S1]` 形式的行内引用，并在末尾生成来源表。
+
+Agent Workspace 的文件系统被限制在项目根目录。读取、列目录、文件状态和正文搜索可直接执行；写入、编辑、建目录、终端命令和终止后台进程会在 Studio 中请求审批；删除工具关闭。
+
+Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙盒。宿主机项目只读映射到 `/project`，`.cvstream/sandbox-workspace` 作为可写、持久的 `/workspace`；沙盒只挂载运行命令所需的 Linux 系统目录，清空继承环境，并默认隔离网络。Mastra 继续负责无窗口启动、输出流、超时、后台进程和进程树终止。课程 Python Worker、Playwright 浏览器、FFmpeg 与 ASR 仍在宿主机运行。
+
+如果 WSL2、指定发行版或 `bwrap` 不可用，启动时会自动降级为宿主机 `LocalSandbox`。Fallback 仍使用固定暂存目录、最小环境变量、无窗口进程与超时控制，但不提供操作系统级文件或网络隔离。可通过 `CVSTREAM_WSL_SANDBOX=false` 主动使用 fallback；`CVSTREAM_SANDBOX_NETWORK=true` 仅影响 WSL/Bubblewrap 模式。Ubuntu 中安装 Bubblewrap：`wsl -d Ubuntu-24.04 -u root -- apt-get install -y bubblewrap`。
 
 ## Available tools
 
@@ -96,14 +185,22 @@ echo '{"action":"health","payload":{}}' | uv run cvstream-tool
 - `search-seu-cse-notices`：分栏查询计算机科学与工程学院、软件学院、人工智能学院官网，命中详情在后台并发同步。
 - `get-seu-cse-notice`：按 `seu-cse-*` 稳定 ID 读取计软智公告正文与附件链接。
 - `list-courses`：列出课程点播目录中的课程。
-- `search-courses`：按课程名、教室、教师或课程号搜索课程。
+- `search-courses`：按课程名、教室、教师或课程号搜索点播课程，可用 `semester` 选择页面上的真实学期值（例如 `2026-2027学年第1学期`）。校内定义为第 1 学期=暑期学校、第 2 学期=秋季、第 3 学期=春季；未命中时返回可选学期与课表外手动目标提示。
 - `find-course-session`：用课程名、教师名和周内节次定位课程；日期缺省时返回最新一次课。
 - `capture-course-session`：抓取选中日期下的全部课段，而不是详情页中的单个列表序号。
-- `capture-course-sessions`：批量抓取多门课程；纯字幕最多并发 2，视频、PPT、ASR 等重任务并发 1。
+- `capture-course-sessions`：批量抓取多门课程；当前常驻共享浏览器串行访问门户，视频、PPT、ASR 等重任务同样串行，以避免 Playwright 线程冲突和内存峰值。
 - `transcribe-local-media`：用 Faster Whisper 转写本地媒体。
 - `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
 - `extract-course-slides`：从视频检测页面变化并生成 PDF。
 - `summarize-course-transcripts`：可总结整批字幕、指定字幕文件或直接文本，并可指定总结重点与输出格式。
+- `read-cvstream-task-result`：按 `resultRef` 和 JSON Pointer 分页读取被紧凑结果省略的数据，单次最多 12000 字符，仍执行敏感字段脱敏。
+- `web-search`：通过 Tavily 查询公共互联网，返回网页摘要、原始链接和 `W1`/`W2` 引用；未配置 `TAVILY_API_KEY` 时返回明确的配置错误。
+- `fetch-web-pages`：通过 Tavily Extract 从最多 5 个明确公共 URL 中提取与 query 最相关的正文片段，返回 `F1`/`F2` 引用；拒绝本地、私网、带凭据或敏感签名参数的 URL。
+- `playwright_browser_*`：仅暴露导航、无障碍树快照、快照查找、点击、输入、下拉选择、按键和标签页 8 个工具。独立浏览器会话不共享 Python Worker 的门户登录状态；点击、输入、选择、按键等交互需要 Studio 审批。
+- `mastra_workspace_read_file`、`list_files`、`file_stat`、`grep`：读取和搜索项目内文件，结果设有 token 上限。
+- `mastra_workspace_write_file`、`edit_file`、`mkdir`：经用户审批后修改项目文件；覆盖现有文件前要求先读取。
+- `mastra_workspace_execute_command`：经用户审批后优先在 WSL/Bubblewrap 的 `/workspace` 暂存区执行前台或后台命令；宿主项目在 `/project` 只读可见。WSL 不可用时自动退回宿主机暂存目录。默认超时 120 秒，可通过 `CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS` 调整。
+- `mastra_workspace_get_process_output`、`kill_process`：查看或经审批终止 Workspace 自己启动的后台进程。
 
 请仅处理本人具有合法访问权限的课程内容。
 

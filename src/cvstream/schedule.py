@@ -13,7 +13,8 @@ from typing import Any
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import sync_playwright
+
+from .browser_runtime import browser_runtime
 
 
 DEFAULT_SCHEDULE_URL = (
@@ -56,37 +57,28 @@ class ScheduleService:
 
     @contextmanager
     def _page(self, *, visible: bool, load_saved_cookies: bool = True):
-        with sync_playwright() as playwright:
-            args = ["--disable-blink-features=AutomationControlled"]
-            if visible:
-                args.extend(["--window-position=0,0", "--start-maximized"])
-            else:
-                args.extend(
-                    ["--window-position=-32000,-32000", "--window-size=1920,1080"]
-                )
-            browser = playwright.chromium.launch(headless=False, args=args)
-            context = browser.new_context(
-                no_viewport=visible,
-                viewport=None if visible else {"width": 1920, "height": 1080},
-                user_agent=DEFAULT_USER_AGENT,
-                locale="zh-CN",
-                timezone_id="Asia/Shanghai",
-            )
+        with browser_runtime().page(
+            "schedule-portal",
+            visible=visible,
+            context_options={
+                "no_viewport": visible,
+                "viewport": None if visible else {"width": 1920, "height": 1080},
+                "user_agent": DEFAULT_USER_AGENT,
+                "locale": "zh-CN",
+                "timezone_id": "Asia/Shanghai",
+            },
+        ) as page:
+            context = page.context
             if load_saved_cookies and self.cookie_file.exists():
                 try:
                     cookies = json.loads(self.cookie_file.read_text(encoding="utf-8"))
                     context.add_cookies(cookies)
                 except (OSError, ValueError):
                     pass
-            page = context.new_page()
             page.add_init_script(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
-            try:
-                yield page
-            finally:
-                context.close()
-                browser.close()
+            yield page
 
     @staticmethod
     def _is_auth_page(url: str) -> bool:

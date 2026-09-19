@@ -14,6 +14,7 @@ from .service import (
 )
 from .schedule import ScheduleService
 from .jwc import CseService, JwcService
+from .protocol import normalize_tool_result
 
 
 def _course_service(payload: dict[str, Any]) -> CourseService:
@@ -67,13 +68,16 @@ def _resolve_course_target(
         course = ScheduleService(
             cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json")
         ).resolve_course(schedule_id)
-        return {
+        resolved = {
             "courseName": course["courseName"],
             "teacherName": course["teacherName"],
             "weeklyPeriods": course["weeklyPeriods"],
             "courseDate": course_date,
             "scheduleId": schedule_id,
         }
+        if target.get("semester"):
+            resolved["semester"] = target["semester"]
+        return resolved
     if source == "manual":
         missing = [
             name
@@ -82,12 +86,15 @@ def _resolve_course_target(
         ]
         if missing:
             raise ValueError(f"manual 目标缺少字段: {', '.join(missing)}")
-        return {
+        resolved = {
             "courseName": target["courseName"],
             "teacherName": target["teacherName"],
             "weeklyPeriods": target["weeklyPeriods"],
             "courseDate": course_date,
         }
+        if target.get("semester"):
+            resolved["semester"] = target["semester"]
+        return resolved
     raise ValueError("target.source 必须是 schedule 或 manual")
 
 
@@ -98,7 +105,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "health":
         return {"version": "0.3.0", "tools": [
             "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article",
+            "extract-slides", "summarize-course", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
@@ -111,13 +118,22 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _schedule_service(payload).get_schedule(
             refresh=payload.get("refresh", False)
         )
-    if action in {"search-jwc", "search-cse"}:
+    if action in {"list-jwc", "search-jwc", "search-cse"}:
         if action == "search-cse":
             payload["site"] = "cse"
+        if action == "list-jwc":
+            return _jwc_service(payload).list_articles(
+                categories=payload.get("categories"),
+                paths=payload.get("paths"),
+                freshness=payload.get("freshness", "latest"),
+                time_scope=payload.get("timeScope", "any"),
+                recent_days=payload.get("recentDays", 7),
+                limit=payload.get("limit", 5),
+            )
         return _jwc_service(payload).search(
             payload["query"],
-            keywords=payload.get("keywords"),
             categories=payload.get("categories"),
+            paths=payload.get("paths"),
             freshness=payload.get("freshness", "balanced"),
             time_scope=payload.get("timeScope", "any"),
             recent_days=payload.get("recentDays", 7),
@@ -132,7 +148,9 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "list-courses":
         return _course_service(payload).list_courses()
     if action == "search-courses":
-        return _course_service(payload).search_courses(payload["query"])
+        return _course_service(payload).search_courses(
+            payload["query"], semester=payload.get("semester")
+        )
     if action == "find-course-session":
         target = _resolve_course_target(payload, payload.get("target", payload))
         return _course_service(payload).find_course_session(
@@ -140,6 +158,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             teacher_name=target["teacherName"],
             weekly_periods=target["weeklyPeriods"],
             course_date=target.get("courseDate"),
+            semester=target.get("semester"),
         )
     if action == "capture-course-session":
         target = _resolve_course_target(payload, payload.get("target", payload))
@@ -148,6 +167,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             teacher_name=target["teacherName"],
             weekly_periods=target["weeklyPeriods"],
             course_date=target.get("courseDate"),
+            semester=target.get("semester"),
             need_subtitle=payload.get("needSubtitle", True),
             need_ppt=payload.get("needPpt", False),
             keep_media=payload.get("keepMedia", False),
@@ -238,6 +258,11 @@ def main() -> None:
             return
         request = json.load(sys.stdin)
         result = dispatch(request)
+        result = normalize_tool_result(
+            request.get("action", "unknown"),
+            result,
+            requested_task_id=(request.get("payload") or {}).get("taskId"),
+        )
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False))
     except Exception as exc:
         print(json.dumps({

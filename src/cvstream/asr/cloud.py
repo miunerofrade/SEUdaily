@@ -4,6 +4,8 @@ import subprocess
 import warnings
 from pathlib import Path
 
+from cvstream.subprocess_utils import hidden_process_options
+
 warnings.filterwarnings("ignore")
 
 try:
@@ -51,7 +53,12 @@ class CloudASRWorker:
             '-y', self.temp_audio_path
         ])
         
-        self.current_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.current_process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **hidden_process_options(),
+        )
         self.current_process.communicate()
 
     def transcribe_and_export(self, task_name: str):

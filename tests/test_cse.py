@@ -41,8 +41,15 @@ def test_cse_adapter_routes_and_parses_article(tmp_path: Path) -> None:
         }
 
     service._fetch = fake_fetch  # type: ignore[method-assign]
+    service._search_remote = lambda query, category: [{
+        "id": "seu-cse-582946",
+        "url": article_url,
+        "title": "关于学院拟推荐免试攻读研究生名单的公示",
+        "publishedAt": "2026-09-12",
+        "categoryLabel": "本科生通知公告",
+    }]  # type: ignore[method-assign]
     result = service.search(
-        "本科推免名单", keywords=["推免", "名单"], freshness="latest"
+        "本科推免名单", categories=["undergraduate_notices"]
     )
     synced = service.sync_pending()
     detail = service.get_article(result["results"][0]["id"], refresh=False)["article"]

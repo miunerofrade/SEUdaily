@@ -6,6 +6,8 @@ import sys
 import json
 from pathlib import Path
 
+from cvstream.subprocess_utils import hidden_process_options
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
 warnings.filterwarnings("ignore")
@@ -41,7 +43,12 @@ class LocalASRWorker:
         else: ffmpeg_cmd.extend(['-c', 'copy'])
         ffmpeg_cmd.extend(['-y', self.temp_video_path])
        
-        self.current_process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.current_process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **hidden_process_options(),
+        )
         stdout, stderr = self.current_process.communicate()
         
         if self.current_process.returncode != 0 and self.current_process.returncode != -9: 
@@ -65,7 +72,12 @@ class LocalASRWorker:
         
         
         self.current_process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            **hidden_process_options(),
         )
         
         

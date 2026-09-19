@@ -1,7 +1,11 @@
 import { Mastra } from "@mastra/core/mastra";
 
-import { courseAgent } from "./agents/course-agent.js";
+import { seuDailyAgent } from "./agents/course-agent.js";
+import { appRoutes } from "./app-routes.js";
+import { mastraAppStorage } from "./storage.js";
 
 export const mastra = new Mastra({
-  agents: { courseAgent },
+  agents: { seuDailyAgent },
+  storage: mastraAppStorage,
+  server: { apiRoutes: appRoutes },
 });
