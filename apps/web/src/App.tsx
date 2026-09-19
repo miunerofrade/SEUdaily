@@ -45,7 +45,8 @@ import { SidebarIcon } from "./sidebar-icons";
 import type { ChatMessage, Conversation, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 import { LibraryPage, NoticesPage, SchedulePage, SettingsPage } from "./workspace-pages";
 
-const STORAGE_KEY = "cvstream.web.conversations.v1";
+const STORAGE_KEY = "seudaily.web.conversations.v1";
+const LEGACY_STORAGE_KEY = "cvstream.web.conversations.v1";
 type AppView = "chat" | "schedule" | "library" | "notices" | "settings";
 
 hljs.registerLanguage("bash", bash);
@@ -120,7 +121,7 @@ function createConversation(): Conversation {
 
 function loadConversations(): Conversation[] {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = stored ? (JSON.parse(stored) as Conversation[]) : [];
     return Array.isArray(parsed) && parsed.length ? parsed : [createConversation()];
   } catch {

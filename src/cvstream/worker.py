@@ -8,6 +8,7 @@ import threading
 import traceback
 from typing import Any
 
+from . import __version__
 from .cancellation import TaskCancelledError, set_current_cancel_event
 from .cli import dispatch
 from .protocol import normalize_tool_result
@@ -49,7 +50,7 @@ def main() -> None:
             requests.put(message)
         requests.put(None)
 
-    threading.Thread(target=read_requests, name="cvstream-worker-reader", daemon=True).start()
+    threading.Thread(target=read_requests, name="seudaily-worker-reader", daemon=True).start()
 
     while True:
         request = requests.get()
@@ -68,7 +69,7 @@ def main() -> None:
         set_current_cancel_event(event)
         try:
             if action == "health":
-                raw_result = {"status": "completed", "version": "0.3.0", "worker": True}
+                raw_result = {"status": "completed", "version": __version__, "worker": True}
             else:
                 raw_result = dispatch({"action": action, "payload": {**payload, "taskId": task_id}})
             if event.is_set():

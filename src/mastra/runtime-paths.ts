@@ -20,7 +20,7 @@ function discoverProjectRoot(start: string): string {
     const parent = dirname(current);
     if (parent === current) {
       throw new Error(
-        `Unable to locate CVStream project root from ${start}. Set CVSTREAM_PROJECT_ROOT.`,
+        `Unable to locate the SEUdaily project root from ${start}. Set CVSTREAM_PROJECT_ROOT.`,
       );
     }
     current = parent;
@@ -36,7 +36,7 @@ export const projectRoot = configuredRoot
 
 if (!hasProjectMarkers(projectRoot)) {
   throw new Error(
-    `CVSTREAM_PROJECT_ROOT does not point to a CVStream project: ${projectRoot}`,
+    `CVSTREAM_PROJECT_ROOT does not point to a SEUdaily project: ${projectRoot}`,
   );
 }
 

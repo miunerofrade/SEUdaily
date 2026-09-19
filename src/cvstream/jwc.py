@@ -577,7 +577,7 @@ class JwcService:
         temp.replace(self.index_file)
 
     def _fetch(self, url: str, validators: dict[str, str] | None = None) -> dict[str, Any]:
-        headers = {"User-Agent": "CVStream/0.3 (+local academic search)"}
+        headers = {"User-Agent": "SEUdaily/1.0 (+local academic search)"}
         validators = validators or {}
         if validators.get("etag"):
             headers["If-None-Match"] = validators["etag"]
@@ -768,7 +768,7 @@ class JwcService:
             else f"{self.base_url}/"
         )
         opener = build_opener(HTTPCookieProcessor())
-        headers = {"User-Agent": "Mozilla/5.0 (CVStream)", "Referer": list_url}
+        headers = {"User-Agent": "Mozilla/5.0 (SEUdaily)", "Referer": list_url}
         with opener.open(Request(list_url, headers=headers), timeout=self.timeout_seconds) as response:
             encoding = response.headers.get_content_charset() or "utf-8"
             listing_html = response.read().decode(encoding, errors="replace")

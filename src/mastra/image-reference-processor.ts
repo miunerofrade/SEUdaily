@@ -5,7 +5,8 @@ import { basename, extname, resolve } from "node:path";
 
 import { projectRoot } from "./runtime-paths.js";
 
-const referencePrefix = "cvstream-image-ref:";
+const referencePrefix = "seudaily-image-ref:";
+const legacyReferencePrefix = "cvstream-image-ref:";
 const imageRoot = resolve(projectRoot, ".cvstream", "uploads", "images");
 
 function imageMediaType(path: string) {
@@ -17,8 +18,14 @@ async function rehydrateMessage(message: MastraDBMessage): Promise<MastraDBMessa
   const parts = await Promise.all(message.content.parts.map(async (part) => {
     if (part.type !== "file") return part;
     const loose = part as typeof part & { data?: unknown; filename?: unknown; mediaType?: string };
-    if (typeof loose.data !== "string" || !loose.data.startsWith(referencePrefix)) return part;
-    const ref = loose.data.slice(referencePrefix.length);
+    if (typeof loose.data !== "string") return part;
+    const prefix = loose.data.startsWith(referencePrefix)
+      ? referencePrefix
+      : loose.data.startsWith(legacyReferencePrefix)
+        ? legacyReferencePrefix
+        : null;
+    if (!prefix) return part;
+    const ref = loose.data.slice(prefix.length);
     if (!ref || basename(ref) !== ref) return null;
     const target = resolve(imageRoot, ref);
     const details = await stat(target).catch(() => null);
@@ -46,14 +53,14 @@ function persistReferences(message: MastraDBMessage): MastraDBMessage {
 }
 
 export const imageReferenceInputProcessor = {
-  id: "cvstream-image-reference-input",
+  id: "seudaily-image-reference-input",
   async processInput({ messages }: ProcessInputArgs) {
     return Promise.all(messages.map(rehydrateMessage));
   },
 } satisfies Processor;
 
 export const imageReferenceOutputProcessor = {
-  id: "cvstream-image-reference-output",
+  id: "seudaily-image-reference-output",
   async processOutputResult({ messages }: ProcessOutputResultArgs) {
     return messages.map(persistReferences);
   },

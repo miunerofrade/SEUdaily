@@ -35,7 +35,7 @@ def _required(value: str | None, name: str) -> str:
 
 
 class CourseService:
-    """UI-independent facade over the original CVStream capabilities."""
+    """UI-independent facade for SEUdaily course and media capabilities."""
 
     def __init__(
         self,

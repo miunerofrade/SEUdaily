@@ -1,7 +1,7 @@
 [project]
-name = "cvstream-agent-core"
+name = "seudaily-core"
 version = "1.0.0"
-description = "Python tool runtime for the CVStream Mastra agent"
+description = "Python automation and media runtime for the SEUdaily assistant"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -15,8 +15,14 @@ dependencies = [
 ]
 
 [project.scripts]
+seudaily-tool = "cvstream.cli:main"
+seudaily-worker = "cvstream.worker:main"
 cvstream-tool = "cvstream.cli:main"
 cvstream-worker = "cvstream.worker:main"
+
+[project.urls]
+Repository = "https://github.com/miunerofrade/SEUdaily"
+Issues = "https://github.com/miunerofrade/SEUdaily/issues"
 
 [build-system]
 requires = ["hatchling"]

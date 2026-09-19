@@ -24,6 +24,7 @@ SEUdaily 的首个稳定大版本：产品从课程抓取 Agent 扩展为面向�
 ### Changed
 
 - Agent 定位由课程资料助手调整为 SEUdaily 日常助手，系统提示词、产品名称与页面标题同步更新。
+- GitHub 仓库、npm/Python 包元数据、仓库链接、运行时展示 ID 和 User-Agent 统一更名为 SEUdaily；旧数据键和命令仅作为 1.x 兼容接口保留。
 - 会话历史改为 Mastra/LibSQL 服务端存储优先，跨浏览器保持一致。
 - 课表、教务处和计软智查询改为分层缓存与按需同步，减少重复登录和详情抓取。
 - 课程抓取、字幕、ASR、PPT 和总结流程迁移到长期运行的 Worker，共享浏览器 Context。

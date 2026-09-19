@@ -24,7 +24,7 @@ import { playwrightBrowserTools } from "../tools/browser-tools.js";
 import { readTaskResultTool } from "../tools/task-result-tool.js";
 import { webFetchTool } from "../tools/web-fetch.js";
 import { webSearchTool } from "../tools/web-search.js";
-import { cvstreamWorkspace } from "../workspace.js";
+import { seudailyWorkspace } from "../workspace.js";
 import { imageReferenceInputProcessor, imageReferenceOutputProcessor } from "../image-reference-processor.js";
 
 export const seuDailyAgent = new Agent({
@@ -77,7 +77,7 @@ export const seuDailyAgent = new Agent({
   memory: courseAgentMemory,
   inputProcessors: [imageReferenceInputProcessor],
   outputProcessors: [imageReferenceOutputProcessor],
-  workspace: cvstreamWorkspace,
+  workspace: seudailyWorkspace,
   tools: {
     authorizePortalTool,
     authorizeScheduleTool,

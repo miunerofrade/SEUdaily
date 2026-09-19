@@ -26,7 +26,7 @@ class PythonWorkerClient {
   private ensureWorker(): ChildProcessWithoutNullStreams {
     if (this.child && this.child.exitCode === null && !this.child.killed) return this.child;
 
-    const child = spawn("uv", ["run", "cvstream-worker"], {
+    const child = spawn("uv", ["run", "seudaily-worker"], {
       cwd: projectRoot,
       env: {
         ...process.env,

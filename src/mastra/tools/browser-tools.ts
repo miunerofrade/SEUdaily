@@ -27,7 +27,7 @@ const approvalRequiredTools = new Set([
 ]);
 
 export const playwrightMcpClient = new MCPClient({
-  id: "cvstream-playwright",
+  id: "seudaily-playwright",
   timeout: 60_000,
   servers: {
     playwright: {

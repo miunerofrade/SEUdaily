@@ -5,6 +5,7 @@ import sys
 import traceback
 from typing import Any
 
+from . import __version__
 from .service import (
     CourseService,
     extract_slides,
@@ -103,7 +104,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     payload = request.get("payload") or {}
 
     if action == "health":
-        return {"version": "0.3.0", "tools": [
+        return {"version": __version__, "tools": [
             "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article",
         ]}

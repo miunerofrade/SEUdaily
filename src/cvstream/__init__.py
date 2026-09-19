@@ -1,3 +1,6 @@
-"""CVStream core services exposed to the Mastra agent layer."""
+"""SEUdaily automation services exposed to the Mastra agent layer.
 
-__version__ = "0.3.0"
+The ``cvstream`` import namespace remains available for 1.x compatibility.
+"""
+
+__version__ = "1.0.0"

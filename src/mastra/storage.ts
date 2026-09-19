@@ -7,7 +7,7 @@ import { InMemoryStore, MastraCompositeStore } from "@mastra/core/storage";
 import { mastraRuntimeRoot, toLibSqlFileUrl } from "./runtime-paths.js";
 
 export const mastraStorage = new LibSQLStore({
-  id: "cvstream-local-storage",
+  id: "seudaily-local-storage",
   url: toLibSqlFileUrl(resolve(mastraRuntimeRoot, "mastra.db")),
   connectionTimeoutMs: 10_000,
 });
@@ -15,9 +15,9 @@ export const mastraStorage = new LibSQLStore({
 // LibSQL persists application and memory domains. Its current observability
 // domain does not implement Studio's feedback listing endpoint, so keep that
 // UI-only domain in memory while all durable domains continue to use LibSQL.
-const studioTransientStorage = new InMemoryStore({ id: "cvstream-studio-transient" });
+const studioTransientStorage = new InMemoryStore({ id: "seudaily-studio-transient" });
 export const mastraAppStorage = new MastraCompositeStore({
-  id: "cvstream-app-storage",
+  id: "seudaily-app-storage",
   default: mastraStorage,
   domains: { observability: studioTransientStorage.stores.observability },
 });

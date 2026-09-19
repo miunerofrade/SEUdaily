@@ -356,39 +356,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cvstream-agent-core"
-version = "1.0.0"
-source = { editable = "." }
-dependencies = [
-    { name = "dashscope" },
-    { name = "faster-whisper" },
-    { name = "img2pdf" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "opencv-python" },
-    { name = "playwright" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "dashscope", specifier = ">=1.25.15" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "img2pdf", specifier = ">=0.6.3" },
-    { name = "numpy", specifier = ">=2.4.3" },
-    { name = "openai", specifier = ">=2.30.0" },
-    { name = "opencv-python", specifier = ">=4.13.0.92" },
-    { name = "playwright", specifier = ">=1.55.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.4.0" }]
-
-[[package]]
 name = "dashscope"
 version = "1.25.15"
 source = { registry = "https://pypi.org/simple" }
@@ -1364,6 +1331,39 @@ sdist = { url = "https://files.pythonhosted.org/packages/34/64/8860370b167a9721e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/5d/c814546c2333ceea4ba42262d8c4d55763003e767fa169adc693bd524478/requests-2.33.0-py3-none-any.whl", hash = "sha256:3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b", size = 65017, upload-time = "2026-03-25T15:10:40.382Z" },
 ]
+
+[[package]]
+name = "seudaily-core"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "dashscope" },
+    { name = "faster-whisper" },
+    { name = "img2pdf" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "opencv-python" },
+    { name = "playwright" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dashscope", specifier = ">=1.25.15" },
+    { name = "faster-whisper", specifier = ">=1.2.1" },
+    { name = "img2pdf", specifier = ">=0.6.3" },
+    { name = "numpy", specifier = ">=2.4.3" },
+    { name = "openai", specifier = ">=2.30.0" },
+    { name = "opencv-python", specifier = ">=4.13.0.92" },
+    { name = "playwright", specifier = ">=1.55.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.4.0" }]
 
 [[package]]
 name = "sniffio"

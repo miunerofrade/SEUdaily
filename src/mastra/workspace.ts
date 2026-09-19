@@ -17,17 +17,17 @@ const timeout = Number.isFinite(commandTimeout) && commandTimeout > 0
   : 120_000;
 
 export const commandSandboxSelection = createCommandSandbox({
-  id: "cvstream-native-command-runtime",
+  id: "seudaily-native-command-runtime",
   projectRoot,
   workingDirectory: sandboxWorkspaceRoot,
   timeout,
 });
 
-export const cvstreamWorkspace = new Workspace({
-  id: "cvstream-project-workspace",
+export const seudailyWorkspace = new Workspace({
+  id: "seudaily-project-workspace",
   name: "SEUdaily project workspace",
   filesystem: new LocalFilesystem({
-    id: "cvstream-project-files",
+    id: "seudaily-project-files",
     basePath: projectRoot,
     contained: true,
   }),

@@ -1,6 +1,6 @@
 # SEUdaily
 
-SEUdaily 是一个面向日常学习与校园生活的本地优先 Web 助手。它以 Mastra 负责编排、记忆与流式事件，以 React/Vite 提供对话工作台，并复用 CVStream Python 核心完成课程门户、课表、教务通知、字幕、媒体和语音处理。
+SEUdaily 是一个面向日常学习与校园生活的本地优先 Web 助手。它以 Mastra 负责编排、记忆与流式事件，以 React/Vite 提供对话工作台，并由 Python 自动化核心完成课程门户、课表、教务通知、字幕、媒体和语音处理。
 
 当前版本为 **1.0.0**。这是从课程资料 Agent 到完整日常助手的首次稳定版本，主要能力包括：
 
@@ -59,6 +59,8 @@ Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量�
 要求：Node.js 22.13+、Python 3.13、uv、FFmpeg。Windows 上推荐启用 WSL2 Ubuntu；终端沙盒不依赖 Docker Desktop。
 
 ```bash
+git clone https://github.com/miunerofrade/SEUdaily.git
+cd SEUdaily
 npm ci
 uv sync --frozen
 uv run playwright install chromium
@@ -150,16 +152,20 @@ Web 工作台入口为 `http://127.0.0.1:4173`，包含以下页面：
 检查 Python 工具桥：
 
 ```bash
-echo '{"action":"health","payload":{}}' | uv run cvstream-tool
+echo '{"action":"health","payload":{}}' | uv run seudaily-tool
 ```
 
 检查常驻 Worker 协议：
 
 ```bash
-echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload":{}}' | uv run cvstream-worker
+echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload":{}}' | uv run seudaily-worker
 ```
 
 ## Runtime and memory
+
+### 1.x compatibility identifiers
+
+产品、仓库和新包元数据统一使用 **SEUdaily**。为避免升级后丢失既有会话、课表缓存和外部脚本，1.x 继续兼容 Python import 命名空间 `cvstream`、旧命令别名 `cvstream-tool` / `cvstream-worker`、`.cvstream` 运行数据目录、`CVSTREAM_*` 环境变量以及旧浏览器会话键。这些名称仅作为兼容接口保留，不再作为产品或仓库名称；新集成应使用 `seudaily-tool` 与 `seudaily-worker`。
 
 运行数据统一写入项目根目录的 `.cvstream`。Mastra 对话、线程与 Observational Memory 保存在 `.cvstream/mastra/mastra.db`，不再受 Studio 当前工作目录变化影响。默认上下文预算为 512000 tokens，未压缩消息达到 80%（409600 tokens）时同步启动 Observation；提前后台 buffering 已关闭。最近消息数量上限设为 200，防止在达到 token 阈值前仅因消息条数过早丢失历史，并最多带入 1500 tokens 的既有观察。窗口、比例和消息数量均可通过环境变量调整，也可用 `CVSTREAM_OBSERVATIONAL_MEMORY=false` 临时关闭压缩。`CVSTREAM_OBSERVATION_MESSAGE_TOKENS` 仍可作为高级配置直接覆盖计算后的阈值。
 
@@ -193,7 +199,7 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 - `transcribe-cloud-audio`：用云端 ASR 转写本地 MP3/WAV。
 - `extract-course-slides`：从视频检测页面变化并生成 PDF。
 - `summarize-course-transcripts`：可总结整批字幕、指定字幕文件或直接文本，并可指定总结重点与输出格式。
-- `read-cvstream-task-result`：按 `resultRef` 和 JSON Pointer 分页读取被紧凑结果省略的数据，单次最多 12000 字符，仍执行敏感字段脱敏。
+- `read-seudaily-task-result`：按 `resultRef` 和 JSON Pointer 分页读取被紧凑结果省略的数据，单次最多 12000 字符，仍执行敏感字段脱敏。
 - `web-search`：通过 Tavily 查询公共互联网，返回网页摘要、原始链接和 `W1`/`W2` 引用；未配置 `TAVILY_API_KEY` 时返回明确的配置错误。
 - `fetch-web-pages`：通过 Tavily Extract 从最多 5 个明确公共 URL 中提取与 query 最相关的正文片段，返回 `F1`/`F2` 引用；拒绝本地、私网、带凭据或敏感签名参数的 URL。
 - `playwright_browser_*`：仅暴露导航、无障碍树快照、快照查找、点击、输入、下拉选择、按键和标签页 8 个工具。独立浏览器会话不共享 Python Worker 的门户登录状态；点击、输入、选择、按键等交互需要 Studio 审批。
