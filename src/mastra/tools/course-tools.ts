@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 
 import { runPythonTool } from "./python-bridge.js";
-import { pythonToolOutput } from "./tool-result.js";
+import { pythonToolOutput, type ToolResult } from "./tool-result.js";
 
 const commonPortalFields = {
   targetUrl: z.string().url().default("https://cvs.seu.edu.cn"),
@@ -17,6 +17,86 @@ const scheduleFields = {
   cookieFile: z.string().default(".cvstream/ehall-cookies.json"),
   cacheFile: z.string().default(".cvstream/schedule.json"),
 };
+
+type JsonRecord = Record<string, unknown>;
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function courseFact(value: unknown): JsonRecord {
+  const course = objectValue(value);
+  const fact: JsonRecord = {};
+  for (const key of [
+    "code",
+    "name",
+    "group",
+    "nature",
+    "credits",
+    "semester",
+    "status",
+    "choiceNote",
+    "source",
+    "classificationSource",
+  ]) {
+    if (course[key] !== undefined && course[key] !== "") fact[key] = course[key];
+  }
+  const options = arrayValue(course.options).map((option) => {
+    const item = objectValue(option);
+    return {
+      code: item.code,
+      name: item.name,
+      credits: item.credits,
+      semester: item.semester,
+      status: item.status,
+    };
+  });
+  if (options.length) fact.options = options;
+  return fact;
+}
+
+function trainingPlanAuditModelOutput(output: ToolResult) {
+  const data = objectValue(output.data);
+  const modelView = {
+    status: output.status,
+    summary: output.summary,
+    officialPlan: data.plan,
+    officialHardRequirements: arrayValue(data.studyRequirements),
+    creditTotals: data.creditTotals,
+    evidenceCounts: data.counts,
+    evidenceRules: data.evidence,
+    limitations: data.limitations,
+    coursesByStatus: {
+      completedCourses: arrayValue(data.completedCourses).map(courseFact),
+      attentionPoints: arrayValue(data.attentionPoints),
+      studyingCourses: arrayValue(data.studyingCourses).map(courseFact),
+      missingPastCourses: arrayValue(data.missingPastCourses).map(courseFact),
+      missingCurrentCourses: arrayValue(data.missingCurrentCourses).map(courseFact),
+      futureCourses: arrayValue(data.futureCourses).map(courseFact),
+      scheduleOnlyCourses: arrayValue(data.scheduleOnlyCourses).map(courseFact),
+      choiceGroups: arrayValue(data.choiceGroups).map(courseFact),
+    },
+    fullResult: output.resultRef
+      ? {
+          resultRef: output.resultRef,
+          readWith: "read-seudaily-task-result",
+          detailPointers: {
+            completedCourses: "/data/completedCourses",
+            futureCourses: "/data/futureCourses",
+            studyingCourses: "/data/studyingCourses",
+            choiceGroups: "/data/choiceGroups",
+          },
+        }
+      : undefined,
+  };
+  return { type: "text" as const, value: JSON.stringify(modelView, null, 2) };
+}
 
 export const authorizePortalTool = createTool({
   ...pythonToolOutput,
@@ -47,26 +127,55 @@ export const getScheduleTool = createTool({
   ...pythonToolOutput,
   id: "get-course-schedule",
   description:
-    "Read the normalized local timetable cache. Set refresh=true only for the first sync or when the user explicitly requests an update. Returns course name, teacher, weekday, weekly periods, weeks, and classroom.",
+    "Read an SEU timetable for the current or a historical academic semester. Omit semester for the current timetable; pass an exact semester code returned by eHall (for example 2025-2026-2) for another timetable. Semester-specific caches are isolated. The school response is the source of truth for available semester values.",
   inputSchema: z.object({
     ...scheduleFields,
+    semester: z
+      .string()
+      .regex(/^\d{4}-\d{4}-\d+$/)
+      .optional()
+      .describe("Exact eHall timetable semester code. Usually 1=summer school, 2=fall semester, 3=spring semester, but use the dynamic value returned by availableSemesters when it differs. Example: 2025-2026-2. Omit for the portal's current semester."),
     refresh: z
       .boolean()
       .default(false)
-      .describe("Fetch from SEU eHall instead of using the local cache"),
+      .describe("Re-fetch the selected semester from SEU eHall instead of using that semester's local cache"),
+    includeAvailableSemesters: z
+      .boolean()
+      .default(false)
+      .describe("Return the complete dynamic semester list exposed by eHall"),
+    prefetchAvailableSemesters: z
+      .boolean()
+      .default(false)
+      .describe("Sequentially fetch and cache every semester returned by eHall in the authenticated session"),
   }),
   execute: async (context, options) => runPythonTool("get-schedule", context, options?.abortSignal),
+});
+
+export const auditTrainingPlanTool = createTool({
+  outputSchema: pythonToolOutput.outputSchema,
+  toModelOutput: trainingPlanAuditModelOutput,
+  id: "audit-training-plan",
+  description:
+    "返回 eHall 官方培养方案要求和课表证据，供模型进行判断。结果包含硬性要求、选择组、当前或缺失的课表证据、仅课表课程和数据限制，但不直接判断是否符合毕业条件，也不分配风险等级。历史课表出现只能证明有修读记录，不能证明课程通过或已经获得学分。",
+  inputSchema: z.object({
+    cookieFile: z.string().default(".cvstream/ehall-cookies.json"),
+    cacheFile: z.string().default(".cvstream/training-plan.json"),
+    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    planId: z.string().optional().describe("当 eHall 返回多个个人方案时，可指定准确的方案 ID"),
+    refresh: z.boolean().default(false).describe("核查前从 eHall 刷新个人方案；除非用户明确要求同步，否则保持 false"),
+  }),
+  execute: async (context, options) => runPythonTool("analyze-training-plan", context, options?.abortSignal),
 });
 
 export const searchJwcTool = createTool({
   ...pythonToolOutput,
   id: "search-seu-academic-affairs",
   description:
-    "Search the SEU Academic Affairs site's own WebPlus search interface. This tool searches the supplied query; it does not perform local keyword matching. Omit categories and list paths for the site's general search, or provide one or more paths to restrict the search to selected columns.",
+    "使用东南大学教务处网站自带的 WebPlus 搜索接口。工具会搜索给定问题，不执行本地关键词匹配。省略栏目和列表路径时进行全站搜索；提供一个或多个路径时，将搜索范围限制在指定栏目。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
     cacheDir: z.string().default(".cvstream/jwc"),
-    query: z.string().min(1).describe("The user's original information need"),
+    query: z.string().min(1).describe("用户原始的信息需求"),
     categories: z
       .array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"]))
       .min(1)
@@ -89,7 +198,7 @@ export const listJwcTool = createTool({
   ...pythonToolOutput,
   id: "list-seu-academic-affairs",
   description:
-    "Refresh explicit SEU Academic Affairs columns and return the filtered list by publication date and limit. This is the tool for latest/recent notices; it does not perform keyword matching.",
+    "刷新指定的教务处栏目，并按发布日期和数量限制返回筛选后的列表。查询最新或近期通知时使用此工具；它不执行关键词匹配。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
     cacheDir: z.string().default(".cvstream/jwc"),
@@ -101,7 +210,7 @@ export const listJwcTool = createTool({
     limit: z.number().int().min(1).max(20).default(5),
     timeoutSeconds: z.number().int().min(5).max(60).default(15),
   }).refine((value) => Boolean(value.categories?.length || value.paths?.length), {
-    message: "Provide explicit categories or paths; automatic routing is disabled.",
+    message: "必须明确提供栏目或路径；已禁用自动路由。",
     path: ["categories"],
   }),
   execute: async (context, options) => runPythonTool("list-jwc", context, options?.abortSignal),
@@ -111,7 +220,7 @@ export const getJwcArticleTool = createTool({
   ...pythonToolOutput,
   id: "get-seu-academic-affairs-notice",
   description:
-    "Read one SEU Academic Affairs notice by the stable article id returned from search. Use this only when the full body or attachment links are needed; refresh=true validates the selected detail page.",
+    "根据搜索结果返回的稳定文章 ID，读取一条教务处通知。只有需要正文或附件链接时才使用；refresh=true 会重新验证选中的详情页。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
     cacheDir: z.string().default(".cvstream/jwc"),
@@ -198,6 +307,19 @@ export const searchCoursesTool = createTool({
     semester: z.string().min(1).optional().describe("Academic semester, for example 2025-2026学年第3学期"),
   }),
   execute: async (context, options) => runPythonTool("search-courses", context, options?.abortSignal),
+});
+
+export const listCourseSessionsTool = createTool({
+  ...pythonToolOutput,
+  id: "list-course-sessions",
+  description: "List published session dates and periods for one exact course and teacher in the replay catalog.",
+  inputSchema: z.object({
+    ...commonPortalFields,
+    courseName: z.string().min(1),
+    teacherName: z.string().min(1),
+    semester: z.string().min(1).optional(),
+  }),
+  execute: async (context, options) => runPythonTool("list-course-sessions", context, options?.abortSignal),
 });
 
 const courseSessionIdentity = {

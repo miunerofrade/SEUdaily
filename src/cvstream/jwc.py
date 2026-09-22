@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -20,8 +21,12 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
+from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
 
-_ARTICLE_PATH = re.compile(r"/(\d{4})/(\d{2})(\d{2})/c\d+a(\d+)/page\.htm$")
+
+_ARTICLE_PATH = re.compile(
+    r"/(\d{4})/(\d{2})(\d{2})/c\d+a(\d+)/page\.(?:htm|psp)$"
+)
 _SPACE = re.compile(r"\s+")
 _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
@@ -374,6 +379,152 @@ class JwcService:
         result["detailStatus"] = "ready"
         return {"status": "completed", "article": result}
 
+    def read_attachment(
+        self,
+        article_id: str | None = None,
+        *,
+        notice_url: str | None = None,
+        attachment_number: int = 1,
+        refresh: bool = False,
+        max_bytes: int = 50 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        """Download and parse an attachment already discovered on an article page."""
+        site_label = "教务处" if self.config.key == "jwc" else "计软智网站"
+        if bool(article_id) == bool(notice_url):
+            raise ValueError("必须且只能提供 articleId 或 noticeUrl 其中一个")
+        if notice_url:
+            normalized_url = self._validated_notice_url(notice_url)
+            response = self._fetch(normalized_url)
+            final_url = self._validated_notice_url(response["url"])
+            match = _ARTICLE_PATH.search(urlparse(final_url).path)
+            article = {
+                "id": _article_id(final_url, self.config.id_prefix),
+                "url": final_url,
+                "publishedAt": (
+                    f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                    if match else ""
+                ),
+            }
+            self._apply_article_response(article, response)
+        else:
+            detail = self.get_article(str(article_id), refresh=refresh)
+            article = detail["article"]
+        attachments = article.get("attachments") or []
+        if not attachments:
+            raise ValueError(f"该{site_label}通知没有已确认的附件")
+        if not 1 <= attachment_number <= len(attachments):
+            raise ValueError(
+                f"附件序号超出范围：该通知共有 {len(attachments)} 个附件"
+            )
+
+        attachment = attachments[attachment_number - 1]
+        name = str(attachment.get("name") or f"附件 {attachment_number}")
+        url = str(attachment.get("url") or "")
+        base_host = (urlparse(self.base_url).hostname or "").lower()
+        parsed_url = urlparse(url)
+        if (
+            parsed_url.scheme not in {"http", "https"}
+            or not parsed_url.hostname
+            or parsed_url.hostname.lower() != base_host
+            or parsed_url.username
+            or parsed_url.password
+        ):
+            raise ValueError(f"附件地址不是{site_label}同源的 HTTP(S) 资源")
+
+        name_extension = Path(name).suffix.lower()
+        url_extension = Path(parsed_url.path).suffix.lower()
+        extension = (
+            name_extension
+            if name_extension in SUPPORTED_DOCUMENT_EXTENSIONS
+            else url_extension
+        )
+        if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+            supported = "、".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
+            raise ValueError(f"暂不支持解析该附件格式；支持：{supported}")
+
+        sha256 = hashlib.sha256()
+        size_bytes = 0
+        with tempfile.TemporaryDirectory(
+            prefix=f"cvstream-{self.config.key}-attachment-"
+        ) as temp_dir:
+            temporary_path = Path(temp_dir) / f"attachment{extension}"
+            request = Request(
+                url,
+                headers={
+                    "User-Agent": "SEUdaily/1.0 (+local academic search)",
+                    "Referer": str(article.get("url") or self.base_url),
+                },
+            )
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                final_url = urlparse(response.geturl())
+                if (
+                    final_url.scheme not in {"http", "https"}
+                    or not final_url.hostname
+                    or final_url.hostname.lower() != base_host
+                ):
+                    raise ValueError(f"附件下载被重定向到了非{site_label}域名")
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > max_bytes:
+                    raise ValueError("附件超过 50 MB，已拒绝下载")
+                with temporary_path.open("wb") as target:
+                    while chunk := response.read(1024 * 1024):
+                        size_bytes += len(chunk)
+                        if size_bytes > max_bytes:
+                            raise ValueError("附件超过 50 MB，已停止下载")
+                        target.write(chunk)
+                        sha256.update(chunk)
+
+            with temporary_path.open("rb") as downloaded:
+                signature = downloaded.read(5)
+            valid_signature = (
+                signature == b"%PDF-"
+                if extension == ".pdf"
+                else signature[:2] == b"PK"
+            )
+            if not valid_signature:
+                raise ValueError("附件内容与文件扩展名不匹配或文件已损坏")
+            parsed = parse_document(str(temporary_path), filename=name)
+
+        warnings = []
+        if not parsed["markdown"].strip():
+            warnings.append("附件没有可提取的文本层，可能是扫描版文档，需要 OCR。")
+        return {
+            "status": "completed",
+            "message": f"已读取{site_label}附件：{name}",
+            "article": {
+                key: article[key]
+                for key in ("id", "title", "publishedAt", "url", "contentHash")
+                if article.get(key) is not None
+            },
+            "attachment": {
+                "number": attachment_number,
+                "name": name,
+                "url": url,
+                "extension": extension,
+                "sizeBytes": size_bytes,
+                "sha256": sha256.hexdigest(),
+                "extractionMode": "text_layer" if extension == ".pdf" else "document_structure",
+                "markdown": parsed["markdown"],
+                "charCount": parsed["charCount"],
+            },
+            "warnings": warnings,
+        }
+
+    def _validated_notice_url(self, url: str) -> str:
+        normalized = self._normalize_url(url)
+        parsed = urlparse(normalized)
+        base_host = (urlparse(self.base_url).hostname or "").lower()
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.hostname.lower() != base_host
+            or parsed.username
+            or parsed.password
+            or not _ARTICLE_PATH.search(parsed.path)
+        ):
+            raise ValueError("noticeUrl 必须是对应校内站点的通知详情页地址")
+        return normalized
+
     def sync_pending(self, *, max_workers: int = 4) -> dict[str, Any]:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -642,18 +793,9 @@ class JwcService:
             category_state["lastCheckedAt"] = _iso_now()
         state["articles"] = list(articles.values())
 
-    def _refresh_article(self, article: dict[str, Any]) -> bool:
-        article["url"] = self._normalize_url(article["url"])
-        detail_file = self.articles_dir / f"{article['id']}.json"
-        if detail_file.exists():
-            cached = json.loads(detail_file.read_text(encoding="utf-8"))
-            for key in ("content", "attachments", "contentHash", "validators"):
-                if cached.get(key) is not None:
-                    article[key] = cached[key]
-        response = self._fetch(article["url"], article.get("validators"))
-        article["lastCheckedAt"] = _iso_now()
-        if response["notModified"]:
-            return False
+    def _apply_article_response(
+        self, article: dict[str, Any], response: dict[str, Any]
+    ) -> bool:
         parser = _PageParser(response["url"], self.config)
         parser.feed(response["html"])
         title = parser.title or article.get("title", "")
@@ -693,6 +835,22 @@ class JwcService:
                 "lastModified": response.get("lastModified"),
             },
         })
+        article["lastCheckedAt"] = _iso_now()
+        return changed
+
+    def _refresh_article(self, article: dict[str, Any]) -> bool:
+        article["url"] = self._normalize_url(article["url"])
+        detail_file = self.articles_dir / f"{article['id']}.json"
+        if detail_file.exists():
+            cached = json.loads(detail_file.read_text(encoding="utf-8"))
+            for key in ("content", "attachments", "contentHash", "validators"):
+                if cached.get(key) is not None:
+                    article[key] = cached[key]
+        response = self._fetch(article["url"], article.get("validators"))
+        article["lastCheckedAt"] = _iso_now()
+        if response["notModified"]:
+            return False
+        changed = self._apply_article_response(article, response)
         self.articles_dir.mkdir(parents=True, exist_ok=True)
         detail_file.write_text(
             json.dumps({
@@ -704,7 +862,7 @@ class JwcService:
         if changed:
             version_dir = self.versions_dir / article["id"]
             version_dir.mkdir(parents=True, exist_ok=True)
-            version_file = version_dir / f"{digest}.json"
+            version_file = version_dir / f"{article['contentHash']}.json"
             if not version_file.exists():
                 version_file.write_text(
                     json.dumps({

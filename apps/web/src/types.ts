@@ -31,8 +31,9 @@ export type ToolResult = {
 export type ToolRun = {
   id: string;
   name: string;
-  state: "running" | "completed" | "failed";
+  state: "running" | "approval-requested" | "completed" | "failed";
   args?: Record<string, unknown>;
+  approvalId?: string;
   result?: ToolResult;
 };
 
@@ -40,7 +41,9 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  modelContent?: string;
   attachments?: ImageAttachment[];
+  documents?: DocumentAttachment[];
   createdAt: number;
   tools?: ToolRun[];
   reasoningActive?: boolean;
@@ -57,9 +60,19 @@ export type ImageAttachment = {
   path?: string;
 };
 
+export type DocumentAttachment = {
+  id: string;
+  name: string;
+  mediaType: string;
+  contextRef?: string;
+  markdown?: string;
+  charCount: number;
+};
+
 export type Conversation = {
   id: string;
   resourceId?: string;
+  focusId?: string;
   title: string;
   createdAt: number;
   updatedAt: number;

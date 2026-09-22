@@ -6,6 +6,7 @@ import traceback
 from typing import Any
 
 from . import __version__
+from .document_parser import parse_document
 from .service import (
     CourseService,
     extract_slides,
@@ -14,8 +15,11 @@ from .service import (
     transcribe_local,
 )
 from .schedule import ScheduleService
+from .focus import FocusService
 from .jwc import CseService, JwcService
 from .protocol import normalize_tool_result
+from .training_plan import TrainingPlanService
+from .web_reader import read_web_page
 
 
 def _course_service(payload: dict[str, Any]) -> CourseService:
@@ -36,6 +40,9 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
         ),
         cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
         cache_file=payload.get("cacheFile", ".cvstream/schedule.json"),
+        customization_file=payload.get(
+            "customizationFile", ".cvstream/schedule-user.json"
+        ),
         username=payload.get("username"),
         password=payload.get("password"),
     )
@@ -57,6 +64,17 @@ def _jwc_service(payload: dict[str, Any]) -> JwcService:
     )
 
 
+def _focus_service(payload: dict[str, Any]) -> FocusService:
+    return FocusService(
+        state_file=payload.get("stateFile", ".cvstream/focus.json"),
+        schedule_cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json"),
+        schedule_customization_file=payload.get(
+            "scheduleCustomizationFile", ".cvstream/schedule-user.json"
+        ),
+        export_dir=payload.get("exportDir", "exports"),
+    )
+
+
 def _resolve_course_target(
     payload: dict[str, Any], target: dict[str, Any]
 ) -> dict[str, Any]:
@@ -68,7 +86,7 @@ def _resolve_course_target(
             raise ValueError("schedule 目标必须提供 scheduleId")
         course = ScheduleService(
             cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json")
-        ).resolve_course(schedule_id)
+        ).resolve_course(schedule_id, semester=target.get("semester"))
         resolved = {
             "courseName": course["courseName"],
             "teacherName": course["teacherName"],
@@ -76,8 +94,9 @@ def _resolve_course_target(
             "courseDate": course_date,
             "scheduleId": schedule_id,
         }
-        if target.get("semester"):
-            resolved["semester"] = target["semester"]
+        resolved_semester = target.get("semester") or course.get("semester")
+        if resolved_semester:
+            resolved["semester"] = resolved_semester
         return resolved
     if source == "manual":
         missing = [
@@ -105,8 +124,8 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
     if action == "health":
         return {"version": __version__, "tools": [
-            "authorize", "authorize-schedule", "get-schedule", "list-courses", "search-courses", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article",
+            "authorize", "authorize-schedule", "get-schedule", "save-schedule-customizations", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
+            "extract-slides", "summarize-course", "read-web-page", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article", "get-training-plan", "analyze-training-plan", "list-focus", "upsert-focus", "delete-focus", "claim-focus-agent-run", "record-focus-agent-run", "run-focus-cycle", "run-course-focus-queue", "acknowledge-course-focus-alert",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
@@ -117,7 +136,62 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         )
     if action == "get-schedule":
         return _schedule_service(payload).get_schedule(
-            refresh=payload.get("refresh", False)
+            refresh=payload.get("refresh", False),
+            semester=payload.get("semester"),
+            include_available_semesters=payload.get(
+                "includeAvailableSemesters", False
+            ),
+            prefetch_available_semesters=payload.get(
+                "prefetchAvailableSemesters", False
+            ),
+        )
+    if action == "save-schedule-customizations":
+        return _schedule_service(payload).save_customizations(payload)
+    if action == "list-focus":
+        return _focus_service(payload).list()
+    if action == "upsert-focus":
+        return _focus_service(payload).upsert(payload.get("item", payload))
+    if action == "delete-focus":
+        return _focus_service(payload).delete(payload["focusId"])
+    if action == "claim-focus-agent-run":
+        return _focus_service(payload).claim_agent_run(
+            payload["focusId"],
+            force=bool(payload.get("force", False)),
+            respect_interval=bool(payload.get("respectInterval", True)),
+        )
+    if action == "record-focus-agent-run":
+        return _focus_service(payload).record_agent_run(
+            payload["focusId"],
+            status=str(payload.get("runStatus") or "completed"),
+            message=str(payload.get("message") or ""),
+            run_id=str(payload.get("runId") or ""),
+        )
+    if action == "run-focus-cycle":
+        return _focus_service(payload).run_cycle(
+            respect_interval=bool(payload.get("respectInterval", False))
+        )
+    if action == "run-course-focus-queue":
+        return _focus_service(payload).run_course_queue()
+    if action == "acknowledge-course-focus-alert":
+        return _focus_service(payload).acknowledge_course_alert(payload["jobKey"])
+    if action in {"get-training-plan", "search-training-plans"}:
+        return TrainingPlanService(
+            cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
+            cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
+            schedule_cache_file=payload.get(
+                "scheduleCacheFile", ".cvstream/schedule.json"
+            ),
+        ).get(refresh=bool(payload.get("refresh", False)))
+    if action == "analyze-training-plan":
+        return TrainingPlanService(
+            cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
+            cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
+            schedule_cache_file=payload.get(
+                "scheduleCacheFile", ".cvstream/schedule.json"
+            ),
+        ).audit(
+            refresh=bool(payload.get("refresh", False)),
+            plan_id=str(payload.get("planId") or ""),
         )
     if action in {"list-jwc", "search-jwc", "search-cse"}:
         if action == "search-cse":
@@ -146,11 +220,25 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _jwc_service(payload).get_article(
             payload["articleId"], refresh=payload.get("refresh", True)
         )
+    if action == "read-web-page":
+        return read_web_page(
+            payload["url"],
+            query=payload.get("query", ""),
+            include_attachments=payload.get("includeAttachments", "auto"),
+            max_attachments=payload.get("maxAttachments", 3),
+            timeout_seconds=payload.get("timeoutSeconds", 20),
+        )
     if action == "list-courses":
         return _course_service(payload).list_courses()
     if action == "search-courses":
         return _course_service(payload).search_courses(
             payload["query"], semester=payload.get("semester")
+        )
+    if action == "list-course-sessions":
+        return _course_service(payload).list_course_sessions(
+            course_name=payload["courseName"],
+            teacher_name=payload["teacherName"],
+            semester=payload.get("semester"),
         )
     if action == "find-course-session":
         target = _resolve_course_target(payload, payload.get("target", payload))
@@ -243,6 +331,8 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             base_url=payload.get("baseUrl"),
             model=payload.get("model"),
         )
+    if action == "parse-document":
+        return parse_document(path=payload["path"], filename=payload.get("filename"))
     raise ValueError(f"未知工具动作: {action}")
 
 

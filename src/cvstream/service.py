@@ -332,6 +332,64 @@ class CourseService:
             result["hint"] = self._course_not_found_hint()
         return result
 
+    def list_course_sessions(
+        self,
+        *,
+        course_name: str,
+        teacher_name: str,
+        semester: str | None = None,
+    ) -> dict[str, Any]:
+        """Discover every published session for one exact portal course."""
+        course_name = _required(course_name, "courseName")
+        teacher_name = _required(teacher_name, "teacherName")
+        with self._page() as page:
+            logs = self._login(page)
+            catalog = self._open_course_catalog(page)
+            search_box = catalog.locator("input[placeholder*='课程名称']").first
+            search_box.fill(course_name)
+            catalog.locator("button.el-button--primary").first.click()
+            catalog.wait_for_url("**/#/advance-search", timeout=15000)
+            catalog.wait_for_timeout(2500)
+            semester_info = self._select_search_filters(catalog, semester)
+            courses = self._read_course_cards(catalog) if semester_info["found"] else []
+            if semester:
+                courses = self._filter_courses_by_semester(courses, semester)
+            matches = self._exact_course_matches(courses, course_name, teacher_name)
+            sessions_by_date: dict[str, dict[str, Any]] = {}
+            for course in matches:
+                detail_page = self._open_course_detail(catalog, course)
+                try:
+                    for session in self._sessions_from_lessons(
+                        self._read_lessons(detail_page)
+                    ):
+                        existing = sessions_by_date.setdefault(
+                            session["date"],
+                            {
+                                "date": session["date"],
+                                "periodNumbers": [],
+                                "teachers": [],
+                            },
+                        )
+                        existing["periodNumbers"] = sorted(
+                            set(existing["periodNumbers"])
+                            | set(session["periodNumbers"])
+                        )
+                        if teacher_name not in existing["teachers"]:
+                            existing["teachers"].append(teacher_name)
+                finally:
+                    detail_page.close()
+        sessions = sorted(sessions_by_date.values(), key=lambda item: item["date"])
+        return {
+            "status": "completed" if matches else "course_not_found",
+            "courseName": course_name,
+            "teacherName": teacher_name,
+            "semester": semester,
+            **semester_info,
+            "courses": matches,
+            "sessions": sessions,
+            "logs": logs,
+        }
+
     @staticmethod
     def _read_lessons(page) -> list[dict[str, Any]]:
         lesson_nodes = page.locator(".list-item.student")

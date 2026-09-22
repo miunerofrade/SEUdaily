@@ -172,7 +172,7 @@ function pageValue(value: unknown, offset: number, limit: number, maxChars: numb
 export const readTaskResultTool = createTool({
   id: "read-seudaily-task-result",
   description:
-    "Read a bounded, paginated section of a full SEUdaily task result using the resultRef returned by another tool. Use only when the compact tool result omitted data needed for the user's request.",
+    "使用其他工具返回的 resultRef，读取完整 SEUdaily 任务结果中有限大小、可分页的部分。只有紧凑工具结果缺少用户问题所需数据时才使用。",
   inputSchema,
   outputSchema,
   execute: async ({ resultRef, jsonPointer, offset, limit, maxChars }) => {

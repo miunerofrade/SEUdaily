@@ -35,6 +35,7 @@ class BrowserRuntime:
         playwright = self._ensure_playwright()
         if self._browser is None or not self._browser.is_connected():
             self._browser = playwright.chromium.launch(
+                channel="msedge",
                 headless=True,
                 args=[
                     "--disable-blink-features=AutomationControlled",
@@ -59,6 +60,7 @@ class BrowserRuntime:
             temporary_context: BrowserContext | None = None
             if visible:
                 temporary_browser = playwright.chromium.launch(
+                    channel="msedge",
                     headless=False,
                     args=[
                         "--disable-blink-features=AutomationControlled",

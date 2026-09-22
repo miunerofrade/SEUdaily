@@ -1,11 +1,18 @@
 import { registerApiRoute } from "@mastra/core/server";
-import { mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, extname, isAbsolute, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 import { projectRoot } from "./runtime-paths.js";
 import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
+import { courseAgentMemory, mastraStorage } from "./storage.js";
+import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, type FocusAgentItem } from "./focus-runtime.js";
+import { isFullAccessEnabled, setFullAccessEnabled } from "./permission-state.js";
+import { storeDocumentContext } from "./document-context.js";
+
+const FOCUS_RESOURCE_ID = "seudaily-focus-local";
 
 const editableEnvironment = [
   "DEEPSEEK_API_KEY",
@@ -15,9 +22,139 @@ const editableEnvironment = [
   "CVSTREAM_PASSWORD",
   "CVSTREAM_ASR_API_KEY",
   "CVSTREAM_WHISPER_MODEL",
+  "CVSTREAM_FULL_ACCESS",
 ] as const;
 
 const secretEnvironment = new Set(["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "CVSTREAM_PASSWORD", "CVSTREAM_ASR_API_KEY"]);
+const agentInstructionsPath = resolve(projectRoot, "AGENTS.md");
+const supportedDocumentExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
+const documentMediaTypes: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+const titleGenerationTasks = new Map<string, Promise<{ title: string; generated: boolean; reason?: string }>>();
+
+function compactTitleInput(value: unknown) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 600) : "";
+}
+
+function cleanGeneratedTitle(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/^[\s“”‘’"'《》【】]+|[\s“”‘’"'《》【】。！？!?，,：:；;]+$/g, "")
+    .replace(/\.(pdf|docx|xlsx|pptx)(?=\s|$)/ig, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40);
+}
+
+function fallbackConversationTitle(titleInput: string) {
+  const withoutExtension = titleInput.replace(/\.(pdf|docx|xlsx|pptx)$/i, "");
+  const cleaned = cleanGeneratedTitle(withoutExtension);
+  return cleaned.length > 24 ? cleaned.slice(0, 24) : cleaned || "新对话";
+}
+
+async function requestConversationTitle(titleInput: string) {
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) throw new Error("未配置 DEEPSEEK_API_KEY");
+  const response = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-flash",
+      messages: [
+        {
+          role: "system",
+          content: "你是对话标题生成器。根据用户请求或附件文件名生成一个可辨识的短标题。跟随用户语言；中文通常6到14字，英文通常3到8词；不要保留 PDF、DOCX、XLSX、PPTX 扩展名，不要引号、句号、emoji或‘关于/讨论’等套话。只返回合法 JSON，格式为 {\"title\":\"标题\"}。",
+        },
+        { role: "user", content: titleInput },
+      ],
+      thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_tokens: 160,
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`DeepSeek 标题生成失败（${response.status}）`);
+  const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const content = result.choices?.[0]?.message?.content;
+  if (!content) return fallbackConversationTitle(titleInput);
+  let parsedTitle: unknown;
+  try {
+    parsedTitle = (JSON.parse(content) as { title?: unknown }).title;
+  } catch {
+    return fallbackConversationTitle(titleInput);
+  }
+  const title = cleanGeneratedTitle(parsedTitle);
+  if (!title) throw new Error("DeepSeek 返回了空标题");
+  return title;
+}
+
+async function generateFirstTurnTitle(input: { threadId: string; resourceId: string; titleInput: string }) {
+  const memoryStore = await mastraStorage.getStore("memory");
+  if (!memoryStore) throw new Error("会话存储不可用");
+  const thread = await memoryStore.getThreadById({ threadId: input.threadId, resourceId: input.resourceId });
+  if (!thread) return { title: "", generated: false, reason: "thread-not-found" };
+  if (typeof thread.metadata?.titleGeneratedAt === "string") {
+    return { title: thread.title?.trim() ?? "", generated: false, reason: "already-generated" };
+  }
+  const history = await memoryStore.listMessages({
+    threadId: input.threadId,
+    resourceId: input.resourceId,
+    perPage: 20,
+    includeTotal: false,
+  });
+  const userMessageCount = history.messages.filter((message) => message.role === "user").length;
+  if (userMessageCount !== 1) {
+    return { title: thread.title?.trim() ?? "", generated: false, reason: "not-first-turn" };
+  }
+  await memoryStore.patchThread({
+    id: input.threadId,
+    metadata: {
+      ...thread.metadata,
+      titleGenerationAttempted: true,
+      titleGenerationAttemptedAt: new Date().toISOString(),
+    },
+  });
+  let title: string;
+  try {
+    title = await requestConversationTitle(input.titleInput);
+  } catch (error) {
+    await memoryStore.patchThread({
+      id: input.threadId,
+      metadata: {
+        ...thread.metadata,
+        titleGenerationAttempted: true,
+        titleGenerationError: error instanceof Error ? error.message : "标题生成失败",
+      },
+    });
+    throw error;
+  }
+  await memoryStore.patchThread({
+    id: input.threadId,
+    title,
+    metadata: {
+      ...thread.metadata,
+      titleGenerationAttempted: true,
+      titleGeneratedAt: new Date().toISOString(),
+    },
+  });
+  return { title, generated: true };
+}
+
+async function readAgentInstructions() {
+  try {
+    return await readFile(agentInstructionsPath, "utf8");
+  } catch {
+    return "";
+  }
+}
 
 function resultResponse(result: ToolResult) {
   return {
@@ -26,6 +163,16 @@ function resultResponse(result: ToolResult) {
     data: result.data,
     warnings: result.warnings,
   };
+}
+
+async function fullResultData(result: ToolResult): Promise<unknown> {
+  if (!result.resultRef) return result.data;
+  try {
+    const full = JSON.parse(await readFile(result.resultRef, "utf8")) as { data?: unknown };
+    return full.data ?? result.data;
+  } catch {
+    return result.data;
+  }
 }
 
 type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
@@ -134,20 +281,182 @@ async function updateEnvFile(updates: Record<string, string>) {
 }
 
 export const appRoutes = [
+  registerApiRoute("/app/conversations/title", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as Record<string, unknown>;
+      const threadId = compactTitleInput(body.threadId);
+      const resourceId = compactTitleInput(body.resourceId);
+      const titleInput = compactTitleInput(body.titleInput);
+      if (!threadId || !resourceId || !titleInput) {
+        return c.json({ error: "缺少生成标题所需的信息" }, 400);
+      }
+      const taskKey = `${resourceId}:${threadId}`;
+      const running = titleGenerationTasks.get(taskKey);
+      if (running) return c.json(await running);
+      const task = generateFirstTurnTitle({ threadId, resourceId, titleInput })
+        .finally(() => titleGenerationTasks.delete(taskKey));
+      titleGenerationTasks.set(taskKey, task);
+      try {
+        return c.json(await task);
+      } catch (error) {
+        return c.json({
+          title: "",
+          generated: false,
+          reason: "generation-failed",
+          error: error instanceof Error ? error.message : "标题生成失败",
+        }, 502);
+      }
+    },
+  }),
   registerApiRoute("/app/schedule", {
     method: "GET",
     requiresAuth: false,
     handler: async (c: any) => {
       const refresh = c.req.query("refresh") === "true";
-      const result = await runPythonTool<ToolResult>("get-schedule", { refresh });
-      let data = result.data;
-      try {
-        const cached = JSON.parse(await readFile(resolve(projectRoot, ".cvstream", "schedule.json"), "utf8")) as Record<string, unknown>;
-        if (Array.isArray(cached.courses)) data = { ...(result.data as Record<string, unknown>), ...cached };
-      } catch {
-        // Missing cache is represented by the tool status and summary.
-      }
+      const semester = c.req.query("semester")?.trim();
+      const includeAvailableSemesters = c.req.query("includeSemesters") === "true";
+      const prefetchAvailableSemesters = c.req.query("prefetchSemesters") === "true";
+      const result = await runPythonTool<ToolResult>("get-schedule", {
+        refresh,
+        includeAvailableSemesters,
+        prefetchAvailableSemesters,
+        ...(semester ? { semester } : {}),
+      });
+      const data = await fullResultData(result);
       return c.json({ ...resultResponse(result), data });
+    },
+  }),
+  registerApiRoute("/app/schedule", {
+    method: "PUT",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as Record<string, unknown>;
+      await runPythonTool<ToolResult>("save-schedule-customizations", body);
+      const result = await runPythonTool<ToolResult>("get-schedule", { refresh: false });
+      const data = await fullResultData(result);
+      return c.json({ ...resultResponse(result), data });
+    },
+  }),
+  registerApiRoute("/app/focus", {
+    method: "GET",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const result = await runPythonTool<ToolResult>("list-focus", {});
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+    },
+  }),
+  registerApiRoute("/app/focus", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as Record<string, unknown>;
+      const creating = typeof body.id !== "string" || !body.id;
+      const focusId = creating ? `focus-${randomUUID()}` : String(body.id);
+      const item = {
+        ...body,
+        id: focusId,
+        threadId: typeof body.threadId === "string" && body.threadId ? body.threadId : focusId,
+        resourceId: typeof body.resourceId === "string" && body.resourceId ? body.resourceId : FOCUS_RESOURCE_ID,
+      };
+      const result = await runPythonTool<ToolResult>("upsert-focus", { item });
+      const data = await fullResultData(result) as { item?: FocusAgentItem };
+      return c.json({ ...resultResponse(result), data });
+    },
+  }),
+  registerApiRoute("/app/focus/:id", {
+    method: "DELETE",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const focusId = c.req.param("id");
+      const listed = await runPythonTool<ToolResult>("list-focus", {});
+      const listData = await fullResultData(listed) as { items?: FocusAgentItem[] };
+      const focus = listData.items?.find((item) => item.id === focusId);
+      const result = await runPythonTool<ToolResult>("delete-focus", { focusId });
+      if (focus?.threadId) await courseAgentMemory.deleteThread(focus.threadId).catch(() => undefined);
+      return c.json(resultResponse(result));
+    },
+  }),
+  registerApiRoute("/app/focus/run", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const courseQueue = await runCourseFocusQueue();
+      await runFocusAgentCycle({ force: true });
+      return c.json({
+        status: "completed",
+        summary: "关注检查已完成；课程任务仅在到达队列执行时间后运行。",
+        data: { courseQueue },
+      });
+    },
+  }),
+  registerApiRoute("/app/focus/:id/run/claim", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json().catch(() => ({})) as { force?: unknown; respectInterval?: unknown };
+      const result = await runPythonTool<ToolResult>("claim-focus-agent-run", {
+        focusId: c.req.param("id"),
+        force: body.force === true,
+        respectInterval: body.respectInterval !== false,
+      });
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+    },
+  }),
+  registerApiRoute("/app/focus/:id/run/record", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as { runId?: unknown; status?: unknown; message?: unknown };
+      const runId = typeof body.runId === "string" ? body.runId : "";
+      if (!runId) return c.json({ error: "runId 不能为空" }, 400);
+      const result = await runPythonTool<ToolResult>("record-focus-agent-run", {
+        focusId: c.req.param("id"),
+        runId,
+        runStatus: body.status === "failed" ? "failed" : "completed",
+        message: typeof body.message === "string" ? body.message : "",
+      });
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+    },
+  }),
+  registerApiRoute("/app/focus/:id/message", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as { message?: unknown };
+      const message = typeof body.message === "string" ? body.message.trim() : "";
+      if (!message) return c.json({ error: "消息不能为空" }, 400);
+      const listed = await runPythonTool<ToolResult>("list-focus", {});
+      const data = await fullResultData(listed) as { items?: FocusAgentItem[] };
+      const focus = data.items?.find((item) => item.id === c.req.param("id"));
+      if (!focus) return c.json({ error: "Focus 不存在" }, 404);
+      const text = await sendFocusAgentMessage(focus, message);
+      return c.json({ status: "completed", data: { text } });
+    },
+  }),
+  registerApiRoute("/app/focus/courses/search", {
+    method: "GET",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const query = c.req.query("q")?.trim();
+      if (!query) return c.json({ error: "请输入课程名称、教师或课程号" }, 400);
+      const semester = c.req.query("semester")?.trim();
+      const result = await runPythonTool<ToolResult>("search-courses", {
+        query,
+        ...(semester ? { semester } : {}),
+      });
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+    },
+  }),
+  registerApiRoute("/app/programs", {
+    method: "GET",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const result = await runPythonTool<ToolResult>("get-training-plan", {
+        refresh: c.req.query("refresh") === "true",
+      });
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
     },
   }),
   registerApiRoute("/app/schedule/authorize", {
@@ -216,6 +525,58 @@ export const appRoutes = [
       return c.json({ path: target, ref: basename(target), sha256: createHash("sha256").update(bytes).digest("hex"), name: typeof body.name === "string" ? body.name : `image.${extension}`, mediaType: match[1], size: bytes.length });
     },
   }),
+  registerApiRoute("/app/documents", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.parseBody();
+      const upload = body?.file;
+      if (!(upload instanceof File)) return c.json({ error: "缺少文档文件" }, 400);
+      const filename = upload.name || "document";
+      const extension = extname(filename).toLowerCase();
+      if (!supportedDocumentExtensions.has(extension)) {
+        return c.json({ error: "仅支持 PDF、DOCX、XLSX、PPTX；不支持旧版 DOC、XLS、PPT" }, 400);
+      }
+      if (upload.size <= 0 || upload.size > 50 * 1024 * 1024) {
+        return c.json({ error: "文档大小必须在 50 MB 以内" }, 413);
+      }
+
+      const bytes = Buffer.from(await upload.arrayBuffer());
+      const validSignature = extension === ".pdf"
+        ? bytes.subarray(0, 5).toString("ascii") === "%PDF-"
+        : bytes[0] === 0x50 && bytes[1] === 0x4b;
+      if (!validSignature) return c.json({ error: "文件内容与扩展名不匹配或文件已损坏" }, 400);
+
+      const temporaryDirectory = await mkdtemp(join(tmpdir(), "cvstream-document-"));
+      const temporaryPath = join(temporaryDirectory, `${randomUUID()}${extension}`);
+      try {
+        await writeFile(temporaryPath, bytes);
+        let result: ToolResult;
+        try {
+          result = await runPythonTool<ToolResult>("parse-document", { path: temporaryPath, filename });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return c.json({ error: `文档解析失败：${message}` }, 422);
+        }
+        const data = await fullResultData(result) as { filename?: string; extension?: string; markdown?: string; charCount?: number } | undefined;
+        if (result.status !== "completed" || !data?.markdown) {
+          return c.json({ error: result.summary || "文档解析失败", warnings: result.warnings }, 422);
+        }
+        const contextRef = randomUUID();
+        storeDocumentContext(contextRef, data.filename || filename, data.markdown);
+        return c.json({
+          filename: data.filename || filename,
+          extension: data.extension || extension,
+          mediaType: documentMediaTypes[extension],
+          contextRef,
+          markdown: data.markdown,
+          charCount: data.charCount ?? data.markdown.length,
+        });
+      } finally {
+        await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    },
+  }),
   registerApiRoute("/app/images/resolve", {
     method: "GET",
     requiresAuth: false,
@@ -262,11 +623,16 @@ export const appRoutes = [
       const values = parseEnv(await readEnvFile());
       return c.json({
         provider: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", editable: false },
+        agentInstructions: await readAgentInstructions(),
         fields: editableEnvironment.map((name) => ({
           name,
           secret: secretEnvironment.has(name),
           configured: Boolean(values[name] || process.env[name]),
-          value: secretEnvironment.has(name) ? "" : (values[name] ?? process.env[name] ?? ""),
+          value: secretEnvironment.has(name)
+            ? ""
+            : name === "CVSTREAM_FULL_ACCESS"
+              ? String(isFullAccessEnabled())
+              : (values[name] ?? process.env[name] ?? ""),
         })),
       });
     },
@@ -275,14 +641,20 @@ export const appRoutes = [
     method: "POST",
     requiresAuth: false,
     handler: async (c: any) => {
-      const body = await c.req.json() as { values?: Record<string, unknown> };
+      const body = await c.req.json() as { values?: Record<string, unknown>; agentInstructions?: unknown };
       const values: Record<string, string> = {};
       for (const name of editableEnvironment) {
         const value = body.values?.[name];
         if (typeof value === "string" && value.trim()) values[name] = value.trim();
       }
+      if (Object.hasOwn(values, "CVSTREAM_FULL_ACCESS")) {
+        setFullAccessEnabled(values.CVSTREAM_FULL_ACCESS === "true" || values.CVSTREAM_FULL_ACCESS === "1" || values.CVSTREAM_FULL_ACCESS === "yes" || values.CVSTREAM_FULL_ACCESS === "on");
+      }
       await updateEnvFile(values);
-      return c.json({ saved: Object.keys(values), restartRequired: true });
+      const agentInstructionsSaved = typeof body.agentInstructions === "string";
+      if (agentInstructionsSaved) await writeFile(agentInstructionsPath, body.agentInstructions as string, "utf8");
+      const restartRequired = Object.keys(values).some((name) => name !== "CVSTREAM_FULL_ACCESS");
+      return c.json({ saved: Object.keys(values), agentInstructionsSaved, restartRequired });
     },
   }),
 ];

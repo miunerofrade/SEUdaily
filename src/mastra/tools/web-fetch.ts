@@ -98,7 +98,7 @@ export const webFetchTool = createTool({
   ...standardToolOutput,
   id: "fetch-web-pages",
   description:
-    "Extract focused content from up to five public web URLs with Tavily. Use after web-search or for URLs explicitly supplied by the user. A query is required so only relevant chunks are returned. Local, private, credentialed, and signed URLs are rejected.",
+    "Remote fallback that uses Tavily to extract query-relevant chunks from up to five public web URLs. Use this tool only after read-web-page has been attempted and failed for the required URL, or when read-web-page cannot process a batch of multiple public web-search results. Never use it for SEU Academic Affairs (jwc.seu.edu.cn), SEU CSE (cse.seu.edu.cn), campus/internal/private URLs, or attachment reading. It does not use the local network, browser session, cookies, or login state. A query is required; local, private, credentialed, and signed URLs are rejected.",
   inputSchema,
   execute: async (input, options): Promise<ToolResult> => {
     const taskId = `fetch-${randomUUID()}`;

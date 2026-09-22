@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { MCPClient } from "@mastra/mcp";
 
 import { projectRoot } from "../runtime-paths.js";
+import { isFullAccessEnabled } from "../permission-state.js";
 
 const outputDir = resolve(projectRoot, ".cvstream", "browser");
 mkdirSync(outputDir, { recursive: true });
@@ -37,7 +38,7 @@ export const playwrightMcpClient = new MCPClient({
         "--headless",
         "--isolated",
         "--browser",
-        "chrome",
+        "msedge",
         "--block-service-workers",
         "--codegen",
         "none",
@@ -53,7 +54,7 @@ export const playwrightMcpClient = new MCPClient({
       inheritDefaultEnv: true,
       forwardInstructions: false,
       timeout: 60_000,
-      requireToolApproval: ({ toolName }) => approvalRequiredTools.has(toolName),
+      requireToolApproval: ({ toolName }) => !isFullAccessEnabled() && approvalRequiredTools.has(toolName),
     },
   },
 });

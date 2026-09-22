@@ -1,30 +1,39 @@
-import type { ChatMessage, Conversation, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
+import type { ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
 export const RESOURCE_ID = "seudaily-web-local";
 const HISTORY_RESOURCES = [RESOURCE_ID, "cvstream-web-local"];
+const DOCUMENT_SECTION_MARKER = "\n\n<!-- cvstream:documents -->";
 
 export type AgentContent = string | Array<
   | { type: "text"; text: string }
   | { type: "image"; image: string; mediaType?: string }
   | { type: "file"; data: string; mediaType: string; filename?: string }
 >;
-export type AgentInput = string | Array<{ role: "user" | "assistant"; content: AgentContent }>;
+export type AgentInput = string | Array<
+  | { role: "user" | "assistant"; content: AgentContent }
+  | { role: "tool"; content: Array<{ type: "tool-approval-response"; approvalId: string; approved: boolean; reason?: string }> }
+>;
 
 type StreamOptions = {
   message: AgentInput;
   threadId: string;
+  resourceId?: string;
+  documents?: DocumentAttachment[];
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
 };
 
-export async function streamAgent({ message, threadId, signal, onEvent }: StreamOptions) {
+export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], signal, onEvent }: StreamOptions) {
   const response = await fetch(AGENT_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       messages: message,
-      memory: { thread: threadId, resource: RESOURCE_ID },
+      memory: { thread: threadId, resource: resourceId },
+      ...(documents.some((document) => document.contextRef) ? {
+        requestContext: { cvstreamDocumentRefs: documents.flatMap((document) => document.contextRef ? [document.contextRef] : []) },
+      } : {}),
     }),
     signal,
   });
@@ -134,6 +143,22 @@ async function storedAttachments(messageId: string, parts: Array<Record<string, 
   return attachments.flat();
 }
 
+function visibleStoredContent(content: string) {
+  const packagedMarker = content.indexOf(DOCUMENT_SECTION_MARKER);
+  const legacyMarker = content.indexOf("\n\n【附件：");
+  const marker = packagedMarker >= 0 ? packagedMarker : legacyMarker;
+  return (marker >= 0 ? content.slice(0, marker) : content).trim();
+}
+
+function legacyStoredDocuments(messageId: string, content: string): DocumentAttachment[] {
+  return [...content.matchAll(/【附件：([^】]+)】(?:\r?\n【字符数：(\d+)】)?/g)].map((match, index) => ({
+    id: `${messageId}-document-${index}`,
+    name: match[1].trim(),
+    mediaType: "application/octet-stream",
+    charCount: Number(match[2] ?? 0),
+  }));
+}
+
 async function fetchThreadMessages(thread: StoredThread): Promise<Conversation | null> {
   const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "100" });
   const response = await fetch(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
@@ -141,15 +166,19 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   const data = await response.json() as { messages?: StoredMessage[] };
   const restored = await Promise.all((data.messages ?? []).map(async (item): Promise<ChatMessage | null> => {
     if (item.role !== "user" && item.role !== "assistant") return null;
-    const content = item.content?.content ?? "";
+    const storedContent = item.content?.content ?? "";
+    const content = item.role === "user" ? visibleStoredContent(storedContent) : storedContent;
     const attachments = item.role === "user" ? await storedAttachments(item.id, item.content?.parts) : undefined;
-    if (!content && item.role === "user" && !attachments?.length) return null;
+    const documents = item.role === "user" ? legacyStoredDocuments(item.id, storedContent) : undefined;
+    if (!content && item.role === "user" && !attachments?.length && !documents?.length) return null;
     return {
       id: item.id,
       role: item.role,
       content,
+      modelContent: item.role === "user" && storedContent !== content ? storedContent : undefined,
       createdAt: Date.parse(item.createdAt),
       attachments,
+      documents,
       tools: item.role === "assistant" ? storedTools(item.content?.parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(item.content?.parts?.some((part) => part.type === "reasoning")),
     } satisfies ChatMessage;
@@ -190,6 +219,21 @@ export async function deleteServerConversation(threadId: string, resourceId?: st
   }
 }
 
+export async function generateConversationTitle(input: {
+  threadId: string;
+  resourceId?: string;
+  titleInput: string;
+}) {
+  const response = await fetch("/app/conversations/title", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...input, resourceId: input.resourceId ?? RESOURCE_ID }),
+  });
+  const result = await response.json() as { title?: string; generated?: boolean; reason?: string; error?: string };
+  if (!response.ok) throw new Error(result.error || "标题生成失败");
+  return result;
+}
+
 export type ScheduleCourse = {
   scheduleId: string;
   courseName: string;
@@ -201,17 +245,147 @@ export type ScheduleCourse = {
   weeks?: number[];
   classroom?: string;
   courseCode?: string;
+  semester?: string;
+  sourceKey: string;
+  source?: "remote" | "custom";
+  customId?: string;
+  occurrenceDate?: string;
+};
+
+export type ScheduleSemesterOption = { value: string; label: string };
+
+export type SemesterSettings = { name: string; startDate: string; totalWeeks: number };
+export type ScheduleCustomizations = {
+  version: number;
+  semester: SemesterSettings;
+  overrides: Record<string, Partial<ScheduleCourse> & { hidden?: boolean }>;
+  customCourses: Array<ScheduleCourse & { customId: string }>;
+  dateOverrides: Array<{
+    id: string;
+    date: string;
+    action: "add" | "replace" | "cancel";
+    targetSourceKey?: string;
+    course?: ScheduleCourse & { customId: string };
+  }>;
 };
 
 export type ScheduleResponse = {
   status: string;
   summary: string;
-  data?: { fetchedAt?: string; count?: number; courses?: ScheduleCourse[]; cacheAvailable?: boolean };
+  data?: {
+    fetchedAt?: string;
+    count?: number;
+    courses?: ScheduleCourse[];
+    cacheAvailable?: boolean;
+    customizations?: ScheduleCustomizations;
+    currentSemester?: string;
+    currentSemesterLabel?: string;
+    selectedSemester?: string;
+    selectedSemesterLabel?: string;
+    availableSemesters?: ScheduleSemesterOption[];
+    prefetchedSemesters?: Array<ScheduleSemesterOption & { count: number; cacheFile: string }>;
+    prefetchFailures?: Array<ScheduleSemesterOption & { message: string }>;
+    prefetchCounts?: Record<string, number>;
+  };
   warnings?: string[];
 };
 
 export type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
 export type NoticeItem = { id: string; title: string; url: string; publishedAt?: string; category?: string; detailStatus?: string };
+export type TrainingPlanSource = {
+  title: string;
+  url: string;
+  path: string[];
+  source: string;
+};
+export type TrainingPlanCourseStatus = "completed" | "studying" | "not_taken" | "upcoming" | "unscheduled" | "unknown";
+export type TrainingPlanCourse = {
+  id: string;
+  code: string;
+  name: string;
+  group: string;
+  nature: string;
+  credits: number;
+  hours: number;
+  semester: string;
+  semesterLabel: string;
+  semesterOptions: Array<{ value: string; label: string; status?: TrainingPlanCourseStatus }>;
+  department: string;
+  assessment: string;
+  note: string;
+  status: TrainingPlanCourseStatus;
+  options: Array<{ name: string; code: string }>;
+  choiceNote: string;
+  source?: "plan" | "schedule";
+  classificationSource?: "ehall" | "schedule_explicit" | "course_code" | "unknown";
+  isGeneralElective?: boolean;
+};
+export type TrainingPlanStudyRequirement = {
+  name: string;
+  nature: string;
+  requiredCredits: number;
+  availableCredits: number;
+  note: string;
+};
+export type TrainingPlan = {
+  id: string;
+  title: string;
+  major: string;
+  grade: string;
+  department: string;
+  track: string;
+  degree: string;
+  startSemester: string;
+  requiredCredits: number;
+  completedCredits: number;
+  progress: number;
+  objective: string;
+  requirements: string;
+  mainCourses: string;
+  currentSemester: string;
+  currentSemesterLabel: string;
+  studyRequirements: TrainingPlanStudyRequirement[];
+  courseGroupCount: number;
+  courseCount: number;
+  courses: TrainingPlanCourse[];
+};
+export type TrainingPlanResponse = {
+  status: string;
+  summary: string;
+  data?: {
+    status: string;
+    message?: string;
+    source: TrainingPlanSource;
+    fetchedAt?: string;
+    plans: TrainingPlan[];
+  };
+  warnings?: string[];
+};
+export type TrainingPlanAccess = TrainingPlanSource & {
+  guidanceTitle: string;
+  guidanceUrl: string;
+};
+export type TrainingPlanArchive = {
+  id: string;
+  title: string;
+  url: string;
+  year?: string;
+  publishedAt?: string;
+  articleTitle: string;
+  articleUrl: string;
+  source: string;
+};
+export type TrainingPlanSearchResponse = {
+  status: string;
+  summary: string;
+  data?: {
+    query: string;
+    currentAccess: TrainingPlanAccess;
+    archives: TrainingPlanArchive[];
+    warnings?: string[];
+  };
+  warnings?: string[];
+};
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -219,8 +393,207 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function fetchSchedule(refresh = false) {
-  return jsonRequest<ScheduleResponse>(`/app/schedule?refresh=${refresh}`);
+export function fetchSchedule(refresh = false, semester = "", includeSemesters = false, prefetchSemesters = false) {
+  const params = new URLSearchParams({ refresh: String(refresh) });
+  if (semester.trim()) params.set("semester", semester.trim());
+  if (includeSemesters) params.set("includeSemesters", "true");
+  if (prefetchSemesters) params.set("prefetchSemesters", "true");
+  return jsonRequest<ScheduleResponse>(`/app/schedule?${params}`);
+}
+
+export function fetchTrainingPlans(refresh = false) {
+  return jsonRequest<TrainingPlanResponse>(`/app/programs?refresh=${refresh}`);
+}
+
+export async function searchTrainingPlans(query = ""): Promise<TrainingPlanSearchResponse> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("q", query.trim());
+  const response = await jsonRequest<TrainingPlanResponse>(`/app/programs${params.size ? `?${params}` : ""}`);
+  const source = response.data?.source ?? { title: "个人方案查询", url: "", path: [], source: "东南大学网上办事服务大厅" };
+  return {
+    status: response.status,
+    summary: response.summary,
+    warnings: response.warnings,
+    data: {
+      query,
+      currentAccess: {
+        ...source,
+        guidanceTitle: source.title,
+        guidanceUrl: source.url,
+      },
+      archives: (response.data?.plans ?? []).map((plan) => ({
+        id: plan.id,
+        title: plan.title,
+        url: source.url,
+        year: plan.grade,
+        articleTitle: plan.title,
+        articleUrl: source.url,
+        source: source.source,
+      })),
+      warnings: response.warnings,
+    },
+  };
+}
+
+export function saveScheduleCustomizations(customizations: ScheduleCustomizations) {
+  return jsonRequest<ScheduleResponse>("/app/schedule", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(customizations),
+  });
+}
+
+export type FocusItem = {
+  id: string;
+  kind: "notice" | "course";
+  title: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastCheckedAt?: string;
+  lastAgentRunAt?: string;
+  threadId?: string;
+  resourceId?: string;
+  description?: string;
+  generatedQueries?: string[];
+  keywords?: string[];
+  categories?: string[];
+  sourceKey?: string;
+  sourceKeys?: string[];
+  courseSource?: "schedule" | "portal";
+  courseName?: string;
+  teacherNames?: string[];
+  semester?: string;
+  summary?: boolean;
+  summaryInstructions?: string;
+};
+
+export type FocusEvent = {
+  id: string;
+  focusId: string;
+  focusTitle: string;
+  kind: "notice" | "course";
+  type: string;
+  createdAt: string;
+  article?: NoticeItem;
+  courseDate?: string;
+  courseName?: string;
+  notePath?: string;
+  message?: string;
+  reason?: string;
+};
+
+export type FocusResponse = {
+  status: string;
+  summary: string;
+  data?: { item?: FocusItem; items?: FocusItem[]; activity?: FocusEvent[]; jobs?: Record<string, unknown>; lastRunAt?: string };
+  warnings?: string[];
+};
+
+export function fetchFocus() { return jsonRequest<FocusResponse>("/app/focus"); }
+export function saveFocus(item: Partial<FocusItem>) {
+  return jsonRequest<FocusResponse>("/app/focus", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item),
+  });
+}
+export function deleteFocus(id: string) {
+  return jsonRequest<FocusResponse>(`/app/focus/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+export function runFocus() { return jsonRequest<FocusResponse>("/app/focus/run", { method: "POST" }); }
+
+export type FocusRunClaim = {
+  claimed?: boolean;
+  reason?: "disabled" | "interval" | "running" | string;
+  remainingSeconds?: number;
+  runId?: string;
+  item?: FocusItem;
+};
+
+export function claimFocusRun(id: string, options: { force?: boolean; respectInterval?: boolean } = {}) {
+  return jsonRequest<{ status: string; data?: FocusRunClaim }>(`/app/focus/${encodeURIComponent(id)}/run/claim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+}
+
+export function recordFocusRun(id: string, runId: string, status: "completed" | "failed", message: string) {
+  return jsonRequest<{ status: string }>(`/app/focus/${encodeURIComponent(id)}/run/record`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId, status, message }),
+  });
+}
+
+export async function fetchFocusMessages(item: FocusItem): Promise<ChatMessage[]> {
+  if (!item.threadId || !item.resourceId) return [];
+  const query = new URLSearchParams({ resourceId: item.resourceId, perPage: "100" });
+  const response = await fetch(`/api/memory/threads/${encodeURIComponent(item.threadId)}/messages?${query}`);
+  if (!response.ok) return [];
+  const data = await response.json() as { messages?: StoredMessage[] };
+  const messages = await Promise.all((data.messages ?? []).map(async (stored): Promise<ChatMessage | null> => {
+    if (stored.role !== "user" && stored.role !== "assistant") return null;
+    const content = stored.content?.content ?? "";
+    const attachments = stored.role === "user" ? await storedAttachments(stored.id, stored.content?.parts) : undefined;
+    if (!content && stored.role === "user" && !attachments?.length) return null;
+    return {
+      id: stored.id,
+      role: stored.role,
+      content,
+      createdAt: Date.parse(stored.createdAt),
+      attachments,
+      tools: stored.role === "assistant" ? storedTools(stored.content?.parts) : undefined,
+      reasoningDone: stored.role === "assistant" && Boolean(stored.content?.parts?.some((part) => part.type === "reasoning")),
+    };
+  }));
+  return messages.filter((message): message is ChatMessage => message !== null);
+}
+
+export async function loadFocusConversations(): Promise<Conversation[]> {
+  const response = await fetchFocus();
+  const conversations = await Promise.all((response.data?.items ?? []).map(async (item): Promise<Conversation | null> => {
+    const messages = await fetchFocusMessages(item);
+    if (!messages.length) return null;
+    return {
+      id: item.threadId || item.id,
+      resourceId: item.resourceId,
+      focusId: item.id,
+      title: item.title,
+      createdAt: Date.parse(item.createdAt),
+      updatedAt: messages.at(-1)?.createdAt ?? Date.parse(item.updatedAt),
+      messages,
+    };
+  }));
+  return conversations.filter((conversation): conversation is Conversation => conversation !== null)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export function sendFocusMessage(id: string, message: string) {
+  return jsonRequest<{ status: string; data?: { text?: string } }>(`/app/focus/${encodeURIComponent(id)}/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+}
+
+export type PortalCourse = {
+  title: string;
+  teacher: string;
+  semester: string;
+  lessonCount?: string;
+};
+
+export type PortalCourseSearchResponse = {
+  status: string;
+  summary: string;
+  data?: { courses?: PortalCourse[]; availableSemesters?: string[]; selectedSemester?: string };
+  warnings?: string[];
+};
+
+export function searchPortalCourses(description: string, semester = "") {
+  const params = new URLSearchParams({ q: description });
+  if (semester.trim()) params.set("semester", semester.trim());
+  return jsonRequest<PortalCourseSearchResponse>(`/app/focus/courses/search?${params}`);
 }
 
 export function authorizeSchedule() {
@@ -251,12 +624,24 @@ export function uploadTemporaryImage(image: { dataUrl: string; name: string }) {
   });
 }
 
+export async function uploadDocument(file: File) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const response = await fetch("/app/documents", { method: "POST", body: form });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({})) as { error?: string };
+    throw new Error(detail.error || `文档解析失败（${response.status}）`);
+  }
+  return await response.json() as { filename: string; extension: string; mediaType: string; contextRef: string; markdown: string; charCount: number };
+}
+
 export function fetchNotices(refresh = true) {
   return jsonRequest<{ status: string; summary: string; data?: { results?: NoticeItem[]; source?: string }; warnings?: string[] }>(`/app/notices?refresh=${refresh}`);
 }
 
 export type SettingsPayload = {
   provider: { name: string; baseUrl: string; editable: boolean };
+  agentInstructions: string;
   fields: Array<{ name: string; secret: boolean; configured: boolean; value: string }>;
 };
 
@@ -264,10 +649,18 @@ export function fetchSettings() {
   return jsonRequest<SettingsPayload>("/app/settings");
 }
 
-export function saveSettings(values: Record<string, string>) {
-  return jsonRequest<{ saved: string[]; restartRequired: boolean }>("/app/settings", {
+export function saveSettings(values: Record<string, string>, agentInstructions: string) {
+  return jsonRequest<{ saved: string[]; agentInstructionsSaved: boolean; restartRequired: boolean }>("/app/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values }),
+    body: JSON.stringify({ values, agentInstructions }),
+  });
+}
+
+export function saveFullAccess(enabled: boolean) {
+  return jsonRequest<{ saved: string[]; agentInstructionsSaved: boolean; restartRequired: boolean }>("/app/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ values: { CVSTREAM_FULL_ACCESS: String(enabled) } }),
   });
 }

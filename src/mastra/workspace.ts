@@ -6,6 +6,7 @@ import {
 
 import { createCommandSandbox } from "./native-command-sandbox.js";
 import { projectRoot, sandboxWorkspaceRoot } from "./runtime-paths.js";
+import { isFullAccessEnabled } from "./permission-state.js";
 
 const commandTimeout = Number.parseInt(
   process.env.CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS ?? "120000",
@@ -15,7 +16,6 @@ const commandTimeout = Number.parseInt(
 const timeout = Number.isFinite(commandTimeout) && commandTimeout > 0
   ? commandTimeout
   : 120_000;
-
 export const commandSandboxSelection = createCommandSandbox({
   id: "seudaily-native-command-runtime",
   projectRoot,
@@ -43,28 +43,31 @@ export const seudailyWorkspace = new Workspace({
     [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: { maxOutputTokens: 1_000 },
     [WORKSPACE_TOOLS.FILESYSTEM.GREP]: { maxOutputTokens: 2_000 },
     [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
-      requireApproval: true,
+      requireApproval: () => !isFullAccessEnabled(),
       requireReadBeforeWrite: true,
       maxOutputTokens: 1_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
-      requireApproval: true,
+      requireApproval: () => !isFullAccessEnabled(),
       requireReadBeforeWrite: true,
       maxOutputTokens: 1_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: {
-      requireApproval: true,
+      requireApproval: () => !isFullAccessEnabled(),
       maxOutputTokens: 1_000,
     },
-    [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: { enabled: false },
+    [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
+      enabled: () => isFullAccessEnabled(),
+      requireApproval: () => !isFullAccessEnabled(),
+    },
     [WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT]: { enabled: false },
     [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
-      requireApproval: true,
+      requireApproval: () => !isFullAccessEnabled(),
       maxOutputTokens: 2_500,
     },
     [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: { maxOutputTokens: 2_000 },
     [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
-      requireApproval: true,
+      requireApproval: () => !isFullAccessEnabled(),
       maxOutputTokens: 1_000,
     },
   },
