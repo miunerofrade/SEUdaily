@@ -99,6 +99,12 @@ CVSTREAM_ASR_API_KEY=
 首次安装依赖后，推荐用一个命令同时启动 Agent 后端和 Web 前端：
 
 ```bash
+uv run seudaily start
+```
+
+如果已经激活项目的 `.venv`，可以直接运行：
+
+```bash
 seudaily start
 ```
 
