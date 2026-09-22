@@ -3,4 +3,4 @@
 The ``cvstream`` import namespace remains available for 1.x compatibility.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
