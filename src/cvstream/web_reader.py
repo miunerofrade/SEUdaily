@@ -30,7 +30,7 @@ _SPACE = re.compile(r"\s+")
 _SENSITIVE_QUERY_KEY = re.compile(r"token|key|auth|signature|cookie|credential|password|secret", re.I)
 _ATTACHMENT_INTENT = re.compile(r"附件|文档|文件|PDF|表格|名单|下载|attachment|document", re.I)
 _TRUSTED_CAMPUS_HOSTS = {"jwc.seu.edu.cn", "cse.seu.edu.cn"}
-_TRUSTED_MIXED_DNS_SUFFIXES = (".wikipedia.org",)
+_TRUSTED_MIXED_DNS_SUFFIXES = (".seu.edu.cn", ".wikipedia.org")
 
 
 def _clean(value: str) -> str:

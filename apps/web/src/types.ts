@@ -37,6 +37,18 @@ export type ToolRun = {
   result?: ToolResult;
 };
 
+export type AgentProcessEntry =
+  | {
+      id: string;
+      type: "reasoning" | "narration";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "tool";
+      toolId: string;
+    };
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -46,6 +58,7 @@ export type ChatMessage = {
   documents?: DocumentAttachment[];
   createdAt: number;
   tools?: ToolRun[];
+  process?: AgentProcessEntry[];
   reasoningActive?: boolean;
   reasoningDone?: boolean;
   streaming?: boolean;

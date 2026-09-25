@@ -203,7 +203,8 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
 - `authorize-schedule-portal`：默认清理旧的 eHall Cookie，在全新的可见窗口中自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。它只清理课表门户会话，不会删除 Mastra 对话或课表缓存；如需保留 Cookie，可传 `resetSession: false`。
-- `get-course-schedule`：默认读取当前学期的本地课表缓存；可传 `semester: "2025-2026-2"` 切换并读取往年课表。通常 `1=暑期学校`、`2=秋季学期`、`3=春季学期`，但实际可用值始终以学校动态返回的 `availableSemesters` 为准，其他数字尾码也会保留。各学期使用独立缓存，`refresh: true` 只更新选中的学期；设置 `includeAvailableSemesters: true` 可读取完整列表，配合 `prefetchAvailableSemesters: true` 会在同一认证会话中顺序获取并缓存全部可访问课表。返回值还包含 `currentSemester`、`currentSemesterLabel`、`selectedSemester`、`selectedSemesterLabel` 和批量同步结果。
+- `get-course-schedule`：默认读取当前学期的完整课表，返回全部课程，不截取前 12 门；可传 `semester: "2025-2026-2"` 切换并读取往年课表。传 `date: "YYYY-MM-DD"` 时按学期起始日期、教学周、星期、单双周和日期调整筛选当天课程；`date` 省略或为空时返回完整课表。通常 `1=暑期学校`、`2=秋季学期`、`3=春季学期`，但实际可用值始终以学校动态返回的 `availableSemesters` 为准，其他数字尾码也会保留。各学期使用独立缓存，`refresh: true` 只更新选中的学期；设置 `includeAvailableSemesters: true` 可读取完整列表，配合 `prefetchAvailableSemesters: true` 会在同一认证会话中顺序获取并缓存全部可访问课表。返回值还包含 `currentSemester`、`currentSemesterLabel`、`selectedSemester`、`selectedSemesterLabel` 和批量同步结果。
+- `get-current-date`：返回 Asia/Shanghai 当前日期、星期和时间戳，供“今天/明天”等相对日期查询使用；不应通过终端命令或读取本地文件获取日期。
 - 当前远端课表保存在 `.cvstream/schedule.json`，指定往年学期的课表保存在 `.cvstream/schedule.<semester>.json`；学期展示设置和用户修改保存在 `.cvstream/schedule-user.json`，重新抓取不会覆盖用户修改。Focus 规则、事件与任务幂等记录保存在 `.cvstream/focus.json`。
 - `search-seu-academic-affairs`：先用条件请求校验相关公告列表并立即返回，命中详情交给后台并发同步；支持“最新一条”“最近 N 天”和历史查询。
 - `get-seu-academic-affairs-notice`：按搜索返回的稳定 ID 读取一条公告正文与附件链接，需要时可同步校验详情页。

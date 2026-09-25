@@ -325,3 +325,184 @@ def test_user_schedule_overlay_is_separate_from_remote_cache(tmp_path: Path):
 def test_semester_date_and_week_conversion():
     assert ScheduleService.week_for_date("2026-09-07", date(2026, 9, 20)) == 2
     assert ScheduleService.date_for_weekday("2026-09-07", 3, 4).isoformat() == "2026-09-24"
+
+
+def test_schedule_date_filter_keeps_full_schedule_when_date_is_empty(tmp_path: Path):
+    cache_file = tmp_path / "schedule.json"
+    service = ScheduleService(cache_file=cache_file, customization_file=tmp_path / "user.json")
+    courses = [
+        {
+            "courseName": "周一课程",
+            "teacherName": "教师一",
+            "weekday": 1,
+            "startPeriod": 1,
+            "endPeriod": 2,
+            "weeklyPeriods": [1, 2],
+            "weeks": [1],
+            "classroom": "教一-101",
+        },
+        {
+            "courseName": "周二课程",
+            "teacherName": "教师二",
+            "weekday": 2,
+            "startPeriod": 3,
+            "endPeriod": 4,
+            "weeklyPeriods": [3, 4],
+            "weeks": [1],
+            "classroom": "教二-202",
+        },
+        {
+            "courseName": "下一周课程",
+            "teacherName": "教师三",
+            "weekday": 2,
+            "startPeriod": 5,
+            "endPeriod": 6,
+            "weeklyPeriods": [5, 6],
+            "weeks": [2],
+            "classroom": "教三-303",
+        },
+    ]
+    ScheduleService._write_json_atomic(
+        cache_file,
+        {"version": 2, "status": "fresh", "count": len(courses), "courses": courses},
+    )
+    service.save_customizations(
+        {
+            "semester": {"name": "测试学期", "startDate": "2026-09-21", "totalWeeks": 18},
+            "overrides": {},
+            "customCourses": [],
+            "dateOverrides": [],
+        }
+    )
+
+    full = service.get_schedule()
+    filtered = service.get_schedule(target_date="2026-09-22")
+
+    assert len(full["courses"]) == 3
+    assert full["count"] == 3
+    assert [item["courseName"] for item in filtered["courses"]] == ["周二课程"]
+    assert filtered["dateFilter"] == {
+        "requestedDate": "2026-09-22",
+        "weekday": 2,
+        "applied": True,
+        "semesterStartDate": "2026-09-21",
+        "week": 1,
+        "matchedCount": 1,
+    }
+
+
+def test_schedule_date_filter_reports_missing_semester_start_date(tmp_path: Path):
+    cache_file = tmp_path / "schedule.json"
+    service = ScheduleService(cache_file=cache_file, customization_file=tmp_path / "user.json")
+    ScheduleService._write_json_atomic(
+        cache_file,
+        {"version": 2, "status": "fresh", "count": 1, "courses": [{"courseName": "课程"}]},
+    )
+
+    result = service.get_schedule(target_date="2026-09-22")
+
+    assert result["status"] == "partial"
+    assert result["courses"] == []
+    assert result["dateFilter"]["reason"] == "missing_semester_start_date"
+
+
+def test_agent_schedule_change_adds_then_updates_custom_course(tmp_path: Path):
+    customization_file = tmp_path / "schedule-user.json"
+    service = ScheduleService(
+        cache_file=tmp_path / "schedule.json",
+        customization_file=customization_file,
+    )
+
+    added = service.apply_agent_change(
+        {
+            "operation": "add",
+            "course": {
+                "courseName": "测试课程",
+                "teacherName": "张老师",
+                "weekday": 3,
+                "startPeriod": 3,
+                "endPeriod": 4,
+                "weeks": [1, 2, 3],
+                "classroom": "教一-101",
+            },
+        }
+    )
+    source_key = added["change"]["sourceKey"]
+    updated = service.apply_agent_change(
+        {
+            "operation": "update",
+            "sourceKey": source_key,
+            "changes": {"classroom": "教二-202", "startPeriod": 5, "endPeriod": 6},
+        }
+    )
+
+    course = updated["customizations"]["customCourses"][0]
+    assert course["courseName"] == "测试课程"
+    assert course["classroom"] == "教二-202"
+    assert course["weeklyPeriods"] == [5, 6]
+
+
+def test_agent_schedule_change_moves_one_occurrence(tmp_path: Path):
+    cache_file = tmp_path / "schedule.json"
+    customization_file = tmp_path / "schedule-user.json"
+    service = ScheduleService(cache_file=cache_file, customization_file=customization_file)
+    ScheduleService._write_json_atomic(
+        cache_file,
+        {
+            "version": 2,
+            "courses": [
+                {
+                    "courseName": "计算机组成原理",
+                    "teacherName": "张老师",
+                    "weekday": 4,
+                    "startPeriod": 3,
+                    "endPeriod": 5,
+                    "weeklyPeriods": [3, 4, 5],
+                    "weeks": [1, 2, 3, 4, 5, 6, 7, 8],
+                    "classroom": "教一-201",
+                    "courseCode": "TEST001",
+                }
+            ],
+        },
+    )
+    service.save_customizations(
+        {
+            "semester": {"name": "测试学期", "startDate": "2026-09-21", "totalWeeks": 16},
+            "overrides": {},
+            "customCourses": [],
+            "dateOverrides": [],
+        }
+    )
+    source_key = service.get_schedule()["courses"][0]["sourceKey"]
+
+    result = service.apply_agent_change(
+        {
+            "operation": "move",
+            "sourceKey": source_key,
+            "fromDate": "2026-09-24",
+            "toDate": "2026-11-14",
+            "changes": {"startPeriod": 6, "endPeriod": 8},
+        }
+    )
+
+    overrides = result["customizations"]["dateOverrides"]
+    assert overrides[0]["action"] == "cancel"
+    assert overrides[0]["targetSourceKey"] == source_key
+    assert overrides[1]["action"] == "add"
+    assert overrides[1]["date"] == "2026-11-14"
+    assert overrides[1]["course"]["weeklyPeriods"] == [6, 7, 8]
+
+
+def test_get_schedule_local_only_never_fetches_remote(tmp_path: Path, monkeypatch):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+
+    def fail_remote(**_kwargs):
+        raise AssertionError("local_only must not access the remote timetable")
+
+    monkeypatch.setattr(service, "_fetch_remote", fail_remote)
+
+    result = service.get_schedule(local_only=True)
+
+    assert result["status"] == "empty"
+    assert result["courses"] == []
+    assert result["localOnly"] is True

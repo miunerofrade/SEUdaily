@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
+import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
 export const RESOURCE_ID = "seudaily-web-local";
@@ -23,6 +23,26 @@ type StreamOptions = {
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
 };
+
+function errorDetail(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const message = typeof record.message === "string" ? record.message.trim() : "";
+  if (message) return name && !message.startsWith(`${name}:`) ? `${name}: ${message}` : message;
+
+  for (const key of ["error", "cause", "reason", "detail"]) {
+    const nested = errorDetail(record[key]);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+function agentErrorMessage(value: unknown) {
+  return errorDetail(value) || "Agent 请求失败，但服务端没有提供错误详情。";
+}
 
 export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], signal, onEvent }: StreamOptions) {
   const response = await fetch(AGENT_ENDPOINT, {
@@ -55,11 +75,18 @@ export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID,
       .map((line) => line.slice(5).trimStart())
       .join("\n");
     if (!data || data === "[DONE]") return;
+    let event: StreamEvent;
     try {
-      onEvent(JSON.parse(data) as StreamEvent);
+      event = JSON.parse(data) as StreamEvent;
     } catch {
       // Ignore keep-alives or non-JSON server diagnostics.
+      return;
     }
+    if (event.type === "error") {
+      const payload = event.payload ?? {};
+      throw new Error(agentErrorMessage(payload.error ?? event.data ?? payload));
+    }
+    onEvent(event);
   };
 
   while (true) {
@@ -73,6 +100,20 @@ export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID,
       break;
     }
   }
+}
+
+export type AgentActionRequest = {
+  id: string;
+  kind: "create-focus" | "modify-schedule";
+  text: string;
+  expiresAt?: string;
+};
+
+export function activateAgentActionRequest(id: string) {
+  return jsonRequest<{ status: string; actionRequest: AgentActionRequest }>(
+    `/app/action-requests/${encodeURIComponent(id)}/activate`,
+    { method: "POST" },
+  );
 }
 
 type StoredThread = {
@@ -106,6 +147,57 @@ function storedTools(parts: Array<Record<string, unknown>> = []): ToolRun[] {
       result,
     } satisfies ToolRun];
   });
+}
+
+function storedPartText(part: Record<string, unknown>) {
+  if (typeof part.text === "string") return part.text;
+  if (typeof part.reasoning === "string") return part.reasoning;
+  if (!Array.isArray(part.details)) return "";
+  return part.details.flatMap((detail) => (
+    detail && typeof detail === "object" && typeof (detail as Record<string, unknown>).text === "string"
+      ? [String((detail as Record<string, unknown>).text)]
+      : []
+  )).join("");
+}
+
+function finalStoredTextIndex(parts: Array<Record<string, unknown>> = []) {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (parts[index].type === "text" && storedPartText(parts[index]).trim()) return index;
+  }
+  return -1;
+}
+
+function storedProcess(parts: Array<Record<string, unknown>> = []): AgentProcessEntry[] {
+  const finalTextIndex = finalStoredTextIndex(parts);
+  return parts.flatMap((part, index): AgentProcessEntry[] => {
+    if (part.type === "reasoning") {
+      const text = storedPartText(part).trim();
+      return text ? [{ id: `reasoning-${index}`, type: "reasoning", text }] : [];
+    }
+    if (part.type === "text" && index !== finalTextIndex) {
+      const text = storedPartText(part).trim();
+      return text ? [{ id: `narration-${index}`, type: "narration", text }] : [];
+    }
+    if (part.type === "tool-invocation" && part.toolInvocation && typeof part.toolInvocation === "object") {
+      const invocation = part.toolInvocation as Record<string, unknown>;
+      const toolId = String(invocation.toolCallId ?? `stored-${index}`);
+      return [{ id: `tool-${toolId}`, type: "tool", toolId }];
+    }
+    return [];
+  });
+}
+
+function storedAssistantContent(parts: Array<Record<string, unknown>> = [], fallback = "") {
+  const finalTextIndex = finalStoredTextIndex(parts);
+  return finalTextIndex >= 0 ? storedPartText(parts[finalTextIndex]).trim() : fallback;
+}
+
+function storedAssistantError(parts: Array<Record<string, unknown>> = []) {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part.type === "error") return agentErrorMessage(part.error ?? part);
+  }
+  return "";
 }
 
 const storedImagePaths = new Map<string, string | null>();
@@ -167,7 +259,8 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   const restored = await Promise.all((data.messages ?? []).map(async (item): Promise<ChatMessage | null> => {
     if (item.role !== "user" && item.role !== "assistant") return null;
     const storedContent = item.content?.content ?? "";
-    const content = item.role === "user" ? visibleStoredContent(storedContent) : storedContent;
+    const parts = item.content?.parts ?? [];
+    const content = item.role === "user" ? visibleStoredContent(storedContent) : storedAssistantContent(parts, storedContent);
     const attachments = item.role === "user" ? await storedAttachments(item.id, item.content?.parts) : undefined;
     const documents = item.role === "user" ? legacyStoredDocuments(item.id, storedContent) : undefined;
     if (!content && item.role === "user" && !attachments?.length && !documents?.length) return null;
@@ -179,8 +272,10 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       createdAt: Date.parse(item.createdAt),
       attachments,
       documents,
-      tools: item.role === "assistant" ? storedTools(item.content?.parts) : undefined,
-      reasoningDone: item.role === "assistant" && Boolean(item.content?.parts?.some((part) => part.type === "reasoning")),
+      tools: item.role === "assistant" ? storedTools(parts) : undefined,
+      process: item.role === "assistant" ? storedProcess(parts) : undefined,
+      reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),
+      error: item.role === "assistant" ? storedAssistantError(parts) || undefined : undefined,
     } satisfies ChatMessage;
   }));
   const messages = restored.filter((message): message is ChatMessage => message !== null);
@@ -309,7 +404,7 @@ export type TrainingPlanCourse = {
   hours: number;
   semester: string;
   semesterLabel: string;
-  semesterOptions: Array<{ value: string; label: string; status?: TrainingPlanCourseStatus }>;
+  semesterOptions: Array<{ value: string; label: string; status?: TrainingPlanCourseStatus; manualStatus?: boolean }>;
   department: string;
   assessment: string;
   note: string;
@@ -319,6 +414,7 @@ export type TrainingPlanCourse = {
   source?: "plan" | "schedule";
   classificationSource?: "ehall" | "schedule_explicit" | "course_code" | "unknown";
   isGeneralElective?: boolean;
+  manualStatus?: boolean;
 };
 export type TrainingPlanStudyRequirement = {
   name: string;
@@ -337,8 +433,16 @@ export type TrainingPlan = {
   degree: string;
   startSemester: string;
   requiredCredits: number;
+  officialCompletedCredits?: number;
   completedCredits: number;
   progress: number;
+  creditSummary?: {
+    countedCompleted: number;
+    studying: number;
+    remaining: number;
+    generalElectiveCompleted: number;
+    manualAdjustment?: number;
+  };
   objective: string;
   requirements: string;
   mainCourses: string;
@@ -403,6 +507,19 @@ export function fetchSchedule(refresh = false, semester = "", includeSemesters =
 
 export function fetchTrainingPlans(refresh = false) {
   return jsonRequest<TrainingPlanResponse>(`/app/programs?refresh=${refresh}`);
+}
+
+export function saveTrainingPlanCourseStatus(input: {
+  planId: string;
+  courseId: string;
+  semester: string;
+  status: "auto" | "completed" | "studying" | "not_taken";
+}) {
+  return jsonRequest<TrainingPlanResponse>("/app/programs/course-status", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function searchTrainingPlans(query = ""): Promise<TrainingPlanSearchResponse> {
@@ -533,7 +650,9 @@ export async function fetchFocusMessages(item: FocusItem): Promise<ChatMessage[]
   const data = await response.json() as { messages?: StoredMessage[] };
   const messages = await Promise.all((data.messages ?? []).map(async (stored): Promise<ChatMessage | null> => {
     if (stored.role !== "user" && stored.role !== "assistant") return null;
-    const content = stored.content?.content ?? "";
+    const storedContent = stored.content?.content ?? "";
+    const parts = stored.content?.parts ?? [];
+    const content = stored.role === "assistant" ? storedAssistantContent(parts, storedContent) : storedContent;
     const attachments = stored.role === "user" ? await storedAttachments(stored.id, stored.content?.parts) : undefined;
     if (!content && stored.role === "user" && !attachments?.length) return null;
     return {
@@ -542,8 +661,9 @@ export async function fetchFocusMessages(item: FocusItem): Promise<ChatMessage[]
       content,
       createdAt: Date.parse(stored.createdAt),
       attachments,
-      tools: stored.role === "assistant" ? storedTools(stored.content?.parts) : undefined,
-      reasoningDone: stored.role === "assistant" && Boolean(stored.content?.parts?.some((part) => part.type === "reasoning")),
+      tools: stored.role === "assistant" ? storedTools(parts) : undefined,
+      process: stored.role === "assistant" ? storedProcess(parts) : undefined,
+      reasoningDone: stored.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),
     };
   }));
   return messages.filter((message): message is ChatMessage => message !== null);

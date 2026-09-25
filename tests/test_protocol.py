@@ -85,3 +85,17 @@ def test_protocol_keeps_full_result_on_disk_and_compacts_conversation_data(
     assert any("resultRef" in warning for warning in result["warnings"])
     full = json.loads(Path(result["resultRef"]).read_text(encoding="utf-8"))
     assert len(full["data"]["courses"]) == 20
+
+
+def test_protocol_keeps_all_schedule_courses_in_model_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("CVSTREAM_PROJECT_ROOT", str(tmp_path))
+    courses = [{"courseName": f"课程 {index}"} for index in range(20)]
+
+    result = normalize_tool_result(
+        "get-schedule",
+        {"status": "completed", "count": 20, "courses": courses},
+        requested_task_id="task-schedule-large",
+    )
+
+    assert len(result["data"]["courses"]) == 20
+    assert not any("resultRef" in warning for warning in result["warnings"])

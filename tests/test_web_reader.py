@@ -100,7 +100,7 @@ def test_reads_normal_web_page_without_downloading_attachment(
     assert opener.opened == [url]
 
 
-@pytest.mark.parametrize("host", ["jwc.seu.edu.cn", "cse.seu.edu.cn"])
+@pytest.mark.parametrize("host", ["jwc.seu.edu.cn", "cse.seu.edu.cn", "tyx.seu.edu.cn", "any-campus-service.seu.edu.cn"])
 def test_empty_webplus_page_automatically_parses_pdf_and_cleans_temp_file(
     host: str,
     monkeypatch: pytest.MonkeyPatch,

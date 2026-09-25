@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -930,13 +931,33 @@ class JwcService:
         with opener.open(Request(list_url, headers=headers), timeout=self.timeout_seconds) as response:
             encoding = response.headers.get_content_charset() or "utf-8"
             listing_html = response.read().decode(encoding, errors="replace")
-        search_path_match = re.search(r'id="securl" value="([^"]+)"', listing_html)
-        if not search_path_match:
-            raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
-        search_page = urljoin(list_url, search_path_match.group(1))
-        with opener.open(Request(search_page, headers=headers), timeout=self.timeout_seconds) as response:
-            encoding = response.headers.get_content_charset() or "utf-8"
-            search_html = response.read().decode(encoding, errors="replace")
+        search_form_match = re.search(
+            r"<form\b[^>]+action=['\"]([^'\"]*?/search/new\.rst\?[^'\"]*)['\"]",
+            listing_html,
+            re.I,
+        )
+        if search_form_match:
+            search_page = urljoin(list_url, unescape(search_form_match.group(1)))
+            form_request = Request(
+                search_page,
+                data=urlencode({"keyword": query, "submit": ""}).encode(),
+                headers={
+                    **headers,
+                    "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                },
+                method="POST",
+            )
+            with opener.open(form_request, timeout=self.timeout_seconds) as response:
+                encoding = response.headers.get_content_charset() or "utf-8"
+                search_html = response.read().decode(encoding, errors="replace")
+        else:
+            search_path_match = re.search(r'id="securl" value="([^"]+)"', listing_html)
+            if not search_path_match:
+                raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
+            search_page = urljoin(list_url, search_path_match.group(1))
+            with opener.open(Request(search_page, headers=headers), timeout=self.timeout_seconds) as response:
+                encoding = response.headers.get_content_charset() or "utf-8"
+                search_html = response.read().decode(encoding, errors="replace")
         endpoint_match = re.search(r"url:'([^']*searchCon/create\.rst\?[^']+)'", search_html)
         if not endpoint_match:
             raise RuntimeError(f"无法解析站内搜索接口: {search_page}")
@@ -944,7 +965,7 @@ class JwcService:
         infos = [
             {"field": "pageIndex", "value": 1},
             {"field": "group", "value": 0},
-            {"field": "searchType", "value": ""},
+            {"field": "searchType", "value": "1" if self.config.key == "cse" else ""},
             {"field": "keyword", "value": query},
             {"field": "recommend", "value": 1},
             *({"field": field, "value": ""} for field in (4, 5, 6, 7)),

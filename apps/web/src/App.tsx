@@ -42,11 +42,12 @@ import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { deleteServerConversation, fetchSettings, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveFullAccess, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
-import type { AgentContent, AgentInput } from "./api";
+import { activateAgentActionRequest, deleteServerConversation, fetchSettings, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveFullAccess, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
+import type { AgentActionRequest, AgentContent, AgentInput } from "./api";
 import { normalizeMathMarkdown } from "./markdown";
 import { SidebarIcon } from "./sidebar-icons";
-import type { ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
+import { addProcessTool, appendProcessText, finalizeProcessAnswer } from "./stream-state";
+import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 import { FocusPage, LibraryPage, NoticesPage, ProgramsPage, SchedulePage, SettingsPage } from "./workspace-pages";
 
 const STORAGE_KEY = "seudaily.web.conversations.v1";
@@ -70,6 +71,7 @@ const languageAliases: Record<string, string> = {
 
 const toolLabels: Record<string, string> = {
   getScheduleTool: "读取课表",
+  getCurrentDateTool: "获取日期",
   auditTrainingPlanTool: "检查培养方案",
   authorizeScheduleTool: "课表登录",
   authorizePortalTool: "课程平台登录",
@@ -91,10 +93,15 @@ const toolLabels: Record<string, string> = {
   readWebPageTool: "读取网页与附件",
   webFetchTool: "读取网页",
   readTaskResultTool: "读取完整结果",
+  requestCreateFocusTool: "准备创建关注",
+  createFocusFromRequestTool: "创建关注",
+  requestModifyScheduleTool: "准备修改课表",
+  modifyScheduleFromRequestTool: "修改课表",
 };
 
 const toolNarrations: Record<string, { running: string; completed: string }> = {
   getScheduleTool: { running: "正在读取课表", completed: "已读取课表" },
+  getCurrentDateTool: { running: "正在获取当前日期", completed: "当前日期已获取" },
   auditTrainingPlanTool: { running: "正在检查培养方案与历年课表", completed: "培养方案检查已完成" },
   authorizeScheduleTool: { running: "正在打开课表登录", completed: "课表登录已完成" },
   authorizePortalTool: { running: "正在打开课程平台登录", completed: "课程平台登录已完成" },
@@ -116,6 +123,10 @@ const toolNarrations: Record<string, { running: string; completed: string }> = {
   readWebPageTool: { running: "正在读取网页与附件", completed: "网页与附件已读取" },
   webFetchTool: { running: "正在阅读网页", completed: "已阅读网页" },
   readTaskResultTool: { running: "正在读取任务结果", completed: "已读取任务结果" },
+  requestCreateFocusTool: { running: "正在准备创建关注", completed: "已准备创建关注" },
+  createFocusFromRequestTool: { running: "正在创建关注", completed: "关注已创建" },
+  requestModifyScheduleTool: { running: "正在准备课表修改", completed: "已准备课表修改" },
+  modifyScheduleFromRequestTool: { running: "正在修改课表", completed: "课表已修改" },
 };
 
 function uid() {
@@ -331,51 +342,129 @@ function ToolCard({ tool, compact = false, onApproval }: { tool: ToolRun; compac
   );
 }
 
-function ToolActivity({ tools, streaming, hasAnswer, onApproval }: { tools: ToolRun[]; streaming?: boolean; hasAnswer: boolean; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
+function ToolActivity({ tools, process = [], streaming, reasoningActive, onApproval }: { tools: ToolRun[]; process?: AgentProcessEntry[]; streaming?: boolean; reasoningActive?: boolean; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
   const [open, setOpen] = useState(Boolean(streaming));
   const runningTool = [...tools].reverse().find((tool) => tool.state === "running");
   const approvalTool = [...tools].reverse().find((tool) => tool.state === "approval-requested");
   const failedCount = tools.filter((tool) => tool.state === "failed").length;
+  const referencedToolIds = new Set(process.flatMap((entry) => entry.type === "tool" ? [entry.toolId] : []));
+  const entries: AgentProcessEntry[] = [
+    ...process,
+    ...tools.filter((tool) => !referencedToolIds.has(tool.id)).map((tool) => ({ id: `tool-${tool.id}`, type: "tool" as const, toolId: tool.id })),
+  ];
+  const sequence: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string }> = [];
+  let activityEntries: AgentProcessEntry[] = [];
+  const flushActivityEntries = () => {
+    if (!activityEntries.length) return;
+    sequence.push({ id: `segment-${activityEntries[0].id}`, type: "activity", entries: activityEntries });
+    activityEntries = [];
+  };
+  for (const entry of entries) {
+    if (entry.type === "narration") {
+      flushActivityEntries();
+      if (entry.text.trim()) sequence.push({ id: entry.id, type: "text", text: entry.text });
+    } else {
+      activityEntries.push(entry);
+    }
+  }
+  flushActivityEntries();
 
   useEffect(() => {
-    if (!streaming && hasAnswer) setOpen(false);
-    else if (streaming) setOpen(true);
-  }, [streaming, hasAnswer]);
+    setOpen(Boolean(streaming));
+  }, [streaming]);
 
-  const focusTool = runningTool ?? approvalTool ?? tools.at(-1)!;
+  const focusTool = runningTool ?? approvalTool ?? tools.at(-1);
   const statusText = runningTool
     ? toolNarration(runningTool, "running")
     : approvalTool
       ? `等待批准：${toolLabel(approvalTool.name)}`
-    : streaming
-      ? "工具执行完成，正在生成回答"
-      : failedCount
-        ? `${failedCount} 项操作失败`
-        : tools.length === 1
-          ? toolNarration(tools[0], "completed")
-          : `已完成 ${tools.length} 项操作`;
+      : streaming
+        ? reasoningActive ? "正在思考" : "正在继续处理"
+        : failedCount
+          ? `已完成思考，${failedCount} 项操作失败`
+          : "已完成思考";
 
   return (
     <div className={`tool-activity ${open ? "open" : ""}`}>
       <button type="button" className="tool-activity-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span className={`tool-activity-status ${runningTool ? "running" : failedCount ? "failed" : "done"}`}>
-          {failedCount && !runningTool ? <TriangleAlert size={19} /> : <ToolGlyph name={focusTool.name} size={19} />}
+          {failedCount && !runningTool ? <TriangleAlert size={19} /> : focusTool ? <ToolGlyph name={focusTool.name} size={19} /> : <Bot size={19} />}
         </span>
         <span>{statusText}</span>
         <ChevronRight className="tool-activity-chevron" size={18} />
       </button>
       {open && (
-        <div className="tool-activity-list">
-          {tools.map((tool) => (
-            <div className="tool-activity-item" key={tool.id}>
-              <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" || tool.state === "approval-requested" ? <TriangleAlert size={18} /> : <ToolGlyph name={tool.name} size={18} />}</span>
-              <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong><ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
-            </div>
-          ))}
+        <div className="tool-activity-sequence">
+          {sequence.map((block) => block.type === "text"
+            ? <div className="tool-activity-text" key={block.id}><MarkdownContent text={block.text} /></div>
+            : <div className="tool-activity-list" key={block.id}>{block.entries.map((entry) => {
+              if (entry.type === "reasoning") {
+                if (!entry.text.trim()) return null;
+                return <div className="process-text reasoning" key={entry.id}><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(entry.text)}</ReactMarkdown></div>;
+              }
+              if (entry.type !== "tool") return null;
+              const tool = tools.find((item) => item.id === entry.toolId);
+              if (!tool) return null;
+              return (
+                <div className="tool-activity-item" key={entry.id}>
+                  <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" || tool.state === "approval-requested" ? <TriangleAlert size={18} /> : <ToolGlyph name={tool.name} size={18} />}</span>
+                  <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong><ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
+                </div>
+              );
+            })}</div>)}
         </div>
       )}
     </div>
   );
+}
+
+function MarkdownContent({ text }: { text: string }) {
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{
+    pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+    a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+    table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
+  }}>{normalizeMathMarkdown(text)}</ReactMarkdown></div>;
+}
+
+function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
+  const blocks: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string }> = [];
+  let activity: AgentProcessEntry[] = [];
+  const flushActivity = () => {
+    if (!activity.length) return;
+    blocks.push({ id: `activity-${activity[0].id}`, type: "activity", entries: activity });
+    activity = [];
+  };
+
+  for (const entry of message.process ?? []) {
+    if (entry.type === "narration") {
+      flushActivity();
+      if (entry.text.trim()) blocks.push({ id: entry.id, type: "text", text: entry.text });
+    } else {
+      activity.push(entry);
+    }
+  }
+  flushActivity();
+
+  if (!blocks.some((block) => block.type === "activity") && message.tools?.length) {
+    blocks.unshift({ id: "activity-tools", type: "activity", entries: [] });
+  }
+  let lastActivityIndex = -1;
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (blocks[index].type === "activity") {
+      lastActivityIndex = index;
+      break;
+    }
+  }
+
+  return <>
+    {blocks.map((block, index) => {
+      if (block.type === "text") return <MarkdownContent key={block.id} text={block.text} />;
+      const toolIds = new Set(block.entries.flatMap((entry) => entry.type === "tool" ? [entry.toolId] : []));
+      const tools = (message.tools ?? []).filter((tool) => toolIds.has(tool.id) || (!block.entries.length && block.id === "activity-tools"));
+      const active = index === lastActivityIndex && block === blocks.at(-1);
+      return <div className="inline-tools" key={block.id}><ToolActivity tools={tools} process={block.entries} streaming={active} reasoningActive={active && message.reasoningActive} onApproval={onApproval} /></div>;
+    })}
+  </>;
 }
 
 function MessageSources({ tools }: { tools: ToolRun[] }) {
@@ -387,7 +476,60 @@ function MessageSources({ tools }: { tools: ToolRun[] }) {
   return <section className="message-sources"><div className="message-sources-title"><Link2 size={14} /><span>来源</span>{sources.length > previewLimit && <button type="button" className="message-sources-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}><span>{expanded ? "收起" : `展开全部（${sources.length}）`}</span><ChevronRight size={13} /></button>}</div><div className="message-sources-list">{visibleSources.map((citation, index) => citation.url ? <a key={`${citation.id}-${index}`} href={citation.url} target="_blank" rel="noreferrer"><span>[{index + 1}]</span><strong>{citation.title}</strong><Link2 size={12} /></a> : <div key={`${citation.id}-${index}`}><span>[{index + 1}]</span><strong>{citation.title}</strong></div>)}</div></section>;
 }
 
-function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval }: {
+function actionRequestFromTool(tool: ToolRun): AgentActionRequest | null {
+  if (!["request-create-focus", "request-modify-schedule", "requestCreateFocusTool", "requestModifyScheduleTool"].includes(tool.name)) return null;
+  const data = tool.result?.data;
+  if (!data || typeof data !== "object") return null;
+  const value = (data as { actionRequest?: unknown }).actionRequest;
+  if (!value || typeof value !== "object") return null;
+  const request = value as Record<string, unknown>;
+  if (typeof request.id !== "string" || typeof request.text !== "string") return null;
+  if (request.kind !== "create-focus" && request.kind !== "modify-schedule") return null;
+  return {
+    id: request.id,
+    kind: request.kind,
+    text: request.text,
+    expiresAt: typeof request.expiresAt === "string" ? request.expiresAt : undefined,
+  };
+}
+
+function MessageActionRequests({ tools, disabled, onAction }: { tools: ToolRun[]; disabled?: boolean; onAction?: (request: AgentActionRequest) => Promise<void> }) {
+  const [pendingId, setPendingId] = useState("");
+  const [completedIds, setCompletedIds] = useState<string[]>([]);
+  const [error, setError] = useState("");
+  const requests = Array.from(new Map(tools.flatMap((tool) => {
+    const request = actionRequestFromTool(tool);
+    return request ? [[request.id, request] as const] : [];
+  })).values());
+  if (!requests.length) return null;
+
+  async function activate(request: AgentActionRequest) {
+    if (!onAction || pendingId || completedIds.includes(request.id)) return;
+    setPendingId(request.id);
+    setError("");
+    try {
+      await onAction(request);
+      setCompletedIds((current) => [...current, request.id]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "操作请求提交失败");
+    } finally {
+      setPendingId("");
+    }
+  }
+
+  return <section className="message-action-requests">
+    <div className="message-action-request-list">{requests.map((request) => {
+      const completed = completedIds.includes(request.id);
+      return <button type="button" key={request.id} disabled={disabled || Boolean(pendingId) || completed} onClick={() => void activate(request)}>
+        {pendingId === request.id ? "正在发起…" : completed ? "已发起" : request.text}
+        <ArrowUp size={14} />
+      </button>;
+    })}</div>
+    {error && <div className="message-action-request-error">{error}</div>}
+  </section>;
+}
+
+function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval, onActionRequest }: {
   message: ChatMessage;
   canRegenerate?: boolean;
   disabled?: boolean;
@@ -395,9 +537,11 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
   onRegenerate?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ImageAttachment) => void;
   onApproval?: (tool: ToolRun, approved: boolean) => void;
+  onActionRequest?: (request: AgentActionRequest) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
+  const hasProcess = Boolean(message.reasoningActive || message.reasoningDone || message.process?.length || message.tools?.length);
 
   if (message.role === "user") {
     return (
@@ -420,26 +564,21 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
   return (
     <article className="message assistant-message">
       <div className="assistant-body">
-        {(message.reasoningActive || message.reasoningDone) && (
-          <div className={`reasoning-status ${message.reasoningActive ? "active" : "done"}`}>
-            <span>{message.reasoningActive ? "正在思考" : "已完成思考"}</span>
-          </div>
+        {hasProcess && message.streaming && (
+          <StreamingProcess message={message} onApproval={onApproval} />
         )}
-        {!!message.tools?.length && (
+        {hasProcess && !message.streaming && (
           <div className="inline-tools">
-            <ToolActivity tools={message.tools} streaming={message.streaming} hasAnswer={Boolean(message.content)} onApproval={onApproval} />
+            <ToolActivity tools={message.tools ?? []} process={message.process} streaming={message.streaming} reasoningActive={message.reasoningActive} onApproval={onApproval} />
           </div>
         )}
         {message.content ? (
-          <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{
-            pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-            a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-            table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
-          }}>{normalizeMathMarkdown(message.content)}</ReactMarkdown></div>
-        ) : message.streaming ? (
+          <MarkdownContent text={message.content} />
+        ) : message.streaming && !hasProcess ? (
           <div className="thinking"><span /><span /><span /> 正在思考</div>
         ) : null}
         {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
+        {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
         {!message.streaming && !message.error && <MessageSources tools={message.tools ?? []} />}
         {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}</div>}
       </div>
@@ -534,6 +673,11 @@ export default function App() {
         const hydrated = remote.map((conversation) => {
           const local = current.find((item) => item.id === conversation.id);
           if (!local) return conversation;
+          // A focus/visibility sync can resolve while the response stream is still
+          // active. The server snapshot is intentionally behind at that point and
+          // replacing the local messages would also discard the local assistant ID,
+          // causing all subsequent stream events to be ignored.
+          if (local.messages.some((message) => message.streaming) || local.updatedAt > conversation.updatedAt) return local;
           return { ...conversation, messages: conversation.messages.map((message, index) => {
             const localMessage = local.messages[index];
             return {
@@ -653,30 +797,49 @@ export default function App() {
 
   function handleStreamEvent(conversationId: string, messageId: string, event: StreamEvent) {
     const payload = event.payload ?? {};
-    if (event.type === "reasoning-start" || event.type === "reasoning-delta") {
-      mutateMessage(conversationId, messageId, (message) => ({ ...message, reasoningActive: true, reasoningDone: true }));
+    if (event.type === "reasoning-start") {
+      const text = typeof payload.text === "string" ? payload.text : "";
+      mutateMessage(conversationId, messageId, (message) => ({
+        ...appendProcessText(message, "reasoning", text, true, String(payload.id ?? uid())),
+        reasoningActive: true,
+        reasoningDone: true,
+      }));
+    }
+    if (event.type === "reasoning-delta") {
+      const text = typeof payload.text === "string" ? payload.text : typeof payload.delta === "string" ? payload.delta : "";
+      mutateMessage(conversationId, messageId, (message) => ({
+        ...appendProcessText(message, "reasoning", text),
+        reasoningActive: true,
+        reasoningDone: true,
+      }));
     }
     if (event.type === "reasoning-end") {
       mutateMessage(conversationId, messageId, (message) => ({ ...message, reasoningActive: false, reasoningDone: true }));
     }
     if (event.type === "text-delta" && typeof payload.text === "string") {
-      mutateMessage(conversationId, messageId, (message) => ({ ...message, content: message.content + payload.text, reasoningActive: false }));
+      const text = payload.text;
+      mutateMessage(conversationId, messageId, (message) => ({ ...appendProcessText(message, "narration", text), reasoningActive: false }));
     }
     if (event.type === "tool-call-input-streaming-start" || event.type === "tool-call") {
       const id = String(payload.toolCallId ?? uid());
       const name = String(payload.toolName ?? "工具调用");
       const approvalId = typeof payload.approvalId === "string" ? payload.approvalId : undefined;
-      mutateMessage(conversationId, messageId, (message) => ({
-        ...message,
-        tools: updateTool(message.tools, {
+      mutateMessage(conversationId, messageId, (message) => {
+        const next = addProcessTool(message, id);
+        return {
+          ...next,
+          reasoningActive: false,
+          reasoningDone: true,
+          tools: updateTool(next.tools, {
           id,
           name,
           state: approvalId ? "approval-requested" : "running",
           approvalId,
           args: payload.args as Record<string, unknown> | undefined,
           ...(approvalId ? { result: { status: "waiting_for_user", taskId: id, summary: "等待用户批准工具执行。", artifacts: [], citations: [], warnings: [], metrics: {} } } : {}),
-        }),
-      }));
+          }),
+        };
+      });
     }
     if (event.type === "tool-approval-request" || event.type === "approval-requested") {
       const id = String(payload.toolCallId ?? uid());
@@ -684,17 +847,20 @@ export default function App() {
       const approvalId = typeof payload.approvalId === "string"
         ? payload.approvalId
         : typeof nestedApproval?.id === "string" ? nestedApproval.id : "";
-      if (approvalId) mutateMessage(conversationId, messageId, (message) => ({
-        ...message,
-        tools: updateTool(message.tools, {
+      if (approvalId) mutateMessage(conversationId, messageId, (message) => {
+        const next = addProcessTool(message, id);
+        return {
+          ...next,
+          tools: updateTool(next.tools, {
           id,
           name: String(payload.toolName ?? "工具调用"),
           state: "approval-requested",
           approvalId,
           args: payload.args as Record<string, unknown> | undefined,
           result: { status: "waiting_for_user", taskId: id, summary: "等待用户批准工具执行。", artifacts: [], citations: [], warnings: [], metrics: {} },
-        }),
-      }));
+          }),
+        };
+      });
     }
     if (event.type === "tool-result" || event.type === "tool-output") {
       const id = String(payload.toolCallId ?? uid());
@@ -702,16 +868,19 @@ export default function App() {
       const result = (rawResult && typeof rawResult === "object" && "value" in rawResult
         ? (rawResult as { value: unknown }).value
         : rawResult) as ToolResult;
-      mutateMessage(conversationId, messageId, (message) => ({
-        ...message,
-        tools: updateTool(message.tools, {
+      mutateMessage(conversationId, messageId, (message) => {
+        const next = addProcessTool(message, id);
+        return {
+          ...next,
+          tools: updateTool(next.tools, {
           id,
           name: String(payload.toolName ?? "工具调用"),
           state: result?.status === "failed" ? "failed" : "completed",
           args: payload.args as Record<string, unknown> | undefined,
           result,
-        }),
-      }));
+          }),
+        };
+      });
     }
     if (event.type === "tool-error" || event.type === "tool-output-denied") {
       const id = String(payload.toolCallId ?? uid());
@@ -721,9 +890,11 @@ export default function App() {
         : rawError && typeof rawError === "object" && "message" in rawError
           ? String((rawError as { message?: unknown }).message ?? "工具执行失败")
           : event.type === "tool-output-denied" ? "工具审批被拒绝。" : "工具执行失败。";
-      mutateMessage(conversationId, messageId, (message) => ({
-        ...message,
-        tools: updateTool(message.tools, {
+      mutateMessage(conversationId, messageId, (message) => {
+        const next = addProcessTool(message, id);
+        return {
+          ...next,
+          tools: updateTool(next.tools, {
           id,
           name: String(payload.toolName ?? "工具调用"),
           state: "failed",
@@ -736,15 +907,9 @@ export default function App() {
             warnings: [],
             metrics: {},
           },
-        }),
-      }));
-    }
-    if (event.type === "finish") {
-      mutateMessage(conversationId, messageId, (message) => ({
-        ...message,
-        streaming: false,
-        reasoningActive: false,
-      }));
+          }),
+        };
+      });
     }
   }
 
@@ -763,7 +928,9 @@ export default function App() {
         signal: controller.signal,
         onEvent: (event) => {
           if (event.type === "text-delta" && typeof event.payload?.text === "string") assistantText += event.payload.text;
+          if (event.type === "reasoning-start") assistantText = "";
           if (event.type === "tool-call-input-streaming-start" || event.type === "tool-call") {
+            assistantText = "";
             pendingToolCalls.add(String(event.payload?.toolCallId ?? "unknown-tool"));
           }
           if (event.type === "tool-result" || event.type === "tool-output" || event.type === "tool-error" || event.type === "tool-output-denied") {
@@ -775,19 +942,22 @@ export default function App() {
       });
       const interrupted = pendingToolCalls.size > 0 && !waitingForApproval;
       const missingAnswer = !assistantText.trim() && !waitingForApproval;
-      mutateMessage(conversationId, assistantId, (message) => ({
-        ...message,
-        streaming: false,
-        reasoningActive: false,
-        ...(interrupted || missingAnswer ? {
-          error: interrupted
-            ? "工具执行尚未完成，回答流已意外中断，请重试。"
-            : "Agent 未生成最终回答，请重试。",
-        } : {}),
-        tools: message.tools?.map((tool) => tool.state === "running"
-          ? { ...tool, state: interrupted ? "failed" as const : "completed" as const }
-          : tool),
-      }));
+      mutateMessage(conversationId, assistantId, (message) => {
+        const completed = !interrupted && !missingAnswer && !waitingForApproval ? finalizeProcessAnswer(message) : message;
+        return {
+          ...completed,
+          streaming: false,
+          reasoningActive: false,
+          ...(interrupted || missingAnswer ? {
+            error: interrupted
+              ? "工具执行尚未完成，回答流已意外中断，请重试。"
+              : "Agent 未生成最终回答，请重试。",
+          } : {}),
+          tools: completed.tools?.map((tool) => tool.state === "running"
+            ? { ...tool, state: interrupted ? "failed" as const : "completed" as const }
+            : tool),
+        };
+      });
     } catch (error) {
       const aborted = controller.signal.aborted;
       mutateMessage(conversationId, assistantId, (message) => ({
@@ -826,24 +996,26 @@ export default function App() {
     }]);
   }
 
-  async function send(prompt = draft) {
+  async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string } = {}) {
     const text = prompt.trim();
     if ((!text && !pendingImages.length && !pendingDocuments.length) || sending) return;
-    const effectivePrompt = selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
+    const effectivePrompt = !options.preserveComposer && selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
     const conversationId = active.id;
     const firstTurn = active.messages.length === 0;
     const assistantId = uid();
     const now = Date.now();
-    const attachments = pendingImages;
-    const documents = pendingDocuments;
+    const attachments = options.preserveComposer ? [] : pendingImages;
+    const documents = options.preserveComposer ? [] : pendingDocuments;
     const modelContent = packageDocumentContent(effectivePrompt, documents);
-    const userMessage: ChatMessage = { id: uid(), role: "user", content: text, modelContent, createdAt: now, attachments, documents };
+    const userMessage: ChatMessage = { id: uid(), role: "user", content: options.displayText ?? text, modelContent, createdAt: now, attachments, documents };
     const assistantMessage: ChatMessage = { id: assistantId, role: "assistant", content: "", createdAt: now, tools: [], streaming: true };
-    setDraft("");
-    setSelectedSkill(null);
-    setComposerMenuOpen(false);
-    setPendingImages([]);
-    setPendingDocuments([]);
+    if (!options.preserveComposer) {
+      setDraft("");
+      setSelectedSkill(null);
+      setComposerMenuOpen(false);
+      setPendingImages([]);
+      setPendingDocuments([]);
+    }
     setConversations((current) => current.map((conversation) => conversation.id === conversationId ? {
       ...conversation,
       title: conversation.messages.length ? conversation.title : titleFromPrompt(documents[0]?.name || text || "图片对话"),
@@ -862,6 +1034,15 @@ export default function App() {
         })
         .catch(() => undefined);
     }
+  }
+
+  async function handleAgentActionRequest(request: AgentActionRequest) {
+    await activateAgentActionRequest(request.id);
+    await send(`[SEUDAILY_ACTION_REQUEST id=${request.id}] ${request.text}`, {
+      preserveComposer: true,
+      displayText: request.text,
+    });
+    if (request.kind === "create-focus") await syncServerHistory();
   }
 
   async function editPrompt(message: ChatMessage, content: string) {
@@ -901,6 +1082,7 @@ export default function App() {
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
+      if (sending) return;
       event.preventDefault();
       void send();
     }
@@ -990,7 +1172,7 @@ export default function App() {
         <button type="button" className={`composer-permission ${fullAccess ? "enabled" : ""} ${permissionError ? "failed" : ""}`} disabled={permissionSaving} aria-label={permissionSaving ? "正在保存完全访问设置" : fullAccess ? "关闭完全访问" : "开启完全访问"} aria-pressed={fullAccess} title={permissionError || (fullAccess ? "完全访问已开启；点击恢复逐项审批" : "点击开启完全访问，文件修改、命令执行、删除和浏览器交互将免审批")} onClick={() => void toggleFullAccess()}><CircleAlert size={18} /></button>
         <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
-        <textarea ref={composerTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} disabled={sending} />
+        <textarea ref={composerTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
         {sending ? (
           <button type="button" className="send-button stop" onClick={() => abortRef.current?.abort()} aria-label="停止回答"><CircleStop size={19} /></button>
         ) : (
@@ -1075,7 +1257,7 @@ export default function App() {
             </div>
           ) : (
             <div className="message-list">
-              {active.messages.map((message) => <Message key={message.id} message={message} disabled={sending} canRegenerate={message.id === lastAssistantId} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} />)}
+              {active.messages.map((message) => <Message key={message.id} message={message} disabled={sending} canRegenerate={message.id === lastAssistantId} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} />)}
               <div ref={messageEndRef} />
             </div>
           )}

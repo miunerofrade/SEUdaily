@@ -32,11 +32,13 @@ class TrainingPlanService:
         cookie_file: str | Path = ".cvstream/ehall-cookies.json",
         cache_file: str | Path = ".cvstream/training-plan.json",
         schedule_cache_file: str | Path = ".cvstream/schedule.json",
+        override_file: str | Path = ".cvstream/training-plan-user.json",
         launch_url: str = DEFAULT_PLAN_LAUNCH_URL,
     ) -> None:
         self.cookie_file = Path(cookie_file)
         self.cache_file = Path(cache_file)
         self.schedule_cache_file = Path(schedule_cache_file)
+        self.override_file = Path(override_file)
         self.launch_url = launch_url
 
     @staticmethod
@@ -308,6 +310,7 @@ class TrainingPlanService:
             )
         )
         for option in semester_options:
+            option.pop("manualStatus", None)
             bucket = schedule_evidence.get(option["value"], {})
             option["status"] = cls._course_status(
                 option["value"],
@@ -336,6 +339,153 @@ class TrainingPlanService:
             "unscheduled" if not course.get("semester") else "unknown",
         )
         return course
+
+    def _load_overrides(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.override_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"version": 1, "courseOverrides": {}}
+        if payload.get("version") != 1 or not isinstance(
+            payload.get("courseOverrides"), dict
+        ):
+            return {"version": 1, "courseOverrides": {}}
+        return payload
+
+    @classmethod
+    def _course_override_key(cls, course: dict[str, Any], semester: str) -> str:
+        identity = str(course.get("id") or course.get("code") or "").strip()
+        if not identity:
+            identity = cls._normalize_course_name(course.get("name"))
+        return f"{identity}::{semester or 'unassigned'}"
+
+    @classmethod
+    def _aggregate_course_status(cls, course: dict[str, Any]) -> str:
+        statuses = [
+            str(option.get("status") or "unknown")
+            for option in course.get("semesterOptions") or []
+            if isinstance(option, dict)
+        ]
+        return next(
+            (
+                status
+                for status in (
+                    "studying",
+                    "completed",
+                    "not_taken",
+                    "upcoming",
+                    "unscheduled",
+                    "unknown",
+                )
+                if status in statuses
+            ),
+            str(course.get("status") or "unknown"),
+        )
+
+    @classmethod
+    def _apply_default_credits(cls, course: dict[str, Any]) -> None:
+        is_general_choice = "通选" in (
+            f"{course.get('group') or ''} {course.get('nature') or ''}"
+        )
+        if is_general_choice and cls._number(course.get("credits")) <= 0:
+            course["credits"] = 2
+
+    def _apply_user_overrides(self, plan: dict[str, Any]) -> None:
+        plan_overrides = (
+            self._load_overrides()
+            .get("courseOverrides", {})
+            .get(str(plan.get("id") or ""), {})
+        )
+        if not isinstance(plan_overrides, dict):
+            plan_overrides = {}
+        for course in plan.get("courses") or []:
+            if not isinstance(course, dict):
+                continue
+            self._apply_default_credits(course)
+            course.pop("manualStatus", None)
+            options = course.get("semesterOptions") or []
+            if not options:
+                options = [
+                    {
+                        "value": "unassigned",
+                        "label": "未安排学期",
+                        "status": str(course.get("status") or "unscheduled"),
+                    }
+                ]
+                course["semesterOptions"] = options
+            manually_changed = False
+            for option in options:
+                if not isinstance(option, dict):
+                    continue
+                option.pop("manualStatus", None)
+                option["autoStatus"] = str(option.get("status") or "unknown")
+                override = plan_overrides.get(
+                    self._course_override_key(
+                        course, str(option.get("value") or "unassigned")
+                    )
+                )
+                if override in {"completed", "studying", "not_taken"}:
+                    option["status"] = override
+                    option["manualStatus"] = True
+                    manually_changed = True
+            course["status"] = self._aggregate_course_status(course)
+            if manually_changed:
+                course["manualStatus"] = True
+
+    @classmethod
+    def _recompute_plan_credits(cls, plan: dict[str, Any]) -> None:
+        counted_completed = 0.0
+        studying = 0.0
+        general_elective = 0.0
+        manual_adjustment = 0.0
+        for course in plan.get("courses") or []:
+            if not isinstance(course, dict):
+                continue
+            cls._apply_default_credits(course)
+            credits = cls._number(course.get("credits"))
+            status = str(course.get("status") or "unknown")
+            manual_options = [
+                option
+                for option in course.get("semesterOptions") or []
+                if isinstance(option, dict) and option.get("manualStatus")
+            ]
+            if manual_options:
+                has_manual_completion = any(
+                    option.get("status") == "completed"
+                    and option.get("autoStatus") != "completed"
+                    for option in manual_options
+                )
+                has_manual_removal = any(
+                    option.get("status") != "completed"
+                    and option.get("autoStatus") == "completed"
+                    for option in manual_options
+                )
+                if has_manual_completion:
+                    manual_adjustment += credits
+                elif has_manual_removal:
+                    manual_adjustment -= credits
+            if status == "completed":
+                counted_completed += credits
+                if course.get("isGeneralElective"):
+                    general_elective += credits
+            elif status == "studying":
+                studying += credits
+        official = cls._number(
+            plan.get("officialCompletedCredits", plan.get("completedCredits"))
+        )
+        required = cls._number(plan.get("requiredCredits"))
+        completed = max(counted_completed, official + manual_adjustment, 0.0)
+        plan["officialCompletedCredits"] = cls._display_number(official)
+        plan["completedCredits"] = cls._display_number(completed)
+        plan["progress"] = (
+            round(min(100.0, completed / required * 100), 1) if required else 0
+        )
+        plan["creditSummary"] = {
+            "countedCompleted": cls._display_number(counted_completed),
+            "studying": cls._display_number(studying),
+            "remaining": cls._display_number(max(0.0, required - completed)),
+            "generalElectiveCompleted": cls._display_number(general_elective),
+            "manualAdjustment": cls._display_number(manual_adjustment),
+        }
 
     def _load_cache(self) -> dict[str, Any] | None:
         try:
@@ -381,6 +531,8 @@ class TrainingPlanService:
             self._append_schedule_only_courses(
                 plan, schedule_evidence, current_semester
             )
+            self._apply_user_overrides(plan)
+            self._recompute_plan_credits(plan)
             self._sort_courses(plan.get("courses") or [])
             plan["courseCount"] = len(plan.get("courses") or [])
         return cached
@@ -722,7 +874,10 @@ class TrainingPlanService:
                     "name": name,
                     "group": group,
                     "nature": nature,
-                    "credits": cls._display_number(cls._number(raw.get("credits") or raw.get("XF"))),
+                    "credits": cls._display_number(
+                        cls._number(raw.get("credits") or raw.get("XF"))
+                        or (2.0 if is_general else 0.0)
+                    ),
                     "hours": cls._display_number(cls._number(raw.get("hours") or raw.get("XS"))),
                     "semester": semester,
                     "semesterLabel": cls._display_semester_label(semester, label),
@@ -837,7 +992,7 @@ class TrainingPlanService:
         for course in courses:
             course.pop("_groupId", None)
             course.pop("_groupNote", None)
-        return {
+        plan = {
             "id": str(summary.get("PYFADM") or detail.get("PYFADM") or ""),
             "title": str(
                 detail.get("PYFAMC") or summary.get("PYFAMC") or "个人培养方案"
@@ -861,6 +1016,7 @@ class TrainingPlanService:
             "degree": str(detail.get("XWDM_DISPLAY") or "").strip(),
             "startSemester": str(detail.get("KSXQDM_DISPLAY") or "").strip(),
             "requiredCredits": cls._display_number(required),
+            "officialCompletedCredits": cls._display_number(completed),
             "completedCredits": cls._display_number(completed),
             "progress": round(min(100.0, completed / required * 100), 1)
             if required
@@ -875,6 +1031,8 @@ class TrainingPlanService:
             "courseCount": len(courses),
             "courses": courses,
         }
+        cls._recompute_plan_credits(plan)
+        return plan
 
     @staticmethod
     def _post_rows(
@@ -971,6 +1129,10 @@ class TrainingPlanService:
                     )
                 )
 
+            for plan in plans:
+                self._apply_user_overrides(plan)
+                self._recompute_plan_credits(plan)
+
             self._save_cookies(page)
             result = {
                 "status": "completed" if plans else "empty",
@@ -1005,6 +1167,72 @@ class TrainingPlanService:
                 "cacheFile": str(self.cache_file.resolve()),
             }
         return result
+
+    def save_course_override(
+        self,
+        *,
+        plan_id: str,
+        course_id: str,
+        semester: str,
+        status: str,
+    ) -> dict[str, Any]:
+        allowed = {"auto", "completed", "studying", "not_taken"}
+        if status not in allowed:
+            raise ValueError("课程状态只能设为自动、已完成、学习中或未修读")
+        current = self.get(refresh=False)
+        plans = [plan for plan in current.get("plans") or [] if isinstance(plan, dict)]
+        plan = next(
+            (item for item in plans if str(item.get("id") or "") == plan_id),
+            None,
+        )
+        if plan is None:
+            raise ValueError("培养方案不存在")
+        course = next(
+            (
+                item
+                for item in plan.get("courses") or []
+                if isinstance(item, dict)
+                and course_id
+                in {
+                    str(item.get("id") or ""),
+                    str(item.get("code") or ""),
+                    str(item.get("name") or ""),
+                }
+            ),
+            None,
+        )
+        if course is None:
+            raise ValueError("课程不存在")
+        normalized_semester = semester or "unassigned"
+        valid_semesters = {
+            str(option.get("value") or "unassigned")
+            for option in course.get("semesterOptions") or []
+            if isinstance(option, dict)
+        } or {"unassigned"}
+        if normalized_semester not in valid_semesters:
+            raise ValueError("课程学期不存在")
+
+        payload = self._load_overrides()
+        all_overrides = payload.setdefault("courseOverrides", {})
+        plan_overrides = all_overrides.setdefault(plan_id, {})
+        key = self._course_override_key(course, normalized_semester)
+        if status == "auto":
+            plan_overrides.pop(key, None)
+        else:
+            plan_overrides[key] = status
+        if not plan_overrides:
+            all_overrides.pop(plan_id, None)
+        self._write_json_atomic(self.override_file, payload)
+
+        updated = self.get(refresh=False)
+        return {
+            **updated,
+            "status": "completed",
+            "message": "课程修读状态已恢复自动判断。"
+            if status == "auto"
+            else "课程修读状态已保存。",
+            "overrideFile": str(self.override_file.resolve()),
+        }
 
     @staticmethod
     def _audit_course_item(

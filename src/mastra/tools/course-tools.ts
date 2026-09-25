@@ -1,6 +1,8 @@
 import { createTool } from "@mastra/core/tools";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
+import { consumeActionRequest, issueActionRequest } from "../action-request-store.js";
 import { runPythonTool } from "./python-bridge.js";
 import { pythonToolOutput, type ToolResult } from "./tool-result.js";
 
@@ -98,6 +100,150 @@ function trainingPlanAuditModelOutput(output: ToolResult) {
   return { type: "text" as const, value: JSON.stringify(modelView, null, 2) };
 }
 
+function scheduleModelOutput(output: ToolResult) {
+  const data = objectValue(output.data);
+  const { cacheFile: _cacheFile, customizations: _customizations, ...visibleData } = data;
+  const modelView = {
+    status: output.status,
+    summary: output.summary,
+    ...visibleData,
+    courses: arrayValue(data.courses),
+  };
+  return { type: "text" as const, value: JSON.stringify(modelView, null, 2) };
+}
+
+function completedResult(summary: string, data?: unknown): ToolResult {
+  return {
+    status: "completed",
+    taskId: `task-${randomUUID()}`,
+    summary,
+    data,
+    artifacts: [],
+    citations: [],
+    warnings: [],
+    metrics: {},
+  };
+}
+
+const focusRequestSchema = z.object({
+  kind: z.enum(["notice", "course"]),
+  title: z.string().min(1).max(120),
+  description: z.string().min(1).max(2_000),
+  categories: z.array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"])).min(1).max(7).optional(),
+  courseName: z.string().max(200).optional(),
+  teacherNames: z.array(z.string().min(1).max(100)).max(10).optional(),
+  sourceKeys: z.array(z.string().min(1)).max(20).optional(),
+  semester: z.string().max(100).optional(),
+  summary: z.boolean().default(true),
+  summaryInstructions: z.string().max(2_000).optional(),
+});
+
+const editableScheduleCourseFields = {
+  courseName: z.string().min(1).max(200),
+  teacherName: z.string().max(100).default(""),
+  weekday: z.number().int().min(1).max(7),
+  startPeriod: z.number().int().min(1).max(13),
+  endPeriod: z.number().int().min(1).max(13),
+  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30),
+  classroom: z.string().max(200).default(""),
+  courseCode: z.string().max(100).default(""),
+};
+
+const editableScheduleCourseSchema = z.object(editableScheduleCourseFields);
+
+const scheduleCourseChangesSchema = z.object({
+  courseName: z.string().min(1).max(200).optional(),
+  teacherName: z.string().max(100).optional(),
+  weekday: z.number().int().min(1).max(7).optional(),
+  startPeriod: z.number().int().min(1).max(13).optional(),
+  endPeriod: z.number().int().min(1).max(13).optional(),
+  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30).optional(),
+  classroom: z.string().max(200).optional(),
+  courseCode: z.string().max(100).optional(),
+});
+
+const scheduleChangeSchema = z.object({
+  operation: z.enum(["add", "update", "move"]),
+  course: editableScheduleCourseSchema.optional().describe("新增课程时必填"),
+  sourceKey: z.string().min(1).optional().describe("修改或移动已有课程时必填，来自课表查询结果"),
+  changes: scheduleCourseChangesSchema.optional().describe("修改课程字段或移动后的节次、教室等变化"),
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("移动单次课程时的原日期"),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("移动单次课程时的新日期"),
+});
+
+function deferredRequestModelOutput() {
+  return { type: "text" as const, value: "OK" };
+}
+
+export const requestCreateFocusTool = createTool({
+  ...pythonToolOutput,
+  toModelOutput: deferredRequestModelOutput,
+  id: "request-create-focus",
+  description: "记录一个待执行的创建关注请求；此工具不修改数据。普通创建关注请求使用此工具。",
+  inputSchema: focusRequestSchema,
+  execute: async (input) => {
+    const text = `替我创建“${input.title}”的关注`;
+    const actionRequest = await issueActionRequest("create-focus", text, input);
+    return completedResult("请求已记录。", { actionRequest });
+  },
+});
+
+export const createFocusFromRequestTool = createTool({
+  ...pythonToolOutput,
+  id: "create-focus-from-request",
+  description: "执行由 requestId 标识的已授权创建关注请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
+  inputSchema: z.object({ requestId: z.string().startsWith("action-") }),
+  execute: async ({ requestId }, options) => {
+    const payload = await consumeActionRequest(requestId, "create-focus");
+    const id = `focus-${randomUUID()}`;
+    return runPythonTool("upsert-focus", {
+      item: { ...payload, id, threadId: id, resourceId: "seudaily-focus-local", enabled: true },
+    }, options?.abortSignal);
+  },
+});
+
+export const requestModifyScheduleTool = createTool({
+  ...pythonToolOutput,
+  toModelOutput: deferredRequestModelOutput,
+  id: "request-modify-schedule",
+  description: "记录一个待执行的本地课表新增、修改或单次移动请求；此工具不修改数据。普通课表变更请求使用此工具。",
+  inputSchema: scheduleChangeSchema,
+  execute: async (input) => {
+    if (input.operation === "add") {
+      if (!input.course) throw new Error("新增课表课程时必须提供 course");
+      if (input.course.endPeriod < input.course.startPeriod) throw new Error("endPeriod 不能早于 startPeriod");
+    } else if (input.operation === "update") {
+      if (!input.sourceKey || !input.changes || !Object.keys(input.changes).length) {
+        throw new Error("修改课表课程时必须提供 sourceKey 和至少一个 changes 字段");
+      }
+      if (input.changes.startPeriod !== undefined && input.changes.endPeriod !== undefined && input.changes.endPeriod < input.changes.startPeriod) {
+        throw new Error("endPeriod 不能早于 startPeriod");
+      }
+    } else {
+      if (!input.sourceKey || !input.fromDate || !input.toDate) {
+        throw new Error("移动单次课程时必须提供 sourceKey、fromDate 和 toDate");
+      }
+      if (input.changes?.startPeriod !== undefined && input.changes.endPeriod !== undefined && input.changes.endPeriod < input.changes.startPeriod) {
+        throw new Error("endPeriod 不能早于 startPeriod");
+      }
+    }
+    const detail = input.operation === "add" ? `新增“${input.course!.courseName}”` : input.operation === "move" ? "移动指定课次" : "修改指定课程";
+    const actionRequest = await issueActionRequest("modify-schedule", `替我修改课表：${detail}`, input);
+    return completedResult("请求已记录。", { actionRequest });
+  },
+});
+
+export const modifyScheduleFromRequestTool = createTool({
+  ...pythonToolOutput,
+  id: "modify-schedule-from-request",
+  description: "执行由 requestId 标识的已授权本地课表变更请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
+  inputSchema: z.object({ requestId: z.string().startsWith("action-") }),
+  execute: async ({ requestId }, options) => {
+    const payload = await consumeActionRequest(requestId, "modify-schedule");
+    return runPythonTool("apply-agent-schedule-change", payload, options?.abortSignal);
+  },
+});
+
 export const authorizePortalTool = createTool({
   ...pythonToolOutput,
   id: "authorize-course-portal",
@@ -125,9 +271,10 @@ export const authorizeScheduleTool = createTool({
 
 export const getScheduleTool = createTool({
   ...pythonToolOutput,
+  toModelOutput: scheduleModelOutput,
   id: "get-course-schedule",
   description:
-    "Read an SEU timetable for the current or a historical academic semester. Omit semester for the current timetable; pass an exact semester code returned by eHall (for example 2025-2026-2) for another timetable. Semester-specific caches are isolated. The school response is the source of truth for available semester values.",
+    "Read the complete SEU timetable for the current or a historical academic semester. Always returns all courses; it is never limited to the first 12. Omit date for the normal complete timetable. Pass date as YYYY-MM-DD to return only courses scheduled on that date, using the configured semester start date, teaching week, weekday, odd/even weeks, and date overrides.",
   inputSchema: z.object({
     ...scheduleFields,
     semester: z
@@ -139,6 +286,10 @@ export const getScheduleTool = createTool({
       .boolean()
       .default(false)
       .describe("Re-fetch the selected semester from SEU eHall instead of using that semester's local cache"),
+    localOnly: z
+      .boolean()
+      .default(true)
+      .describe("Read only the local timetable cache and never access SEU eHall. Return an empty status when no local cache exists."),
     includeAvailableSemesters: z
       .boolean()
       .default(false)
@@ -147,8 +298,21 @@ export const getScheduleTool = createTool({
       .boolean()
       .default(false)
       .describe("Sequentially fetch and cache every semester returned by eHall in the authenticated session"),
+    date: z
+      .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)])
+      .optional()
+      .describe("Optional target date in YYYY-MM-DD. Omit or leave empty for the complete timetable; when provided, return only that day's courses."),
   }),
   execute: async (context, options) => runPythonTool("get-schedule", context, options?.abortSignal),
+});
+
+export const getCurrentDateTool = createTool({
+  ...pythonToolOutput,
+  id: "get-current-date",
+  description:
+    "Get the current date and weekday in Asia/Shanghai for resolving relative requests such as today or tomorrow. Use this instead of terminal commands or reading local files. This tool does not read the timetable.",
+  inputSchema: z.object({}),
+  execute: async (context, options) => runPythonTool("get-current-date", context, options?.abortSignal),
 });
 
 export const auditTrainingPlanTool = createTool({
@@ -252,15 +416,12 @@ export const searchCseNoticesTool = createTool({
         "undergraduate_downloads",
         "graduate_downloads",
       ]))
-      .min(1)
       .max(9)
-      .optional(),
-    paths: z.array(z.enum(["/49469/list.htm", "/49470/list.htm", "/49447/list.htm", "/jyxx/list.htm", "/49441/list.htm", "/xshd_53564/list.htm", "/rczp/list.htm", "/xzzq_53939/list.htm", "/xzzq_52683/list.htm"])).min(1).max(9).optional().describe("Explicit CSE list paths; multiple paths are allowed."),
+      .optional()
+      .describe("Optional CSE list columns. Omit this and paths for a site-wide search."),
+    paths: z.array(z.enum(["/49469/list.htm", "/49470/list.htm", "/49447/list.htm", "/jyxx/list.htm", "/49441/list.htm", "/xshd_53564/list.htm", "/rczp/list.htm", "/xzzq_53939/list.htm", "/xzzq_52683/list.htm"])).max(9).optional().describe("Optional explicit CSE list paths; omit this and categories for a site-wide search."),
     limit: z.number().int().min(1).max(20).default(5),
     timeoutSeconds: z.number().int().min(5).max(60).default(15),
-  }).refine((value) => Boolean(value.categories?.length || value.paths?.length), {
-    message: "Provide explicit categories or paths; automatic routing is disabled.",
-    path: ["categories"],
   }),
   execute: async (context, options) => runPythonTool("search-cse", context, options?.abortSignal),
 });
@@ -291,7 +452,8 @@ export const listCourseDatesTool = createTool({
 export const listCoursesTool = createTool({
   ...pythonToolOutput,
   id: "list-courses",
-  description: "List courses currently visible in the authenticated course replay catalog.",
+  description:
+    "List courses in the authenticated CVS on-demand/replay catalog. Use only when the user wants course recordings, subtitles, slides, or other replay-course materials; do not use for the user's personal timetable, today's classes, or JWC/CSE notices.",
   inputSchema: z.object(commonPortalFields),
   execute: async (context, options) => runPythonTool("list-courses", context, options?.abortSignal),
 });

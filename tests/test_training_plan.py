@@ -281,7 +281,58 @@ def test_schedule_only_general_elective_is_appended_last() -> None:
     assert extra["source"] == "schedule"
     assert extra["group"] == "通选课"
     assert extra["nature"] == "通选"
+    assert extra["credits"] == 2
     assert extra["classificationSource"] == "course_code"
+    assert plan["creditSummary"]["generalElectiveCompleted"] == 2
+
+
+def test_manual_completed_course_persists_and_adds_credits(tmp_path) -> None:
+    cache_file = tmp_path / "training-plan.json"
+    override_file = tmp_path / "training-plan-user.json"
+    TrainingPlanService._write_json_atomic(
+        cache_file,
+        {
+            "version": 1,
+            "status": "completed",
+            "plans": [
+                {
+                    "id": "plan-1",
+                    "requiredCredits": 150,
+                    "completedCredits": 30,
+                    "officialCompletedCredits": 30,
+                    "courses": [
+                        {
+                            "id": "military-training",
+                            "name": "军训",
+                            "credits": 2,
+                            "semester": "2025-2026-2",
+                            "semesterLabel": "2025-2026学年秋季学期",
+                            "status": "not_taken",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    service = TrainingPlanService(
+        cache_file=cache_file,
+        schedule_cache_file=tmp_path / "schedule.json",
+        override_file=override_file,
+    )
+
+    result = service.save_course_override(
+        plan_id="plan-1",
+        course_id="military-training",
+        semester="2025-2026-2",
+        status="completed",
+    )
+
+    plan = result["plans"][0]
+    assert plan["courses"][0]["status"] == "completed"
+    assert plan["courses"][0]["semesterOptions"][0]["manualStatus"] is True
+    assert plan["completedCredits"] == 32
+    assert plan["creditSummary"]["manualAdjustment"] == 2
+    assert override_file.exists()
 
 
 def test_general_elective_credit_requirement_without_note_is_kept() -> None:

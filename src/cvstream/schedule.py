@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -569,6 +570,148 @@ class ScheduleService:
         self._write_json_atomic(self.customization_file, saved)
         return {"status": "completed", "customizations": saved}
 
+    def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
+        operation = str(payload.get("operation") or "").strip()
+        current = self._load_customizations()
+        if operation == "add":
+            raw_course = payload.get("course")
+            if not isinstance(raw_course, dict):
+                raise ValueError("新增课表课程缺少 course 参数")
+            custom_id = f"agent-{uuid.uuid4()}"
+            normalized = self._normalize_editable_course(
+                {**raw_course, "customId": custom_id}, custom=True
+            )
+            current["customCourses"] = [*current["customCourses"], normalized]
+            result = self.save_customizations(current)
+            return {
+                **result,
+                "message": f"已新增课表课程：{normalized['courseName']}",
+                "change": {"operation": "add", "sourceKey": f"custom-{custom_id}", "course": normalized},
+            }
+
+        if operation == "update":
+            source_key = str(payload.get("sourceKey") or "").strip()
+            changes = payload.get("changes")
+            if not source_key or not isinstance(changes, dict) or not changes:
+                raise ValueError("修改课表课程需要 sourceKey 和 changes")
+            allowed = {
+                "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
+                "weeks", "classroom", "courseCode",
+            }
+            unknown = set(changes) - allowed
+            if unknown:
+                raise ValueError(f"课表修改包含不支持的字段: {', '.join(sorted(unknown))}")
+            if source_key.startswith("custom-"):
+                custom_id = source_key.removeprefix("custom-")
+                found = False
+                updated_courses: list[dict[str, Any]] = []
+                for course in current["customCourses"]:
+                    if str(course.get("customId") or "") != custom_id:
+                        updated_courses.append(course)
+                        continue
+                    updated_courses.append(
+                        self._normalize_editable_course(
+                            {**course, **changes, "customId": custom_id}, custom=True
+                        )
+                    )
+                    found = True
+                if not found:
+                    raise ValueError("要修改的自定义课程不存在")
+                current["customCourses"] = updated_courses
+            else:
+                if not source_key.startswith("source-"):
+                    raise ValueError("sourceKey 格式无效")
+                cached = self._load_cache()
+                if cached is None:
+                    raise ValueError("当前课表缓存不存在，请先读取课表")
+                visible = self._apply_customizations(cached)
+                target = next(
+                    (
+                        course
+                        for course in visible.get("courses") or []
+                        if course.get("sourceKey") == source_key
+                    ),
+                    None,
+                )
+                if target is None:
+                    raise ValueError("要修改的课表课程不存在，请重新读取课表")
+                normalized = self._normalize_editable_course(
+                    {**target, **changes}, custom=False
+                )
+                changes = {key: normalized[key] for key in changes}
+                current["overrides"] = {
+                    **current["overrides"],
+                    source_key: {**current["overrides"].get(source_key, {}), **changes},
+                }
+            result = self.save_customizations(current)
+            return {
+                **result,
+                "message": "课表课程信息已修改。",
+                "change": {"operation": "update", "sourceKey": source_key, "changes": changes},
+            }
+
+        if operation == "move":
+            source_key = str(payload.get("sourceKey") or "").strip()
+            from_date = self._valid_iso_date(payload.get("fromDate"), "fromDate")
+            to_date = self._valid_iso_date(payload.get("toDate"), "toDate")
+            changes = payload.get("changes") or {}
+            if not source_key or not isinstance(changes, dict):
+                raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
+            cached = self._load_cache()
+            if cached is None:
+                raise ValueError("当前课表缓存不存在，请先读取课表")
+            visible = self._apply_customizations(cached)
+            target = next(
+                (
+                    course
+                    for course in visible.get("courses") or []
+                    if course.get("sourceKey") == source_key
+                ),
+                None,
+            )
+            if target is None:
+                raise ValueError("要移动的课表课程不存在，请重新读取课表")
+            moved_id = f"agent-{uuid.uuid4()}"
+            moved = self._normalize_editable_course(
+                {
+                    **target,
+                    **changes,
+                    "weekday": date.fromisoformat(to_date).isoweekday(),
+                    "weeks": [],
+                    "customId": moved_id,
+                },
+                custom=True,
+            )
+            current["dateOverrides"] = [
+                *current["dateOverrides"],
+                {
+                    "id": f"{moved_id}-cancel",
+                    "date": from_date,
+                    "action": "cancel",
+                    "targetSourceKey": source_key,
+                },
+                {
+                    "id": moved_id,
+                    "date": to_date,
+                    "action": "add",
+                    "course": moved,
+                },
+            ]
+            result = self.save_customizations(current)
+            return {
+                **result,
+                "message": f"已将 {target.get('courseName') or '课程'} 从 {from_date} 移至 {to_date}。",
+                "change": {
+                    "operation": "move",
+                    "sourceKey": source_key,
+                    "fromDate": from_date,
+                    "toDate": to_date,
+                    "course": moved,
+                },
+            }
+
+        raise ValueError("课表操作仅支持 add、update 或 move")
+
     def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
         customizations = self._load_customizations()
         merged: list[dict[str, Any]] = []
@@ -1003,9 +1146,11 @@ class ScheduleService:
         self,
         *,
         refresh: bool = False,
+        local_only: bool = False,
         semester: str | None = None,
         include_available_semesters: bool = False,
         prefetch_available_semesters: bool = False,
+        target_date: str | None = None,
     ) -> dict[str, Any]:
         requested = str(semester or "").strip()
         cached = (
@@ -1013,6 +1158,23 @@ class ScheduleService:
             if not requested or SEMESTER_CODE_PATTERN.fullmatch(requested)
             else None
         )
+        if local_only:
+            if cached is None:
+                return {
+                    "status": "empty",
+                    "message": "本地没有可用的课表缓存。",
+                    "count": 0,
+                    "courses": [],
+                    "localOnly": True,
+                }
+            result = {
+                **cached,
+                "status": "cached",
+                "cacheFile": str(self._cache_file_for_semester(requested).resolve()),
+                "localOnly": True,
+            }
+            view = result if requested else self._apply_customizations(result)
+            return self._filter_by_date(view, target_date)
         if (
             cached is not None
             and not refresh
@@ -1026,7 +1188,8 @@ class ScheduleService:
                     self._cache_file_for_semester(requested).resolve()
                 ),
             }
-            return result if requested else self._apply_customizations(result)
+            view = result if requested else self._apply_customizations(result)
+            return self._filter_by_date(view, target_date)
 
         result = self._fetch_remote(
             semester=semester,
@@ -1040,8 +1203,91 @@ class ScheduleService:
                 "cachedFetchedAt": cached.get("fetchedAt"),
                 "courses": cached.get("courses", []),
             }
-            return fallback if requested else self._apply_customizations(fallback)
-        return result if requested else self._apply_customizations(result)
+            view = fallback if requested else self._apply_customizations(fallback)
+            return self._filter_by_date(view, target_date)
+        view = result if requested else self._apply_customizations(result)
+        return self._filter_by_date(view, target_date)
+
+    def _filter_by_date(
+        self, result: dict[str, Any], target_date: str | None
+    ) -> dict[str, Any]:
+        requested = str(target_date or "").strip()
+        if not requested:
+            return result
+        requested_date = self._valid_iso_date(requested, "date")
+        target = date.fromisoformat(requested_date)
+        customizations = result.get("customizations")
+        if not isinstance(customizations, dict):
+            customizations = self._load_customizations()
+        semester = customizations.get("semester")
+        semester = semester if isinstance(semester, dict) else {}
+        start_text = str(semester.get("startDate") or "").strip()
+        filter_info: dict[str, Any] = {
+            "requestedDate": requested_date,
+            "weekday": target.isoweekday(),
+            "applied": False,
+        }
+        if not start_text:
+            return {
+                **result,
+                "status": "partial",
+                "message": "课表已读取，但未配置学期起始日期，无法按日期筛选。",
+                "count": 0,
+                "courses": [],
+                "dateFilter": {
+                    **filter_info,
+                    "reason": "missing_semester_start_date",
+                },
+            }
+
+        week = self.week_for_date(start_text, target)
+        filter_info.update({
+            "applied": True,
+            "semesterStartDate": start_text,
+            "week": week,
+        })
+        courses = [
+            dict(course)
+            for course in result.get("courses") or []
+            if int(course.get("weekday") or 0) == target.isoweekday()
+            and (
+                not course.get("weeks")
+                or week in {int(item) for item in course.get("weeks") or []}
+            )
+        ]
+        course_by_source = {
+            str(course.get("sourceKey") or course.get("scheduleId") or f"course-{index}"): course
+            for index, course in enumerate(courses)
+        }
+        for override in customizations.get("dateOverrides") or []:
+            if not isinstance(override, dict) or override.get("date") != requested_date:
+                continue
+            source_key = str(override.get("targetSourceKey") or "")
+            if source_key:
+                course_by_source.pop(source_key, None)
+            if override.get("action") in {"add", "replace"}:
+                raw_course = override.get("course")
+                if isinstance(raw_course, dict):
+                    course = dict(raw_course)
+                    custom_id = str(course.get("customId") or override.get("id") or "")
+                    course["scheduleId"] = f"custom-{custom_id}"
+                    course["sourceKey"] = course["scheduleId"]
+                    course["source"] = "custom"
+                    course_by_source[course["sourceKey"]] = course
+        filtered = sorted(
+            course_by_source.values(),
+            key=lambda item: (
+                item.get("startPeriod") or 0,
+                item.get("courseName") or "",
+            ),
+        )
+        return {
+            **result,
+            "status": "completed" if filtered else "empty",
+            "count": len(filtered),
+            "courses": filtered,
+            "dateFilter": {**filter_info, "matchedCount": len(filtered)},
+        }
 
     def _semester_cache_files(self) -> list[Path]:
         suffix = self.cache_file.suffix

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import __version__
@@ -75,6 +76,19 @@ def _focus_service(payload: dict[str, Any]) -> FocusService:
     )
 
 
+def _training_plan_service(payload: dict[str, Any]) -> TrainingPlanService:
+    return TrainingPlanService(
+        cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
+        cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
+        schedule_cache_file=payload.get(
+            "scheduleCacheFile", ".cvstream/schedule.json"
+        ),
+        override_file=payload.get(
+            "overrideFile", ".cvstream/training-plan-user.json"
+        ),
+    )
+
+
 def _resolve_course_target(
     payload: dict[str, Any], target: dict[str, Any]
 ) -> dict[str, Any]:
@@ -124,7 +138,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
     if action == "health":
         return {"version": __version__, "tools": [
-            "authorize", "authorize-schedule", "get-schedule", "save-schedule-customizations", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
+            "authorize", "authorize-schedule", "get-schedule", "get-current-date", "save-schedule-customizations", "apply-agent-schedule-change", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
             "extract-slides", "summarize-course", "read-web-page", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article", "get-training-plan", "analyze-training-plan", "list-focus", "upsert-focus", "delete-focus", "claim-focus-agent-run", "record-focus-agent-run", "run-focus-cycle", "run-course-focus-queue", "acknowledge-course-focus-alert",
         ]}
     if action == "authorize":
@@ -137,6 +151,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "get-schedule":
         return _schedule_service(payload).get_schedule(
             refresh=payload.get("refresh", False),
+            local_only=payload.get("localOnly", False),
             semester=payload.get("semester"),
             include_available_semesters=payload.get(
                 "includeAvailableSemesters", False
@@ -144,9 +159,23 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             prefetch_available_semesters=payload.get(
                 "prefetchAvailableSemesters", False
             ),
+            target_date=payload.get("date"),
         )
+    if action == "get-current-date":
+        now = datetime.now(timezone(timedelta(hours=8)))
+        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        return {
+            "status": "completed",
+            "date": now.date().isoformat(),
+            "weekday": now.isoweekday(),
+            "weekdayName": weekday_names[now.isoweekday() - 1],
+            "timezone": "Asia/Shanghai",
+            "timestamp": now.isoformat(),
+        }
     if action == "save-schedule-customizations":
         return _schedule_service(payload).save_customizations(payload)
+    if action == "apply-agent-schedule-change":
+        return _schedule_service(payload).apply_agent_change(payload)
     if action == "list-focus":
         return _focus_service(payload).list()
     if action == "upsert-focus":
@@ -175,21 +204,18 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "acknowledge-course-focus-alert":
         return _focus_service(payload).acknowledge_course_alert(payload["jobKey"])
     if action in {"get-training-plan", "search-training-plans"}:
-        return TrainingPlanService(
-            cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
-            cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
-            schedule_cache_file=payload.get(
-                "scheduleCacheFile", ".cvstream/schedule.json"
-            ),
-        ).get(refresh=bool(payload.get("refresh", False)))
+        return _training_plan_service(payload).get(
+            refresh=bool(payload.get("refresh", False))
+        )
+    if action == "save-training-plan-course-override":
+        return _training_plan_service(payload).save_course_override(
+            plan_id=str(payload.get("planId") or ""),
+            course_id=str(payload.get("courseId") or ""),
+            semester=str(payload.get("semester") or ""),
+            status=str(payload.get("status") or "auto"),
+        )
     if action == "analyze-training-plan":
-        return TrainingPlanService(
-            cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
-            cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
-            schedule_cache_file=payload.get(
-                "scheduleCacheFile", ".cvstream/schedule.json"
-            ),
-        ).audit(
+        return _training_plan_service(payload).audit(
             refresh=bool(payload.get("refresh", False)),
             plan_id=str(payload.get("planId") or ""),
         )

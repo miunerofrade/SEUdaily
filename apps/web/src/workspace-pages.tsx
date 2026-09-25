@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, FileImage, FileText, Folder, FolderOpen, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, FileImage, FileText, Folder, FolderOpen, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
@@ -22,6 +22,7 @@ import {
   runFocus,
   recordFocusRun,
   saveScheduleCustomizations,
+  saveTrainingPlanCourseStatus,
   fetchTrainingPlans,
   streamAgent,
   type LibraryFile,
@@ -35,6 +36,7 @@ import {
   type TrainingPlanSource,
 } from "./api";
 import { normalizeMathMarkdown } from "./markdown";
+import { addProcessTool, appendProcessText, finalizeProcessAnswer } from "./stream-state";
 import type { ChatMessage, StreamEvent, ToolResult, ToolRun } from "./types";
 
 const weekdays = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -98,9 +100,10 @@ export function ProgramsPage() {
   const [fetchedAt, setFetchedAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [authorizing, setAuthorizing] = useState(false);
+  const [savingCourse, setSavingCourse] = useState("");
   const [error, setError] = useState("");
 
-  const load = useCallback(async (refresh = false) => {
+  const load = useCallback(async (refresh = false, preserveSemester = false) => {
     setLoading(true);
     setError("");
     try {
@@ -123,7 +126,7 @@ export function ProgramsPage() {
       setSource(response.data?.source ?? null);
       setFetchedAt(response.data?.fetchedAt ?? "");
       setSelectedPlanId((current) => nextPlans.some((plan) => plan.id === current) ? current : nextPlans[0]?.id ?? "");
-      setSelectedSemester("all");
+      if (!preserveSemester) setSelectedSemester("all");
       if (response.status === "failed") setError(response.summary);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "培养方案读取失败");
@@ -215,6 +218,22 @@ export function ProgramsPage() {
     }
   }
 
+  async function setCourseStatus(course: TrainingPlan["courses"][number], semester: string, nextStatus: "auto" | "completed" | "studying" | "not_taken") {
+    if (!plan) return;
+    const courseId = course.id || course.code || course.name;
+    const savingKey = `${courseId}::${semester}`;
+    setSavingCourse(savingKey);
+    setError("");
+    try {
+      await saveTrainingPlanCourseStatus({ planId: plan.id, courseId, semester, status: nextStatus });
+      await load(false, true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "课程状态保存失败");
+    } finally {
+      setSavingCourse("");
+    }
+  }
+
   return <div className="workspace-page programs-page">
     <PageHeader title="培养方案" description={fetchedAt ? `上次同步：${new Date(fetchedAt).toLocaleString("zh-CN")}` : "来自 eHall 个人方案查询"} action={<button className="page-action" disabled={loading || authorizing} onClick={() => void load(true)}><RefreshCw className={loading ? "spin" : ""} size={15} />同步 eHall</button>} />
     {error && <div className="page-state error">{error}</div>}
@@ -225,7 +244,7 @@ export function ProgramsPage() {
       <section className="program-overview">
         <div className="program-overview-head"><div><h2>{plan.title}</h2><p>{[plan.department, plan.grade, plan.major, plan.track].filter(Boolean).join(" · ")}</p></div>{source && <a className="page-action" href={source.url} target="_blank" rel="noreferrer">在 eHall 查看<ExternalLink size={15} /></a>}</div>
         {plans.length > 1 && <label className="program-plan-picker"><span>当前方案</span><select value={plan.id} onChange={(event) => { setSelectedPlanId(event.target.value); setSelectedSemester("all"); }}>{plans.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>}
-        <div className="program-metrics"><div><strong>{plan.requiredCredits}</strong><span>最低修读学分</span></div><div><strong>{plan.completedCredits}</strong><span>已完成学分</span></div><div><strong>{plan.progress}%</strong><span>完成进度</span></div><div><strong>{plan.courseCount}</strong><span>方案课程</span></div></div>
+        <div className="program-metrics"><div><strong>{plan.requiredCredits}</strong><span>最低修读学分</span></div><div><strong>{plan.completedCredits}</strong><span>已完成学分</span></div><div><strong>{plan.creditSummary?.studying ?? 0}</strong><span>在修学分</span></div><div><strong>{plan.creditSummary?.remaining ?? Math.max(0, plan.requiredCredits - plan.completedCredits)}</strong><span>尚需学分</span></div><div><strong>{plan.creditSummary?.generalElectiveCompleted ?? 0}</strong><span>已完成通选学分</span></div><div><strong>{plan.progress}%</strong><span>完成进度</span></div></div>
         <div className="program-progress"><span style={{ width: `${plan.progress}%` }} /></div>
         {source && <p className="program-source">{source.path.join(" / ")} · {source.source}</p>}
       </section>
@@ -243,13 +262,24 @@ export function ProgramsPage() {
           <div className="program-course-row header"><span>课程</span><span>课程组</span><span>性质</span><span>学分</span><span>状态</span></div>
           {semesterGroups.map((group) => <section className="program-semester" key={group.semester}>
             <div className="program-semester-heading"><div><strong>{group.label}</strong><span>{group.courses.length} 门课程</span></div><span className={`program-status ${group.status}`}>{statusLabel(group.status)}</span></div>
-            {group.courses.map(({ course, status: courseStatus }, index) => <div className="program-course-row" key={`${course.id || course.code}-${group.semester}-${index}`}>
+            {group.courses.map(({ course, status: courseStatus }, index) => {
+              const option = trainingCourseSemesterOptions(course).find((item) => item.value === group.semester);
+              const courseId = course.id || course.code || course.name;
+              const savingKey = `${courseId}::${group.semester}`;
+              return <div className="program-course-row" key={`${course.id || course.code}-${group.semester}-${index}`}>
               <span><strong>{course.name}</strong>{(course.code || course.choiceNote) && <small>{[course.code, course.choiceNote].filter(Boolean).join(" · ")}</small>}</span>
               <span>{course.group || "未分类"}</span>
               <span className={`program-nature ${course.nature === "必修" ? "required" : "elective"}`}>{course.nature || course.assessment || "-"}</span>
               <span>{course.credits}</span>
-              <span className={`program-status ${courseStatus}`}>{statusLabel(courseStatus)}</span>
-            </div>)}
+              <label className={`program-status-editor ${option?.manualStatus ? "manual" : ""}`} title={option?.manualStatus ? "手动设置；可切回自动判断" : "按课表同步结果自动判断"}>
+                <select disabled={savingCourse === savingKey} value={option?.manualStatus ? courseStatus : "auto"} onChange={(event) => void setCourseStatus(course, group.semester, event.target.value as "auto" | "completed" | "studying" | "not_taken")}>
+                  <option value="auto">自动 · {statusLabel(courseStatus)}</option>
+                  <option value="completed">手动 · 已完成</option>
+                  <option value="studying">手动 · 学习中</option>
+                  <option value="not_taken">手动 · 未修读</option>
+                </select>
+              </label>
+            </div>})}
           </section>)}
         </div></div>
       </section>
@@ -280,6 +310,7 @@ export function SchedulePage() {
 
   const load = useCallback(async (refresh = false, semester = "") => {
     setLoading(true); setError("");
+    if (refresh) setSemesterError("");
     try {
       const response = await fetchSchedule(refresh, semester);
       setStatus(response.status);
@@ -294,7 +325,9 @@ export function SchedulePage() {
       if (response.data?.prefetchedSemesters) setSemestersPrefetched(true);
       if (response.data?.customizations) setCustomizations(response.data.customizations);
       setWeek((current) => semester ? 1 : current === 1 ? academicWeek((response.data?.customizations ?? emptyCustomizations).semester.startDate, (response.data?.customizations ?? emptyCustomizations).semester.totalWeeks) : current);
-      if (response.status === "failed") setError(response.summary);
+      if (response.status === "auth_required") setSemesterError(response.summary || "课表登录会话不存在或已失效，请重新登录。");
+      else if (["failed", "launch_failed", "semester_switch_failed", "semester_not_found"].includes(response.status)) setError(response.summary);
+      else setSemesterError("");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "课表读取失败"); }
     finally { setLoading(false); }
   }, []);
@@ -330,24 +363,24 @@ export function SchedulePage() {
   }
   const grouped = useMemo(() => {
     const slots = new Map<string, ScheduleCourse[]>();
-    for (const course of courses) {
-      if (course.weeks?.length && !course.weeks.includes(week)) continue;
-      const start = course.startPeriod ?? course.weeklyPeriods?.[0] ?? 1;
-      const end = course.endPeriod ?? course.weeklyPeriods?.at(-1) ?? start;
-      const key = `${course.weekday}-${start}-${end}`;
-      slots.set(key, [...(slots.get(key) ?? []), course]);
-    }
+    let weekCourses = courses.filter((course) => !course.weeks?.length || course.weeks.includes(week));
     if (!semesterSelection && customizations.semester.startDate) {
       const weekStart = new Date(`${customizations.semester.startDate}T00:00:00`);
       weekStart.setDate(weekStart.getDate() + (week - 1) * 7);
       for (const item of customizations.dateOverrides) {
-        if (item.action !== "add" || !item.course) continue;
         const target = new Date(`${item.date}T00:00:00`);
         if (target < weekStart || target.getTime() >= weekStart.getTime() + 7 * 86_400_000) continue;
-        const course = { ...item.course, scheduleId: `date-${item.id}`, sourceKey: `date-${item.id}`, source: "custom" as const, occurrenceDate: item.date, weekday: target.getDay() || 7 };
-        const key = `${course.weekday}-${course.startPeriod}-${course.endPeriod}`;
-        slots.set(key, [...(slots.get(key) ?? []), course]);
+        if (item.targetSourceKey) weekCourses = weekCourses.filter((course) => course.sourceKey !== item.targetSourceKey);
+        if ((item.action === "add" || item.action === "replace") && item.course) {
+          weekCourses.push({ ...item.course, scheduleId: `date-${item.id}`, sourceKey: `date-${item.id}`, source: "custom" as const, occurrenceDate: item.date, weekday: target.getDay() || 7 });
+        }
       }
+    }
+    for (const course of weekCourses) {
+      const start = course.startPeriod ?? course.weeklyPeriods?.[0] ?? 1;
+      const end = course.endPeriod ?? course.weeklyPeriods?.at(-1) ?? start;
+      const key = `${course.weekday}-${start}-${end}`;
+      slots.set(key, [...(slots.get(key) ?? []), course]);
     }
     return [...slots.entries()].map(([key, items]) => {
       const [weekday, start, end] = key.split("-").map(Number);
@@ -416,6 +449,7 @@ export function SchedulePage() {
 
   return <div className="workspace-page">
     <PageHeader title="课表" description={`${selectedSemesterLabel || customizations.semester.name || "当前学期"}${fetchedAt ? ` · 上次同步：${new Date(fetchedAt).toLocaleString("zh-CN")}` : ""}${semesterSelection ? "" : ` · 当前第 ${academicWeek(customizations.semester.startDate, customizations.semester.totalWeeks)} 周`}`} action={<div className="schedule-actions"><label className="schedule-semester-picker" title={semesterError}><span>查看学期</span><select value={semesterSelection} disabled={loading || loadingSemesters} onFocus={() => void loadSemesterOptions()} onChange={(event) => void switchSemester(event.target.value)}><option value="">{currentSemesterLabel || (!semesterSelection && selectedSemesterLabel) || "当前学期"}</option>{semesterOptions.filter((item) => item.value !== currentSemester).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>{loadingSemesters && <LoaderCircle className="spin" size={14} />}</label>{semesterError && <button className="page-action" onClick={() => void login()}><KeyRound size={14} />课表登录</button>}<button className="page-action" disabled={Boolean(semesterSelection)} title={semesterSelection ? "往年课表仅供查看" : "添加课程"} onClick={() => openEditor("recurring")}><Plus size={15} />添加课程</button><button className="page-action" disabled={Boolean(semesterSelection)} title={semesterSelection ? "往年课表仅供查看" : "添加单日课程"} onClick={() => openEditor("date")}><CalendarPlus size={15} />单日课程</button><div className="week-picker"><button disabled={week <= 1} onClick={() => setWeek((value) => value - 1)}><ChevronLeft size={15} /></button><select value={week} onChange={(event) => setWeek(Number(event.target.value))}>{Array.from({ length: visibleTotalWeeks }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 周 · {(index + 1) % 2 ? "单周" : "双周"}</option>)}</select><button disabled={week >= visibleTotalWeeks} onClick={() => setWeek((value) => value + 1)}><ChevronRight size={15} /></button></div><button className="page-action" disabled={loading} onClick={() => void load(true, semesterSelection)}><RefreshCw size={15} />重新抓取</button></div>} />
+    {semesterError && <div className="schedule-refresh-error"><TriangleAlert size={17} /><span>{semesterError} 当前显示的是上次成功同步的缓存课表。</span><button className="page-action" onClick={() => void login()}><KeyRound size={14} />重新登录并抓取</button></div>}
     <div className="semester-settings"><label><span>学期名称</span><input value={customizations.semester.name} onChange={(event) => setCustomizations((value) => ({ ...value, semester: { ...value.semester, name: event.target.value } }))} placeholder="2026-2027 秋季" /></label><label><span>学期起始日期</span><input type="date" value={customizations.semester.startDate} onChange={(event) => setCustomizations((value) => ({ ...value, semester: { ...value.semester, startDate: event.target.value } }))} /></label><label><span>总周数</span><input type="number" min={1} max={30} value={customizations.semester.totalWeeks} onChange={(event) => setCustomizations((value) => ({ ...value, semester: { ...value.semester, totalWeeks: Number(event.target.value) } }))} /></label><button className="page-action" disabled={saving} onClick={() => void persist(customizations)}><Save size={14} />保存学期</button></div>
     <PageState loading={loading} error={error}>
       {courses.length || (!semesterSelection && customizations.dateOverrides.length) ? <Timetable slots={grouped} onEdit={semesterSelection ? undefined : (course) => openEditor("edit", course)} /> : <div className="page-empty"><CalendarDays size={28} /><h2>还没有课表数据</h2><p>先连接东南大学课表系统，完成认证后会保存到本地。</p><button className="page-action primary" onClick={() => void login()}>{status === "auth_required" ? "登录并获取课表" : "获取课表"}</button></div>}
@@ -446,32 +480,37 @@ function updateFocusTool(tools: ToolRun[] = [], next: ToolRun) {
 
 function applyFocusStreamEvent(message: ChatMessage, event: StreamEvent): ChatMessage {
   const payload = event.payload ?? {};
-  if (event.type === "reasoning-start" || event.type === "reasoning-delta") {
-    return { ...message, reasoningActive: true, reasoningDone: true };
+  if (event.type === "reasoning-start") {
+    const text = typeof payload.text === "string" ? payload.text : "";
+    return { ...appendProcessText(message, "reasoning", text, true, String(payload.id ?? crypto.randomUUID())), reasoningActive: true, reasoningDone: true };
+  }
+  if (event.type === "reasoning-delta") {
+    const text = typeof payload.text === "string" ? payload.text : typeof payload.delta === "string" ? payload.delta : "";
+    return { ...appendProcessText(message, "reasoning", text), reasoningActive: true, reasoningDone: true };
   }
   if (event.type === "reasoning-end") {
     return { ...message, reasoningActive: false, reasoningDone: true };
   }
   if (event.type === "text-delta" && typeof payload.text === "string") {
-    return { ...message, content: message.content + payload.text, reasoningActive: false };
+    return { ...appendProcessText(message, "narration", payload.text), reasoningActive: false };
   }
   if (event.type === "tool-call-input-streaming-start" || event.type === "tool-call") {
     const id = String(payload.toolCallId ?? crypto.randomUUID());
-    return { ...message, tools: updateFocusTool(message.tools, { id, name: String(payload.toolName ?? "工具调用"), state: "running", args: payload.args as Record<string, unknown> | undefined }) };
+    const next = addProcessTool(message, id);
+    return { ...next, reasoningActive: false, reasoningDone: true, tools: updateFocusTool(next.tools, { id, name: String(payload.toolName ?? "工具调用"), state: "running", args: payload.args as Record<string, unknown> | undefined }) };
   }
   if (event.type === "tool-result" || event.type === "tool-output") {
     const id = String(payload.toolCallId ?? crypto.randomUUID());
     const rawResult = payload.result ?? payload.output;
     const result = (rawResult && typeof rawResult === "object" && "value" in rawResult ? (rawResult as { value: unknown }).value : rawResult) as ToolResult;
-    return { ...message, tools: updateFocusTool(message.tools, { id, name: String(payload.toolName ?? "工具调用"), state: result?.status === "failed" ? "failed" : "completed", args: payload.args as Record<string, unknown> | undefined, result }) };
+    const next = addProcessTool(message, id);
+    return { ...next, tools: updateFocusTool(next.tools, { id, name: String(payload.toolName ?? "工具调用"), state: result?.status === "failed" ? "failed" : "completed", args: payload.args as Record<string, unknown> | undefined, result }) };
   }
   if (event.type === "tool-error" || event.type === "tool-output-denied") {
     const id = String(payload.toolCallId ?? crypto.randomUUID());
     const result: ToolResult = { status: "failed", taskId: id, summary: typeof payload.error === "string" ? payload.error : "工具执行失败或未获授权。", artifacts: [], citations: [], warnings: [], metrics: {} };
-    return { ...message, tools: updateFocusTool(message.tools, { id, name: String(payload.toolName ?? "工具调用"), state: "failed", result }) };
-  }
-  if (event.type === "finish") {
-    return { ...message, streaming: false, reasoningActive: false, tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, state: "completed" as const } : tool) };
+    const next = addProcessTool(message, id);
+    return { ...next, tools: updateFocusTool(next.tools, { id, name: String(payload.toolName ?? "工具调用"), state: "failed", result }) };
   }
   return message;
 }
@@ -574,10 +613,11 @@ export function FocusPage({
         signal: controller.signal,
         onEvent: (event) => {
           if (event.type === "text-delta" && typeof event.payload?.text === "string") responseText += event.payload.text;
+          if (event.type === "reasoning-start" || event.type === "tool-call-input-streaming-start" || event.type === "tool-call") responseText = "";
           mutateMessage(assistantId, (message) => applyFocusStreamEvent(message, event));
         },
       });
-      mutateMessage(assistantId, (message) => ({ ...message, streaming: false, reasoningActive: false, tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, state: "completed" as const } : tool) }));
+      mutateMessage(assistantId, (message) => ({ ...finalizeProcessAnswer(message), streaming: false, reasoningActive: false, tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, state: "completed" as const } : tool) }));
       await recordFocusRun(item.id, runId, "completed", responseText);
       void load(false);
     } catch (reason) {

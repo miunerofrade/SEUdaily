@@ -165,6 +165,8 @@ def _summary(action: str, result: dict[str, Any], status: str, artifacts: list[d
         return f"查询完成，返回 {count} 条结果。{suffix}"
     if action == "get-schedule":
         return f"课表读取完成，共 {result.get('count', len(result.get('courses') or []))} 门课程。"
+    if action == "get-current-date":
+        return f"当前日期为 {result.get('date', '')}（{result.get('weekdayName', '')}）。"
     if action.startswith("capture-"):
         return f"课程处理{('完成' if status == 'completed' else '未完成')}，生成 {len(artifacts)} 个产物。"
     if action == "summarize-course":
@@ -198,7 +200,13 @@ def _write_full_result(task_id: str, result: dict[str, Any]) -> str:
     return str(target.resolve())
 
 
-def _compact_runtime_data(value: Any, depth: int = 0) -> tuple[Any, bool]:
+def _compact_runtime_data(
+    value: Any,
+    depth: int = 0,
+    *,
+    preserve_list: bool = False,
+    preserve_course_lists: bool = False,
+) -> tuple[Any, bool]:
     if depth > 5:
         return "[内容层级过深，完整内容见 resultRef]", True
     if isinstance(value, str):
@@ -207,9 +215,15 @@ def _compact_runtime_data(value: Any, depth: int = 0) -> tuple[Any, bool]:
         return value[:6000] + "…[已截断，完整内容见 resultRef]", True
     if isinstance(value, list):
         compacted: list[Any] = []
-        changed = len(value) > 12
-        for item in value[:12]:
-            compact_item, item_changed = _compact_runtime_data(item, depth + 1)
+        items = value if preserve_list else value[:12]
+        changed = not preserve_list and len(value) > 12
+        for item in items:
+            compact_item, item_changed = _compact_runtime_data(
+                item,
+                depth + 1,
+                preserve_list=preserve_list,
+                preserve_course_lists=preserve_course_lists,
+            )
             compacted.append(compact_item)
             changed = changed or item_changed
         return compacted, changed
@@ -217,7 +231,12 @@ def _compact_runtime_data(value: Any, depth: int = 0) -> tuple[Any, bool]:
         compacted_dict: dict[str, Any] = {}
         changed = False
         for key, item in value.items():
-            compact_item, item_changed = _compact_runtime_data(item, depth + 1)
+            compact_item, item_changed = _compact_runtime_data(
+                item,
+                depth + 1,
+                preserve_list=preserve_list or (preserve_course_lists and key == "courses"),
+                preserve_course_lists=preserve_course_lists,
+            )
             compacted_dict[key] = compact_item
             changed = changed or item_changed
         return compacted_dict, changed
@@ -278,7 +297,9 @@ def normalize_tool_result(
         full_result["diagnosticsRef"] = diagnostics_ref
 
     result_ref = _write_full_result(task_id, full_result)
-    compacted_data, was_compacted = _compact_runtime_data(data)
+    compacted_data, was_compacted = _compact_runtime_data(
+        data, preserve_course_lists=action == "get-schedule"
+    )
     normalized = {
         **full_result,
         "data": compacted_data,

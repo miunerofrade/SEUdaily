@@ -11,6 +11,7 @@ import { courseAgentMemory, mastraStorage } from "./storage.js";
 import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, type FocusAgentItem } from "./focus-runtime.js";
 import { isFullAccessEnabled, setFullAccessEnabled } from "./permission-state.js";
 import { storeDocumentContext } from "./document-context.js";
+import { activateActionRequest } from "./action-request-store.js";
 
 const FOCUS_RESOURCE_ID = "seudaily-focus-local";
 
@@ -328,6 +329,18 @@ export const appRoutes = [
       return c.json({ ...resultResponse(result), data });
     },
   }),
+  registerApiRoute("/app/action-requests/:id/activate", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      try {
+        const actionRequest = await activateActionRequest(c.req.param("id"));
+        return c.json({ status: "completed", actionRequest });
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "操作请求激活失败" }, 409);
+      }
+    },
+  }),
   registerApiRoute("/app/schedule", {
     method: "PUT",
     requiresAuth: false,
@@ -455,6 +468,20 @@ export const appRoutes = [
     handler: async (c: any) => {
       const result = await runPythonTool<ToolResult>("get-training-plan", {
         refresh: c.req.query("refresh") === "true",
+      });
+      return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+    },
+  }),
+  registerApiRoute("/app/programs/course-status", {
+    method: "PATCH",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      const body = await c.req.json() as { planId?: unknown; courseId?: unknown; semester?: unknown; status?: unknown };
+      const result = await runPythonTool<ToolResult>("save-training-plan-course-override", {
+        planId: typeof body.planId === "string" ? body.planId : "",
+        courseId: typeof body.courseId === "string" ? body.courseId : "",
+        semester: typeof body.semester === "string" ? body.semester : "",
+        status: typeof body.status === "string" ? body.status : "auto",
       });
       return c.json({ ...resultResponse(result), data: await fullResultData(result) });
     },
