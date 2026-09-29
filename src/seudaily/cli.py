@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from .schedule import ScheduleService
 from .focus import FocusService
 from .jwc import CseService, JwcService
 from .protocol import normalize_tool_result
+from .runtime_paths import env_value, runtime_root
 from .training_plan import TrainingPlanService
 from .web_reader import read_web_page
 
@@ -39,10 +41,10 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
             "targetUrl",
             "https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do",
         ),
-        cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
-        cache_file=payload.get("cacheFile", ".cvstream/schedule.json"),
+        cookie_file=payload.get("cookieFile", ".seudaily/ehall-cookies.json"),
+        cache_file=payload.get("cacheFile", ".seudaily/schedule.json"),
         customization_file=payload.get(
-            "customizationFile", ".cvstream/schedule-user.json"
+            "customizationFile", ".seudaily/schedule-user.json"
         ),
         username=payload.get("username"),
         password=payload.get("password"),
@@ -53,13 +55,13 @@ def _jwc_service(payload: dict[str, Any]) -> JwcService:
     if payload.get("site") == "cse":
         return CseService(
             base_url=payload.get("baseUrl", "https://cse.seu.edu.cn"),
-            cache_dir=payload.get("cacheDir", ".cvstream/cse"),
+            cache_dir=payload.get("cacheDir", ".seudaily/cse"),
             timeout_seconds=payload.get("timeoutSeconds", 15),
             background_sync=payload.get("backgroundSync", True),
         )
     return JwcService(
         base_url=payload.get("baseUrl", "https://jwc.seu.edu.cn"),
-        cache_dir=payload.get("cacheDir", ".cvstream/jwc"),
+        cache_dir=payload.get("cacheDir", ".seudaily/jwc"),
         timeout_seconds=payload.get("timeoutSeconds", 15),
         background_sync=payload.get("backgroundSync", True),
     )
@@ -67,10 +69,10 @@ def _jwc_service(payload: dict[str, Any]) -> JwcService:
 
 def _focus_service(payload: dict[str, Any]) -> FocusService:
     return FocusService(
-        state_file=payload.get("stateFile", ".cvstream/focus.json"),
-        schedule_cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json"),
+        state_file=payload.get("stateFile", ".seudaily/focus.json"),
+        schedule_cache_file=payload.get("scheduleCacheFile", ".seudaily/schedule.json"),
         schedule_customization_file=payload.get(
-            "scheduleCustomizationFile", ".cvstream/schedule-user.json"
+            "scheduleCustomizationFile", ".seudaily/schedule-user.json"
         ),
         export_dir=payload.get("exportDir", "exports"),
     )
@@ -78,13 +80,13 @@ def _focus_service(payload: dict[str, Any]) -> FocusService:
 
 def _training_plan_service(payload: dict[str, Any]) -> TrainingPlanService:
     return TrainingPlanService(
-        cookie_file=payload.get("cookieFile", ".cvstream/ehall-cookies.json"),
-        cache_file=payload.get("cacheFile", ".cvstream/training-plan.json"),
+        cookie_file=payload.get("cookieFile", ".seudaily/ehall-cookies.json"),
+        cache_file=payload.get("cacheFile", ".seudaily/training-plan.json"),
         schedule_cache_file=payload.get(
-            "scheduleCacheFile", ".cvstream/schedule.json"
+            "scheduleCacheFile", ".seudaily/schedule.json"
         ),
         override_file=payload.get(
-            "overrideFile", ".cvstream/training-plan-user.json"
+            "overrideFile", ".seudaily/training-plan-user.json"
         ),
     )
 
@@ -99,7 +101,7 @@ def _resolve_course_target(
         if not schedule_id:
             raise ValueError("schedule 目标必须提供 scheduleId")
         course = ScheduleService(
-            cache_file=payload.get("scheduleCacheFile", ".cvstream/schedule.json")
+            cache_file=payload.get("scheduleCacheFile", ".seudaily/schedule.json")
         ).resolve_course(schedule_id, semester=target.get("semester"))
         resolved = {
             "courseName": course["courseName"],
@@ -139,7 +141,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "health":
         return {"version": __version__, "tools": [
             "authorize", "authorize-schedule", "get-schedule", "get-current-date", "save-schedule-customizations", "apply-agent-schedule-change", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course", "read-web-page", "list-jwc", "search-jwc", "get-jwc-article", "search-cse", "get-cse-article", "get-training-plan", "analyze-training-plan", "list-focus", "upsert-focus", "delete-focus", "claim-focus-agent-run", "record-focus-agent-run", "run-focus-cycle", "run-course-focus-queue", "acknowledge-course-focus-alert",
+            "extract-slides", "summarize-course", "read-web-page", "list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article", "get-training-plan", "analyze-training-plan", "list-focus", "upsert-focus", "delete-focus", "claim-focus-agent-run", "record-focus-agent-run", "run-focus-cycle", "run-course-focus-queue", "acknowledge-course-focus-alert",
         ]}
     if action == "authorize":
         return _course_service(payload).authorize()
@@ -219,10 +221,10 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
             refresh=bool(payload.get("refresh", False)),
             plan_id=str(payload.get("planId") or ""),
         )
-    if action in {"list-jwc", "search-jwc", "search-cse"}:
-        if action == "search-cse":
+    if action in {"list-jwc", "list-cse", "search-jwc", "search-cse"}:
+        if action in {"list-cse", "search-cse"}:
             payload["site"] = "cse"
-        if action == "list-jwc":
+        if action in {"list-jwc", "list-cse"}:
             return _jwc_service(payload).list_articles(
                 categories=payload.get("categories"),
                 paths=payload.get("paths"),
@@ -368,6 +370,7 @@ def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
     try:
+        runtime_root(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
         if len(sys.argv) >= 3 and sys.argv[1] == "jwc-worker":
             payload = json.loads(sys.argv[2])
             payload["backgroundSync"] = False

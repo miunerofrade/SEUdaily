@@ -5,11 +5,11 @@ import {
 } from "@mastra/core/workspace";
 
 import { createCommandSandbox } from "./native-command-sandbox.js";
-import { projectRoot, sandboxWorkspaceRoot } from "./runtime-paths.js";
-import { isFullAccessEnabled } from "./permission-state.js";
+import { envValue, projectRoot, sandboxWorkspaceRoot } from "./runtime-paths.js";
+import { isFullAccessExtraEnabled, isUnapprovedAccessEnabled } from "./permission-state.js";
 
 const commandTimeout = Number.parseInt(
-  process.env.CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS ?? "120000",
+  envValue("SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS", "120000") ?? "120000",
   10,
 );
 
@@ -43,31 +43,31 @@ export const seudailyWorkspace = new Workspace({
     [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: { maxOutputTokens: 1_000 },
     [WORKSPACE_TOOLS.FILESYSTEM.GREP]: { maxOutputTokens: 2_000 },
     [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
-      requireApproval: () => !isFullAccessEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
       requireReadBeforeWrite: true,
       maxOutputTokens: 1_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
-      requireApproval: () => !isFullAccessEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
       requireReadBeforeWrite: true,
       maxOutputTokens: 1_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: {
-      requireApproval: () => !isFullAccessEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
       maxOutputTokens: 1_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
-      enabled: () => isFullAccessEnabled(),
-      requireApproval: () => !isFullAccessEnabled(),
+      enabled: () => isFullAccessExtraEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
     },
     [WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT]: { enabled: false },
     [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
-      requireApproval: () => !isFullAccessEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
       maxOutputTokens: 2_500,
     },
     [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: { maxOutputTokens: 2_000 },
     [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
-      requireApproval: () => !isFullAccessEnabled(),
+      requireApproval: () => !isUnapprovedAccessEnabled(),
       maxOutputTokens: 1_000,
     },
   },

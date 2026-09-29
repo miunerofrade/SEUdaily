@@ -2,8 +2,8 @@ import json
 from datetime import date
 from pathlib import Path
 
-from cvstream.cli import _resolve_course_target
-from cvstream.schedule import DEFAULT_SCHEDULE_LAUNCH_URL, ScheduleService
+from seudaily.cli import _resolve_course_target
+from seudaily.schedule import DEFAULT_SCHEDULE_LAUNCH_URL, ScheduleService
 
 
 def test_normalize_schedule_rows_exposes_capture_identity():

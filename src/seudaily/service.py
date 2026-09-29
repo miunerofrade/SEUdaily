@@ -11,13 +11,12 @@ from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from .asr import CloudASRWorker, LocalASRWorker
 from .auth import execute_login
 from .browser_runtime import browser_runtime
 from .cancellation import current_cancel_event
 from .capture import execute_video_task, fetch_dates_only, sanitize_filename
-from .ppt import PPTExtractor
 from .summary import AISummarizer
+from .runtime_paths import env_value
 
 
 DEFAULT_PORTAL_URL = "https://cvs.seu.edu.cn"
@@ -47,8 +46,8 @@ class CourseService:
         export_dir: str | Path = "exports",
     ) -> None:
         self.target_url = target_url
-        self.username = username or os.getenv("CVSTREAM_USERNAME", "")
-        self.password = password or os.getenv("CVSTREAM_PASSWORD", "")
+        self.username = username or env_value("SEUDAILY_USERNAME", "")
+        self.password = password or env_value("SEUDAILY_PASSWORD", "")
         self.cookie_file = Path(cookie_file)
         self.export_dir = Path(export_dir)
 
@@ -510,16 +509,30 @@ class CourseService:
         teacher_name: str,
     ) -> list[dict[str, Any]]:
         normalized_course = course_name.casefold()
-        normalized_teacher = teacher_name.casefold()
+        requested_teachers = {
+            part.strip().casefold()
+            for part in re.split(r"[,，、]", teacher_name)
+            if part.strip()
+        }
         matches = [
             course
             for course in courses
             if course["title"].strip().casefold() == normalized_course
-            and normalized_teacher
-            in [
-                part.strip().casefold()
-                for part in re.split(r"[,，、]", course["teacher"])
-            ]
+            and (
+                requested_teachers
+                == {
+                    part.strip().casefold()
+                    for part in re.split(r"[,，、]", course["teacher"])
+                    if part.strip()
+                }
+                or requested_teachers.intersection(
+                    {
+                        part.strip().casefold()
+                        for part in re.split(r"[,，、]", course["teacher"])
+                        if part.strip()
+                    }
+                )
+            )
         ]
         return matches
 
@@ -686,6 +699,7 @@ class CourseService:
             api_key=asr_api_key,
             model=asr_model,
         )
+        capture_status: list[dict[str, Any]] = []
 
         with self._page() as page:
             logs = self._login(page)
@@ -715,17 +729,61 @@ class CourseService:
                     need_subtitle=need_subtitle,
                     need_ppt=need_ppt,
                     keep_media=keep_media,
+                    capture_status=capture_status,
                 )
             )
 
         artifacts = self._collect_session_artifacts(course, session)
+        self._merge_capture_status(session, capture_status)
+        capture = self._capture_summary(capture_status, artifacts)
         return {
             "status": "completed" if artifacts else "completed_without_artifact",
+            "message": self._capture_message(capture),
             "course": course,
             "session": session,
+            "capture": capture,
             "artifacts": artifacts,
             "logs": logs,
         }
+
+    @staticmethod
+    def _merge_capture_status(session: dict[str, Any], statuses: list[dict[str, Any]]) -> None:
+        by_period = {item.get("periodNumber"): item for item in statuses}
+        for lesson in session.get("lessons", []):
+            status = by_period.get(lesson.get("periodNumber"))
+            if status:
+                lesson.update({key: value for key, value in status.items() if key != "periodNumber"})
+
+    @staticmethod
+    def _capture_summary(statuses: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+        failures = [item["failure"] for item in statuses if item.get("failure")]
+        return {
+            "videoAvailable": sum(1 for item in statuses if item.get("videoAvailable")),
+            "officialSubtitleAvailable": sum(1 for item in statuses if item.get("officialSubtitleAvailable")),
+            "mediaSaved": sum(1 for item in statuses if item.get("mediaSaved")),
+            "asrAttempted": sum(1 for item in statuses if item.get("asrAttempted")),
+            "asrCompleted": sum(1 for item in statuses if item.get("asrCompleted")),
+            "artifactCount": len(artifacts),
+            "failures": failures,
+        }
+
+    @staticmethod
+    def _capture_message(capture: dict[str, Any]) -> str:
+        video = capture["videoAvailable"]
+        official = capture["officialSubtitleAvailable"]
+        saved = capture["mediaSaved"]
+        asr_attempted = capture["asrAttempted"]
+        asr_completed = capture["asrCompleted"]
+        artifact_count = capture["artifactCount"]
+        failures = capture["failures"]
+        if video and artifact_count:
+            return f"课程处理完成：定位到 {video} 节录像，官方字幕 {official} 节，生成 {artifact_count} 个产物。"
+        if video and failures:
+            reason = failures[0]
+            return f"已定位到 {video} 节录像，但未生成字幕产物。官方字幕 {official} 节；ASR {'已完成' if asr_completed else '已尝试但失败'}。原因：{reason}。媒体{'已保存' if saved else '未保存（keepMedia=false）'}。"
+        if video:
+            return f"已定位到 {video} 节录像，但没有官方字幕；ASR {'已完成' if asr_completed else '未执行'}，生成 0 个产物。媒体{'已保存' if saved else '未保存（keepMedia=false）'}。"
+        return f"未定位到可播放录像，生成 {artifact_count} 个产物。"
 
     def _collect_session_artifacts(
         self, course: dict[str, Any], session: dict[str, Any]
@@ -778,7 +836,7 @@ class CourseService:
             and not capture_options.get("keep_media", False)
         )
         effective_concurrency = min(max_concurrency, 2 if subtitle_only else 1)
-        if os.getenv("CVSTREAM_SHARED_BROWSER") == "1":
+        if env_value("SEUDAILY_SHARED_BROWSER") == "1":
             effective_concurrency = 1
 
         results: list[dict[str, Any] | None] = [None] * len(sessions)
@@ -830,8 +888,28 @@ class CourseService:
             warnings.append(
                 "常驻共享浏览器使用同步 Playwright，本批次已自动串行执行以保证线程安全。"
             )
+        video_count = sum(
+            int((result or {}).get("capture", {}).get("videoAvailable", 0))
+            for result in results
+            if result
+        )
+        artifact_count = sum(
+            len((result or {}).get("artifacts", []))
+            for result in results
+            if result
+        )
+        failure_messages = [
+            failure
+            for result in results
+            if result
+            for failure in (result.get("capture", {}).get("failures", []) or [])
+        ]
         return {
             "status": "completed" if completed == len(results) else "partial",
+            "message": (
+                f"批量处理完成：定位到 {video_count} 节录像，生成 {artifact_count} 个产物。"
+                + (f" 资源处理失败：{failure_messages[0]}。" if failure_messages else "")
+            ),
             "count": len(results),
             "completed": completed,
             "requestedConcurrency": max_concurrency,
@@ -946,6 +1024,7 @@ class CourseService:
             api_key=asr_api_key,
             model=asr_model,
         )
+        capture_status: list[dict[str, Any]] = []
         stop_event = current_cancel_event()
 
         with self._page() as page:
@@ -1010,6 +1089,7 @@ class CourseService:
                     need_subtitle=need_subtitle,
                     need_ppt=need_ppt,
                     keep_media=keep_media,
+                    capture_status=capture_status,
                 )
             )
 
@@ -1038,10 +1118,14 @@ class CourseService:
             for path in candidate_paths
             if path.exists()
         ]
+        self._merge_capture_status({"lessons": [lesson]}, capture_status)
+        capture = self._capture_summary(capture_status, artifacts)
         return {
             "status": "completed" if artifacts else "completed_without_artifact",
+            "message": self._capture_message(capture),
             "course": course,
             "lesson": lesson,
+            "capture": capture,
             "artifacts": artifacts,
             "logs": logs,
         }
@@ -1092,15 +1176,19 @@ class CourseService:
         model: str,
     ):
         if engine == "cloud":
-            key = api_key or os.getenv("CVSTREAM_ASR_API_KEY", "")
+            from .asr.cloud import CloudASRWorker
+
+            key = api_key or env_value("SEUDAILY_ASR_API_KEY", "")
             return CloudASRWorker(
                 {"asr_api_key": key, "asr_model_version": model}, self.export_dir
             )
-        selected_model = model_path or os.getenv("CVSTREAM_WHISPER_MODEL", "")
+        selected_model = model_path or env_value("SEUDAILY_WHISPER_MODEL", "")
         if not selected_model:
             return UnavailableASRWorker(
-                "未配置本地 ASR 模型；官方字幕缺失时请设置 CVSTREAM_WHISPER_MODEL"
+                "未配置本地 ASR 模型；官方字幕缺失时请设置 SEUDAILY_WHISPER_MODEL"
             )
+        from .asr.local import LocalASRWorker
+
         return LocalASRWorker(
             selected_model, str(self.export_dir)
         )
@@ -1147,7 +1235,7 @@ def transcribe_cloud(
 ) -> dict[str, Any]:
     worker = CloudASRWorker(
         {
-            "asr_api_key": api_key or os.getenv("CVSTREAM_ASR_API_KEY", ""),
+            "asr_api_key": api_key or env_value("SEUDAILY_ASR_API_KEY", ""),
             "asr_model_version": model,
         },
         output_dir,
@@ -1186,7 +1274,7 @@ def summarize_course(
         "api_key": (
             api_key
             or os.getenv("DEEPSEEK_API_KEY", "")
-            or os.getenv("CVSTREAM_LLM_API_KEY", "")
+            or env_value("SEUDAILY_LLM_API_KEY", "")
         ),
         "llm_engine": llm_engine,
         "model": model or os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),

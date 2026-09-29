@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cvstream.jwc as jwc_module
-from cvstream.jwc import CseService, _article_id
+import seudaily.jwc as jwc_module
+from seudaily.jwc import CseService, _article_id
 
 
 def test_cse_uses_site_specific_stable_id() -> None:

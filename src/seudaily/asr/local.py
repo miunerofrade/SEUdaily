@@ -6,7 +6,7 @@ import sys
 import json
 from pathlib import Path
 
-from cvstream.subprocess_utils import hidden_process_options
+from seudaily.subprocess_utils import hidden_process_options
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -64,7 +64,7 @@ class LocalASRWorker:
         
 
         cmd = [
-            sys.executable, "-m", "cvstream.asr.local",
+            sys.executable, "-m", "seudaily.asr.local",
             "--model", self.model_path,
             "--video", self.temp_video_path,
             "--txt", str(txt_file)
@@ -115,7 +115,11 @@ if __name__ == "__main__":
     import sys
     import os  
     import json
-    from faster_whisper import WhisperModel
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as exc:
+        sys.stderr.write("未安装本地 ASR 可选依赖；请运行 uv sync --extra asr\n")
+        os._exit(1)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)

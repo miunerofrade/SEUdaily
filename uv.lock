@@ -1424,17 +1424,29 @@ version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dashscope" },
-    { name = "faster-whisper" },
-    { name = "img2pdf" },
-    { name = "numpy" },
     { name = "openai" },
-    { name = "opencv-python" },
     { name = "openpyxl" },
     { name = "playwright" },
     { name = "pypdfium2" },
     { name = "python-docx" },
     { name = "python-pptx" },
     { name = "tzdata" },
+]
+
+[package.optional-dependencies]
+asr = [
+    { name = "faster-whisper" },
+]
+media = [
+    { name = "faster-whisper" },
+    { name = "img2pdf" },
+    { name = "numpy" },
+    { name = "opencv-python" },
+]
+ppt = [
+    { name = "img2pdf" },
+    { name = "numpy" },
+    { name = "opencv-python" },
 ]
 
 [package.dev-dependencies]
@@ -1445,11 +1457,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dashscope", specifier = ">=1.25.15" },
-    { name = "faster-whisper", specifier = ">=1.2.1" },
-    { name = "img2pdf", specifier = ">=0.6.3" },
-    { name = "numpy", specifier = ">=2.4.3" },
+    { name = "faster-whisper", marker = "extra == 'asr'", specifier = ">=1.2.1" },
+    { name = "faster-whisper", marker = "extra == 'media'", specifier = ">=1.2.1" },
+    { name = "img2pdf", marker = "extra == 'media'", specifier = ">=0.6.3" },
+    { name = "img2pdf", marker = "extra == 'ppt'", specifier = ">=0.6.3" },
+    { name = "numpy", marker = "extra == 'media'", specifier = ">=2.4.3" },
+    { name = "numpy", marker = "extra == 'ppt'", specifier = ">=2.4.3" },
     { name = "openai", specifier = ">=2.30.0" },
-    { name = "opencv-python", specifier = ">=4.13.0.92" },
+    { name = "opencv-python", marker = "extra == 'media'", specifier = ">=4.13.0.92" },
+    { name = "opencv-python", marker = "extra == 'ppt'", specifier = ">=4.13.0.92" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "playwright", specifier = ">=1.55.0" },
     { name = "pypdfium2", specifier = ">=5.13.0" },
@@ -1457,6 +1473,7 @@ requires-dist = [
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "tzdata", specifier = ">=2025.2" },
 ]
+provides-extras = ["asr", "ppt", "media"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.0" }]

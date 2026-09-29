@@ -30,7 +30,7 @@ class PythonWorkerClient {
       cwd: projectRoot,
       env: {
         ...process.env,
-        CVSTREAM_PROJECT_ROOT: projectRoot,
+        SEUDAILY_PROJECT_ROOT: projectRoot,
         PYTHONUTF8: "1",
         PYTHONIOENCODING: "utf-8",
       },

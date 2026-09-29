@@ -4,7 +4,6 @@ import json
 import shutil
 import threading
 from pathlib import Path
-from .ppt import PPTExtractor
 
 _HEAVY_PROCESSING_LOCK = threading.Lock()
 
@@ -97,7 +96,7 @@ class RouteIsolationCapture:
             pass
 
 
-def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event, target_date=None, target_sequence=None, need_subtitle=True, need_ppt=False, keep_media=False):
+def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event, target_date=None, target_sequence=None, need_subtitle=True, need_ppt=False, keep_media=False, capture_status=None):
     def get_time(): return time.strftime('%H:%M:%S')
     
     captured_subtitles = {}
@@ -275,6 +274,17 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
         seq = item['period_seq']
         idx = item['index']
         date_key = item['date'].replace('-', '')
+        status_item = {
+            "date": item["date"],
+            "periodNumber": seq,
+            "videoAvailable": False,
+            "officialSubtitleAvailable": False,
+            "mediaSaved": False,
+            "asrAttempted": False,
+            "asrCompleted": False,
+        }
+        if capture_status is not None:
+            capture_status.append(status_item)
         
         # 全部日期模式：预扫描跳过已有字幕的课时
         if is_all_dates and (date_key, seq) in existing_keys:
@@ -326,6 +336,7 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                     yield f"[{get_time()}] [DEBUG] 第 {seq} 节 P3(嗅探) 捕获成功。"
 
             item['final_url'] = final_url
+            status_item["videoAvailable"] = bool(final_url)
 
             if final_url and need_subtitle:
                 yield f"[{get_time()}] [DEBUG] 等待字幕请求加载 (尝试规避约 5s 防盗页)..."
@@ -386,6 +397,7 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
             try:
                 process_official_json(sub_json, item_sub_dir, task_name)
                 got_official_sub = True 
+                status_item["officialSubtitleAvailable"] = True
                 yield f"[{get_time()}] 官方字幕写入成功。"
             except Exception as e:
                 yield f"[{get_time()}] 官方字幕写入失败: {e}"
@@ -409,6 +421,7 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                     yield f"[{get_time()}] 启动媒体处理引擎 {msg}..."
                     
                     try:
+                        status_item["asrAttempted"] = bool(need_subtitle and not got_official_sub)
                         asr_worker.export_base_dir = item_sub_dir
                         asr_worker.extract_media(final_url, target_url, audio_only=audio_only_mode)
 
@@ -419,17 +432,26 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                             media_dir.mkdir(parents=True, exist_ok=True)
                             if dest_media_path.exists(): dest_media_path.unlink()
                             shutil.copy2(asr_worker.temp_video_path, dest_media_path)
+                            status_item["mediaSaved"] = True
 
                         if need_subtitle and not got_official_sub:
                             yield f"[{get_time()}] 启动 ASR 音频转写..."
                             for progress_data in asr_worker.transcribe_and_export(task_name):
                                 if "progress" in progress_data:
                                     yield f"[ASR_PROGRESS] {json.dumps(progress_data)}"
+                            status_item["asrCompleted"] = True
 
                         if need_ppt:
                             media_dir.mkdir(parents=True, exist_ok=True)
                             yield f"[{get_time()}] 初始化 PPT 视觉抽帧队列..."
                             try:
+                                try:
+                                    from .ppt import PPTExtractor
+                                except ImportError as exc:
+                                    raise RuntimeError(
+                                        "未安装 PPT 可选依赖；请运行 uv sync --extra ppt"
+                                    ) from exc
+
                                 source_video_path = dest_media_path if dest_media_path.exists() else asr_worker.temp_video_path
                                 ppt_worker = PPTExtractor(
                                     video_path=str(source_video_path),
@@ -445,6 +467,7 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                         asr_worker._cleanup()
 
                     except Exception as e:
+                        status_item["failure"] = str(e)
                         yield f"[{get_time()}] 媒体处理异常终止: {e}"
 
                     if stop_event.is_set():

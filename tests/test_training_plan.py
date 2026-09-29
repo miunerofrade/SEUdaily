@@ -1,4 +1,4 @@
-from cvstream.training_plan import TrainingPlanService
+from seudaily.training_plan import TrainingPlanService
 
 
 def test_training_plan_normalizes_ehall_personal_plan() -> None:

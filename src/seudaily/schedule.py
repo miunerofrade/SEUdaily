@@ -16,6 +16,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser_runtime import browser_runtime
+from .runtime_paths import env_value
 
 
 DEFAULT_SCHEDULE_URL = (
@@ -43,9 +44,9 @@ class ScheduleService:
         self,
         *,
         target_url: str = DEFAULT_SCHEDULE_URL,
-        cookie_file: str | Path = ".cvstream/ehall-cookies.json",
-        cache_file: str | Path = ".cvstream/schedule.json",
-        customization_file: str | Path = ".cvstream/schedule-user.json",
+        cookie_file: str | Path = ".seudaily/ehall-cookies.json",
+        cache_file: str | Path = ".seudaily/schedule.json",
+        customization_file: str | Path = ".seudaily/schedule-user.json",
         username: str | None = None,
         password: str | None = None,
     ) -> None:
@@ -53,8 +54,8 @@ class ScheduleService:
         self.cookie_file = Path(cookie_file)
         self.cache_file = Path(cache_file)
         self.customization_file = Path(customization_file)
-        self.username = username or os.getenv("CVSTREAM_USERNAME", "")
-        self.password = password or os.getenv("CVSTREAM_PASSWORD", "")
+        self.username = username or env_value("SEUDAILY_USERNAME", "")
+        self.password = password or env_value("SEUDAILY_PASSWORD", "")
 
     @property
     def entry_url(self) -> str:
@@ -191,7 +192,7 @@ class ScheduleService:
                         if login_state == "credentials_missing":
                             return {
                                 "status": "credentials_missing",
-                                "message": "请在 .env 配置 CVSTREAM_USERNAME 和 CVSTREAM_PASSWORD。",
+                                "message": "请在 .env 配置 SEUDAILY_USERNAME 和 SEUDAILY_PASSWORD。",
                             }
                         if login_state in {"submitted", "captcha_required"}:
                             login_attempted = True

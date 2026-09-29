@@ -198,7 +198,7 @@ class JwcService:
     def __init__(
         self,
         base_url: str = "https://jwc.seu.edu.cn",
-        cache_dir: str = ".cvstream/jwc",
+        cache_dir: str = ".seudaily/jwc",
         timeout_seconds: int = 15,
         background_sync: bool = True,
         config: WebplusSiteConfig = JWC_CONFIG,
@@ -446,7 +446,7 @@ class JwcService:
         sha256 = hashlib.sha256()
         size_bytes = 0
         with tempfile.TemporaryDirectory(
-            prefix=f"cvstream-{self.config.key}-attachment-"
+            prefix=f"seudaily-{self.config.key}-attachment-"
         ) as temp_dir:
             temporary_path = Path(temp_dir) / f"attachment{extension}"
             request = Request(
@@ -592,7 +592,7 @@ class JwcService:
         command = [
             sys.executable,
             "-m",
-            "cvstream.cli",
+            "seudaily.cli",
             "jwc-worker",
             json.dumps({
                 "site": self.config.key,
@@ -1030,7 +1030,7 @@ class CseService(JwcService):
     def __init__(
         self,
         base_url: str = "https://cse.seu.edu.cn",
-        cache_dir: str = ".cvstream/cse",
+        cache_dir: str = ".seudaily/cse",
         timeout_seconds: int = 15,
         background_sync: bool = True,
     ) -> None:

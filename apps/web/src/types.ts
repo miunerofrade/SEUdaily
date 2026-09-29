@@ -62,6 +62,7 @@ export type ChatMessage = {
   reasoningActive?: boolean;
   reasoningDone?: boolean;
   streaming?: boolean;
+  brokerRunToken?: string;
   error?: string;
 };
 

@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { RequestContext } from "@mastra/core/request-context";
 
 import { seuDailyAgent } from "./agents/course-agent.js";
 import { runPythonTool } from "./tools/python-bridge.js";
@@ -45,8 +47,13 @@ function scheduledPrompt(focus: FocusAgentItem): string {
 }
 
 async function generateFocusAgentMessage(focus: FocusAgentItem, message: string): Promise<string> {
+  const requestContext = new RequestContext();
+  requestContext.set("seudailyRunToken", randomUUID());
+  requestContext.set("seudailyThreadId", focus.threadId);
+  requestContext.set("seudailyToolNamespaces", focus.kind === "notice" ? ["notices"] : ["course-materials"]);
   const output = await seuDailyAgent.generate(message, {
     memory: { thread: focus.threadId, resource: focus.resourceId },
+    requestContext,
   });
   return output.text;
 }

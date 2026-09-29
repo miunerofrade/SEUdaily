@@ -4,7 +4,7 @@ import subprocess
 import warnings
 from pathlib import Path
 
-from cvstream.subprocess_utils import hidden_process_options
+from seudaily.subprocess_utils import hidden_process_options
 
 warnings.filterwarnings("ignore")
 

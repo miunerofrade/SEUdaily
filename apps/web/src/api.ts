@@ -3,7 +3,8 @@ import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
 export const RESOURCE_ID = "seudaily-web-local";
 const HISTORY_RESOURCES = [RESOURCE_ID, "cvstream-web-local"];
-const DOCUMENT_SECTION_MARKER = "\n\n<!-- cvstream:documents -->";
+const DOCUMENT_SECTION_MARKER = "\n\n<!-- seudaily:documents -->";
+const LEGACY_DOCUMENT_SECTION_MARKERS = ["\n\n<!-- cvstream:documents -->"];
 
 export type AgentContent = string | Array<
   | { type: "text"; text: string }
@@ -20,9 +21,43 @@ type StreamOptions = {
   threadId: string;
   resourceId?: string;
   documents?: DocumentAttachment[];
+  authResumeId?: string;
+  runToken?: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
 };
+
+type ToolNamespace = "schedule" | "course-materials" | "notices" | "training-plan" | "web" | "browser" | "local-actions" | "workspace";
+
+function contentText(content: AgentContent) {
+  if (typeof content === "string") return content;
+  return content.filter((part): part is { type: "text"; text: string } => part.type === "text").map((part) => part.text).join("\n");
+}
+
+function latestInputText(message: AgentInput) {
+  if (typeof message === "string") return message;
+  for (let index = message.length - 1; index >= 0; index -= 1) {
+    const item = message[index];
+    if (item.role === "user") return contentText(item.content);
+  }
+  return "";
+}
+
+export function inferToolNamespaces(message: AgentInput, pagePath = ""): ToolNamespace[] {
+  const text = latestInputText(message).toLowerCase();
+  const selected = new Set<ToolNamespace>();
+  if (/课表|上课|今天.*课|明天.*课|timetable|schedule/.test(text)) selected.add("schedule");
+  if (/修改课表|调课|移动.*课|新增.*课|创建.*关注|新建.*关注|focus/.test(text)) selected.add("local-actions");
+  if (/课程回放|课次|字幕|课件|幻灯片|\bppt\b|录播|转写|subtitle|course material/.test(text)) selected.add("course-materials");
+  if (/教务处|计软智|计算机学院|学院通知|校园通知|最新通知|\bjwc\b|\bcse\b/.test(text)) selected.add("notices");
+  if (/培养方案|毕业要求|学分|通选|限选|任选|跨学科|training plan/.test(text)) selected.add("training-plan");
+  if (/https?:\/\/|上网查|网页|互联网|新闻|最新信息|web search|search online/.test(text)) selected.add("web");
+  if (/打开.*网页|浏览器|点击|输入|填写|下拉|页面交互|playwright|browser/.test(text)) selected.add("browser");
+  if (/修改.*文件|编辑.*代码|运行.*命令|终端|项目目录|workspace|terminal/.test(text)) selected.add("workspace");
+  if (/\/schedule/.test(pagePath)) selected.add("schedule");
+  if (/\/focus/.test(pagePath)) selected.add("local-actions");
+  return [...selected];
+}
 
 function errorDetail(value: unknown): string {
   if (typeof value === "string") return value.trim();
@@ -44,16 +79,22 @@ function agentErrorMessage(value: unknown) {
   return errorDetail(value) || "Agent 请求失败，但服务端没有提供错误详情。";
 }
 
-export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], signal, onEvent }: StreamOptions) {
+export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], authResumeId, runToken, signal, onEvent }: StreamOptions) {
+  const toolNamespaces = inferToolNamespaces(message, typeof window === "undefined" ? "" : window.location.pathname);
   const response = await fetch(AGENT_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       messages: message,
       memory: { thread: threadId, resource: resourceId },
-      ...(documents.some((document) => document.contextRef) ? {
-        requestContext: { cvstreamDocumentRefs: documents.flatMap((document) => document.contextRef ? [document.contextRef] : []) },
-      } : {}),
+      requestContext: {
+        seudailyRunToken: runToken ?? crypto.randomUUID(),
+        seudailyThreadId: threadId,
+        seudailyToolNamespaces: toolNamespaces,
+        seudailyPagePath: typeof window === "undefined" ? "" : window.location.pathname,
+        ...(authResumeId ? { seudailyAuthResumeId: authResumeId } : {}),
+        seudailyDocumentRefs: documents.flatMap((document) => document.contextRef ? [document.contextRef] : []),
+      },
     }),
     signal,
   });
@@ -104,10 +145,29 @@ export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID,
 
 export type AgentActionRequest = {
   id: string;
-  kind: "create-focus" | "modify-schedule";
+  kind: "create-focus" | "modify-schedule" | "create_focus" | "add_schedule" | "update_schedule" | "move_schedule";
   text: string;
   expiresAt?: string;
 };
+
+export type AgentAuthRequest = {
+  id: string;
+  target: "schedule" | "course";
+  text: string;
+  expiresAt?: string;
+};
+
+export function executeAgentAuthRequest(id: string) {
+  return jsonRequest<{ status: string; resumeId: string; target: "schedule" | "course" }>(
+    `/app/auth-resumes/${encodeURIComponent(id)}/execute`, { method: "POST" },
+  );
+}
+
+export function executeAgentActionRequest(id: string) {
+  return jsonRequest<{ status: string; data?: unknown; summary?: string }>(
+    `/app/action-requests/${encodeURIComponent(id)}/execute`, { method: "POST" },
+  );
+}
 
 export function activateAgentActionRequest(id: string) {
   return jsonRequest<{ status: string; actionRequest: AgentActionRequest }>(
@@ -236,7 +296,10 @@ async function storedAttachments(messageId: string, parts: Array<Record<string, 
 }
 
 function visibleStoredContent(content: string) {
-  const packagedMarker = content.indexOf(DOCUMENT_SECTION_MARKER);
+  const packagedMarker = [DOCUMENT_SECTION_MARKER, ...LEGACY_DOCUMENT_SECTION_MARKERS]
+    .map((marker) => content.indexOf(marker))
+    .filter((index) => index >= 0)
+    .sort((left, right) => left - right)[0] ?? -1;
   const legacyMarker = content.indexOf("\n\n【附件：");
   const marker = packagedMarker >= 0 ? packagedMarker : legacyMarker;
   return (marker >= 0 ? content.slice(0, marker) : content).trim();
@@ -259,6 +322,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   const restored = await Promise.all((data.messages ?? []).map(async (item): Promise<ChatMessage | null> => {
     if (item.role !== "user" && item.role !== "assistant") return null;
     const storedContent = item.content?.content ?? "";
+    if (item.role === "user" && /^\[SEUDAILY_AUTH_RESUME\s+id=auth-[^\]]+\]/i.test(storedContent)) return null;
     const parts = item.content?.parts ?? [];
     const content = item.role === "user" ? visibleStoredContent(storedContent) : storedAssistantContent(parts, storedContent);
     const attachments = item.role === "user" ? await storedAttachments(item.id, item.content?.parts) : undefined;
@@ -781,6 +845,23 @@ export function saveFullAccess(enabled: boolean) {
   return jsonRequest<{ saved: string[]; agentInstructionsSaved: boolean; restartRequired: boolean }>("/app/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values: { CVSTREAM_FULL_ACCESS: String(enabled) } }),
+    body: JSON.stringify({ values: { SEUDAILY_FULL_ACCESS: String(enabled) } }),
+  });
+}
+
+export function saveFullAccessExtra(enabled: boolean) {
+  return jsonRequest<{ saved: string[]; restartRequired: boolean }>("/app/settings", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ values: { SEUDAILY_FULL_ACCESS_EXTRA: String(enabled) } }),
+  });
+}
+
+export function saveAccessMode(mode: "normal" | "full" | "extra") {
+  return jsonRequest<{ saved: string[]; restartRequired: boolean }>("/app/settings", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ values: {
+      SEUDAILY_FULL_ACCESS: String(mode === "full" || mode === "extra"),
+      SEUDAILY_FULL_ACCESS_EXTRA: String(mode === "extra"),
+    } }),
   });
 }

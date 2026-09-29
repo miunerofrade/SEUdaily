@@ -29,10 +29,10 @@ class TrainingPlanService:
     def __init__(
         self,
         *,
-        cookie_file: str | Path = ".cvstream/ehall-cookies.json",
-        cache_file: str | Path = ".cvstream/training-plan.json",
-        schedule_cache_file: str | Path = ".cvstream/schedule.json",
-        override_file: str | Path = ".cvstream/training-plan-user.json",
+        cookie_file: str | Path = ".seudaily/ehall-cookies.json",
+        cache_file: str | Path = ".seudaily/training-plan.json",
+        schedule_cache_file: str | Path = ".seudaily/schedule.json",
+        override_file: str | Path = ".seudaily/training-plan-user.json",
         launch_url: str = DEFAULT_PLAN_LAUNCH_URL,
     ) -> None:
         self.cookie_file = Path(cookie_file)

@@ -22,7 +22,7 @@ const extractResponseSchema = z.object({
   request_id: z.string().optional(),
 });
 
-const inputSchema = z.object({
+export const webFetchInputSchema = z.object({
   urls: z.array(z.string().url()).min(1).max(5),
   query: z
     .string()
@@ -52,7 +52,7 @@ function isPrivateIpv4(hostname: string): boolean {
   );
 }
 
-function normalizePublicUrl(value: string): string {
+export function normalizePublicUrl(value: string): string {
   const url = new URL(value);
   const safeLabel = `${url.origin}${url.pathname}`;
   if (!['http:', 'https:'].includes(url.protocol)) {
@@ -62,6 +62,9 @@ function normalizePublicUrl(value: string): string {
     throw new Error(`URL 不能包含登录凭据：${safeLabel}`);
   }
   const hostname = url.hostname.toLowerCase();
+  if (hostname === "seu.edu.cn" || hostname.endsWith(".seu.edu.cn")) {
+    throw new Error(`校园域名不允许发送到远程网页提取：${safeLabel}`);
+  }
   if (
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
@@ -94,13 +97,11 @@ function failedResult(taskId: string, summary: string, elapsedMs: number): ToolR
   };
 }
 
-export const webFetchTool = createTool({
-  ...standardToolOutput,
-  id: "fetch-web-pages",
-  description:
-    "Remote fallback that uses Tavily to extract query-relevant chunks from up to five public web URLs. Use this tool only after read-web-page has been attempted and failed for the required URL, or when read-web-page cannot process a batch of multiple public web-search results. Never use it for SEU Academic Affairs (jwc.seu.edu.cn), SEU CSE (cse.seu.edu.cn), campus/internal/private URLs, or attachment reading. It does not use the local network, browser session, cookies, or login state. A query is required; local, private, credentialed, and signed URLs are rejected.",
-  inputSchema,
-  execute: async (input, options): Promise<ToolResult> => {
+export type WebFetchInput = z.infer<typeof webFetchInputSchema>;
+
+export async function fetchPublicWebPages(input: WebFetchInput, abortSignal?: AbortSignal): Promise<ToolResult> {
+  const options = { abortSignal };
+  {
     const taskId = `fetch-${randomUUID()}`;
     const startedAt = performance.now();
     const apiKey = process.env.TAVILY_API_KEY?.trim();
@@ -126,7 +127,7 @@ export const webFetchTool = createTool({
     try {
       const timeoutMs = Math.round(input.timeoutSeconds * 1_000);
       const timeoutSignal = AbortSignal.timeout(timeoutMs + 5_000);
-      const signal = options?.abortSignal
+      const signal = options.abortSignal
         ? AbortSignal.any([options.abortSignal, timeoutSignal])
         : timeoutSignal;
       const response = await fetch(TAVILY_EXTRACT_ENDPOINT, {
@@ -203,7 +204,7 @@ export const webFetchTool = createTool({
         },
       };
     } catch (error) {
-      if (options?.abortSignal?.aborted) {
+      if (options.abortSignal?.aborted) {
         return {
           ...failedResult(taskId, "网页正文提取已取消。", Math.round(performance.now() - startedAt)),
           status: "cancelled",
@@ -216,5 +217,13 @@ export const webFetchTool = createTool({
         Math.round(performance.now() - startedAt),
       );
     }
-  },
+  }
+}
+
+export const webFetchTool = createTool({
+  ...standardToolOutput,
+  id: "fetch-web-pages",
+  description: "兼容保留的公开网页远程提取实现；不作为 Agent 默认工具暴露。",
+  inputSchema: webFetchInputSchema,
+  execute: async (input, options) => fetchPublicWebPages(input, options?.abortSignal),
 });

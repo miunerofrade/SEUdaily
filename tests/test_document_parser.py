@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cvstream.document_parser import parse_document
+from seudaily.document_parser import parse_document
 
 
 def _write_text_pdf(path: Path, text: str) -> None:

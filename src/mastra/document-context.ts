@@ -12,7 +12,7 @@ type DocumentContext = {
 type StoredDocumentContext = Omit<DocumentContext, "cleanupTimer">;
 
 const documentContexts = new Map<string, DocumentContext>();
-const contextDirectory = join(tmpdir(), "cvstream-document-context");
+const contextDirectory = join(tmpdir(), "seudaily-document-context");
 const pendingLifetimeMs = 10 * 60 * 1000;
 const consumedLifetimeMs = 24 * 60 * 60 * 1000;
 

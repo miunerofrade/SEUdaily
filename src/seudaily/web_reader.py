@@ -252,7 +252,7 @@ def _download_and_parse(
     extension = attachment["extension"]
     size_bytes = 0
     digest = hashlib.sha256()
-    with tempfile.TemporaryDirectory(prefix="cvstream-web-attachment-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="seudaily-web-attachment-") as temp_dir:
         temporary_path = Path(temp_dir) / f"attachment{extension}"
         request = Request(url, headers={"User-Agent": "SEUdaily/1.0 (+local web reader)", "Referer": referer})
         with opener.open(request, timeout=timeout_seconds) as response:

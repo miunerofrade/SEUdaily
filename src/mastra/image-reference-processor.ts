@@ -6,8 +6,9 @@ import { basename, extname, resolve } from "node:path";
 import { projectRoot } from "./runtime-paths.js";
 
 const referencePrefix = "seudaily-image-ref:";
+// Persisted 1.x messages used this marker; new messages always use referencePrefix.
 const legacyReferencePrefix = "cvstream-image-ref:";
-const imageRoot = resolve(projectRoot, ".cvstream", "uploads", "images");
+const imageRoot = resolve(projectRoot, ".seudaily", "uploads", "images");
 
 function imageMediaType(path: string) {
   const extension = extname(path).toLowerCase();

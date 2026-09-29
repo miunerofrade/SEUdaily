@@ -87,24 +87,30 @@ function compactDataText(data: unknown): string | undefined {
 }
 
 export function compactToolResultForModel(output: ToolResult) {
+  if (!output || typeof output !== "object") {
+    return { type: "text" as const, value: "工具执行失败：未返回结构化结果。" };
+  }
+  const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
+  const citations = Array.isArray(output.citations) ? output.citations : [];
+  const warnings = Array.isArray(output.warnings) ? output.warnings : [];
   const lines = [`状态：${output.status}`, output.summary, `任务 ID：${output.taskId}`];
   const data = compactDataText(output.data);
   if (data) lines.push("关键数据：", data);
-  if (output.artifacts.length) {
+  if (artifacts.length) {
     lines.push("产物：");
-    for (const artifact of output.artifacts.slice(0, 6)) {
+    for (const artifact of artifacts.slice(0, 6)) {
       lines.push(`- ${artifact.type}: ${artifact.path}`);
     }
   }
-  if (output.citations.length) {
+  if (citations.length) {
     lines.push("可引用来源：");
-    for (const citation of output.citations.slice(0, 6)) {
+    for (const citation of citations.slice(0, 6)) {
       const location = safeCitationLocation(citation);
       lines.push(`- [${citation.id}] ${citation.title}${location ? ` — ${location}` : ""}`);
     }
   }
-  if (output.warnings.length) {
-    lines.push("警告：", ...output.warnings.slice(0, 3).map((item) => `- ${item}`));
+  if (warnings.length) {
+    lines.push("警告：", ...warnings.slice(0, 3).map((item) => `- ${item}`));
   }
   if (output.resultRef) lines.push(`完整结果：${output.resultRef}`);
   return { type: "text" as const, value: lines.join("\n") };

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import cvstream.web_reader as web_reader
+import seudaily.web_reader as web_reader
 
 
 def _text_pdf_bytes(text: str) -> bytes:

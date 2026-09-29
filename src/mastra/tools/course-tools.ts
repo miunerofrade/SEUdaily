@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { consumeActionRequest, issueActionRequest } from "../action-request-store.js";
+import { issueAuthResume, type AuthTarget } from "../auth-resume-store.js";
+import { localActionExecutionPayload, localActionProposalSchema } from "../local-action-schema.js";
 import { runPythonTool } from "./python-bridge.js";
 import { pythonToolOutput, type ToolResult } from "./tool-result.js";
 
@@ -16,8 +18,8 @@ const scheduleFields = {
   targetUrl: z
     .string()
     .default("https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do"),
-  cookieFile: z.string().default(".cvstream/ehall-cookies.json"),
-  cacheFile: z.string().default(".cvstream/schedule.json"),
+  cookieFile: z.string().default(".seudaily/ehall-cookies.json"),
+  cacheFile: z.string().default(".seudaily/schedule.json"),
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -125,6 +127,21 @@ function completedResult(summary: string, data?: unknown): ToolResult {
   };
 }
 
+async function runAuthAwareTool(
+  target: AuthTarget,
+  namespace: string,
+  action: string,
+  payload: Record<string, unknown>,
+  options?: { abortSignal?: AbortSignal; requestContext?: { get?: (key: string) => unknown } },
+) {
+  const result = await runPythonTool<ToolResult>(action, payload, options?.abortSignal);
+  if (result.status !== "auth_required") return result;
+  const threadId = String(options?.requestContext?.get?.("seudailyThreadId") ?? options?.requestContext?.get?.("cvstreamThreadId") ?? "");
+  const authRequest = await issueAuthResume({ target, namespace, action, payload, threadId });
+  const data = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as JsonRecord : {};
+  return { ...result, data: { ...data, authRequest } };
+}
+
 const focusRequestSchema = z.object({
   kind: z.enum(["notice", "course"]),
   title: z.string().min(1).max(120),
@@ -175,7 +192,7 @@ function deferredRequestModelOutput() {
   return { type: "text" as const, value: "OK" };
 }
 
-export const requestCreateFocusTool = createTool({
+const requestCreateFocusTool = createTool({
   ...pythonToolOutput,
   toModelOutput: deferredRequestModelOutput,
   id: "request-create-focus",
@@ -188,7 +205,7 @@ export const requestCreateFocusTool = createTool({
   },
 });
 
-export const createFocusFromRequestTool = createTool({
+const createFocusFromRequestTool = createTool({
   ...pythonToolOutput,
   id: "create-focus-from-request",
   description: "执行由 requestId 标识的已授权创建关注请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
@@ -202,7 +219,7 @@ export const createFocusFromRequestTool = createTool({
   },
 });
 
-export const requestModifyScheduleTool = createTool({
+const requestModifyScheduleTool = createTool({
   ...pythonToolOutput,
   toModelOutput: deferredRequestModelOutput,
   id: "request-modify-schedule",
@@ -233,7 +250,7 @@ export const requestModifyScheduleTool = createTool({
   },
 });
 
-export const modifyScheduleFromRequestTool = createTool({
+const modifyScheduleFromRequestTool = createTool({
   ...pythonToolOutput,
   id: "modify-schedule-from-request",
   description: "执行由 requestId 标识的已授权本地课表变更请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
@@ -244,7 +261,7 @@ export const modifyScheduleFromRequestTool = createTool({
   },
 });
 
-export const authorizePortalTool = createTool({
+const authorizePortalTool = createTool({
   ...pythonToolOutput,
   id: "authorize-course-portal",
   description:
@@ -253,11 +270,11 @@ export const authorizePortalTool = createTool({
   execute: async (context, options) => runPythonTool("authorize", context, options?.abortSignal),
 });
 
-export const authorizeScheduleTool = createTool({
+const authorizeScheduleTool = createTool({
   ...pythonToolOutput,
   id: "authorize-schedule-portal",
   description:
-    "Open a visible SEU eHall timetable window, automatically fill credentials from CVSTREAM_USERNAME/CVSTREAM_PASSWORD, and submit ordinary login. The user only handles captcha or secondary VPN confirmation. Call when get-course-schedule returns auth_required.",
+    "Open a visible SEU eHall timetable window, automatically fill credentials from SEUDAILY_USERNAME/SEUDAILY_PASSWORD, and submit ordinary login. The user only handles captcha or secondary VPN confirmation. Call when get-course-schedule returns auth_required.",
   inputSchema: z.object({
     ...scheduleFields,
     timeoutSeconds: z.number().int().min(30).max(600).default(300),
@@ -303,7 +320,70 @@ export const getScheduleTool = createTool({
       .optional()
       .describe("Optional target date in YYYY-MM-DD. Omit or leave empty for the complete timetable; when provided, return only that day's courses."),
   }),
-  execute: async (context, options) => runPythonTool("get-schedule", context, options?.abortSignal),
+  execute: async (context, options) => runAuthAwareTool("schedule", "schedule", "get-schedule", context, options),
+});
+
+const unifiedCourseTarget = z.object({
+  source: z.enum(["schedule", "manual"]),
+  scheduleId: z.string().optional(), courseName: z.string().optional(), teacherName: z.string().optional(),
+  weeklyPeriods: z.array(z.number().int().min(1).max(13)).optional(), courseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), semester: z.string().optional(),
+});
+
+export const resolveCourseTool = createTool({
+  ...pythonToolOutput,
+  id: "resolve-course",
+  description: "统一搜索课程、列出课程课次或精确定位课次。mode=search 搜索候选课程，sessions 返回按日期聚合的课次，resolve 返回 found/ambiguous/not_found。",
+  inputSchema: z.object({
+    ...commonPortalFields, scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
+    mode: z.enum(["search", "sessions", "resolve"]), query: z.string().optional(), courseName: z.string().optional(), teacherName: z.string().optional(), weeklyPeriods: z.array(z.number().int().min(1).max(13)).optional(), courseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), semester: z.string().optional(), source: z.enum(["schedule", "manual"]).optional(), scheduleId: z.string().optional(),
+  }).superRefine((v, ctx) => {
+    if (v.mode === "search" && !v.query) ctx.addIssue({ code: "custom", path: ["query"], message: "search 模式需要 query" });
+    if (v.mode === "sessions" && !v.courseName && !(v.source === "schedule" && v.scheduleId)) ctx.addIssue({ code: "custom", path: ["courseName"], message: "sessions 模式需要 courseName，或提供 source=schedule 与 scheduleId" });
+    if (v.mode === "resolve" && (!v.source || (v.source === "schedule" ? !v.scheduleId : (!v.courseName || !v.teacherName || !v.weeklyPeriods?.length)))) ctx.addIssue({ code: "custom", path: ["source"], message: "resolve 模式需要完整的 source 目标" });
+  }),
+  execute: async (input, options) => {
+    const action = input.mode === "search" ? "search-courses" : input.mode === "sessions" ? "list-course-sessions" : "find-course-session";
+    let resolvedCourseName = input.courseName;
+    let resolvedTeacherName = input.teacherName;
+    if (input.mode === "sessions" && input.source === "schedule" && input.scheduleId && !resolvedCourseName) {
+      const schedule = await runPythonTool("get-schedule", { cacheFile: input.scheduleCacheFile, semester: input.semester, localOnly: true }, options?.abortSignal);
+      const courses = arrayValue(objectValue(schedule.data).courses);
+      const course = courses.map(objectValue).find((item) => item.scheduleId === input.scheduleId || item.id === input.scheduleId);
+      if (!course) throw new Error(`本地课表中找不到课程 ${input.scheduleId}，请先同步课表或使用 source=manual`);
+      resolvedCourseName = String(course.courseName ?? course.name ?? "").trim();
+      const teachers = arrayValue(course.teacherNames ?? course.teachers).map(String).filter(Boolean);
+      resolvedTeacherName = resolvedTeacherName || String(course.teacherName ?? teachers[0] ?? "").trim();
+    }
+    const payload = input.mode === "search" ? { ...input } : input.mode === "sessions" ? { ...input, courseName: resolvedCourseName, teacherName: resolvedTeacherName ?? "" } : { ...input, target: { source: input.source, scheduleId: input.scheduleId, courseName: input.courseName, teacherName: input.teacherName, weeklyPeriods: input.weeklyPeriods, courseDate: input.courseDate, semester: input.semester } };
+    return runAuthAwareTool("course", "course-materials", action, payload, options);
+  },
+});
+
+export const captureCourseMaterialsTool = createTool({
+  ...pythonToolOutput,
+  id: "capture-course-materials",
+  description: "按一个或多个课程目标抓取课程字幕、媒体或 PPT；targets 长度为一时抓取单门，多个时批量抓取。结果会分别报告录像是否存在、官方字幕是否存在、ASR 是否执行及失败原因、媒体是否保存和最终产物数量。注意：hasAiContent=false 仅表示没有官方 AI 字幕，不代表没有录像；keepMedia=false 时成功定位到的临时录像不会保留。",
+  inputSchema: z.object({ ...commonPortalFields, scheduleCacheFile: z.string().default(".seudaily/schedule.json"), targets: z.array(unifiedCourseTarget).min(1), needSubtitle: z.boolean().default(true), needPpt: z.boolean().default(false), keepMedia: z.boolean().default(false), asrEngine: z.enum(["local", "cloud"]).default("local"), modelPath: z.string().optional(), asrModel: z.string().default("paraformer-realtime-v2"), maxConcurrency: z.number().int().min(1).max(2).default(2) }),
+  execute: async (input, options) => {
+    const action = input.targets.length === 1 ? "capture-course-session" : "capture-course-sessions";
+    const payload = input.targets.length === 1 ? { ...input, target: input.targets[0] } : input;
+    return runAuthAwareTool("course", "course-materials", action, payload, options);
+  },
+});
+
+export const proposeLocalActionTool = createTool({
+  ...pythonToolOutput, toModelOutput: deferredRequestModelOutput, id: "propose-local-action",
+  description: "提出一个需要用户点击后才执行的本地写操作；此工具不会直接修改数据。",
+  inputSchema: localActionProposalSchema,
+  execute: async (input) => {
+    const kind = input.kind === "create_focus" ? "create-focus" : "modify-schedule";
+    const text = input.kind === "create_focus" ? `替我创建“${input.focus!.title}”的关注` : `替我修改课表`;
+    const actionRequest = await issueActionRequest(kind, text, {
+      kind: input.kind,
+      payload: localActionExecutionPayload(input),
+    });
+    return completedResult("已生成待执行的本地操作。", { actionRequest, proposal: input });
+  },
 });
 
 export const getCurrentDateTool = createTool({
@@ -322,23 +402,23 @@ export const auditTrainingPlanTool = createTool({
   description:
     "返回 eHall 官方培养方案要求和课表证据，供模型进行判断。结果包含硬性要求、选择组、当前或缺失的课表证据、仅课表课程和数据限制，但不直接判断是否符合毕业条件，也不分配风险等级。历史课表出现只能证明有修读记录，不能证明课程通过或已经获得学分。",
   inputSchema: z.object({
-    cookieFile: z.string().default(".cvstream/ehall-cookies.json"),
-    cacheFile: z.string().default(".cvstream/training-plan.json"),
-    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    cookieFile: z.string().default(".seudaily/ehall-cookies.json"),
+    cacheFile: z.string().default(".seudaily/training-plan.json"),
+    scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
     planId: z.string().optional().describe("当 eHall 返回多个个人方案时，可指定准确的方案 ID"),
     refresh: z.boolean().default(false).describe("核查前从 eHall 刷新个人方案；除非用户明确要求同步，否则保持 false"),
   }),
   execute: async (context, options) => runPythonTool("analyze-training-plan", context, options?.abortSignal),
 });
 
-export const searchJwcTool = createTool({
+const searchJwcTool = createTool({
   ...pythonToolOutput,
   id: "search-seu-academic-affairs",
   description:
     "使用东南大学教务处网站自带的 WebPlus 搜索接口。工具会搜索给定问题，不执行本地关键词匹配。省略栏目和列表路径时进行全站搜索；提供一个或多个路径时，将搜索范围限制在指定栏目。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
-    cacheDir: z.string().default(".cvstream/jwc"),
+    cacheDir: z.string().default(".seudaily/jwc"),
     query: z.string().min(1).describe("用户原始的信息需求"),
     categories: z
       .array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"]))
@@ -358,14 +438,14 @@ export const searchJwcTool = createTool({
   execute: async (context, options) => runPythonTool("search-jwc", context, options?.abortSignal),
 });
 
-export const listJwcTool = createTool({
+const listJwcTool = createTool({
   ...pythonToolOutput,
   id: "list-seu-academic-affairs",
   description:
     "刷新指定的教务处栏目，并按发布日期和数量限制返回筛选后的列表。查询最新或近期通知时使用此工具；它不执行关键词匹配。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
-    cacheDir: z.string().default(".cvstream/jwc"),
+    cacheDir: z.string().default(".seudaily/jwc"),
     categories: z.array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"])).min(1).max(7).optional(),
     paths: z.array(z.enum(["/zxdt/list.htm", "/jwxx/list.htm", "/cbxx/list.htm", "/xjgl/list.htm", "/sjjx/list.htm", "/jxyj/list.htm", "/xzzq/list.htm"])).min(1).max(7).optional(),
     freshness: z.enum(["latest", "balanced", "archive", "cache_only"]).default("latest"),
@@ -380,14 +460,14 @@ export const listJwcTool = createTool({
   execute: async (context, options) => runPythonTool("list-jwc", context, options?.abortSignal),
 });
 
-export const getJwcArticleTool = createTool({
+const getJwcArticleTool = createTool({
   ...pythonToolOutput,
   id: "get-seu-academic-affairs-notice",
   description:
     "根据搜索结果返回的稳定文章 ID，读取一条教务处通知。只有需要正文或附件链接时才使用；refresh=true 会重新验证选中的详情页。",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://jwc.seu.edu.cn"),
-    cacheDir: z.string().default(".cvstream/jwc"),
+    cacheDir: z.string().default(".seudaily/jwc"),
     articleId: z.string().min(10),
     refresh: z.boolean().default(true),
     timeoutSeconds: z.number().int().min(5).max(60).default(15),
@@ -395,14 +475,14 @@ export const getJwcArticleTool = createTool({
   execute: async (context, options) => runPythonTool("get-jwc-article", context, options?.abortSignal),
 });
 
-export const searchCseNoticesTool = createTool({
+const searchCseNoticesTool = createTool({
   ...pythonToolOutput,
   id: "search-seu-cse-notices",
   description:
     "Search the SEU Computer Science, Software and AI school website. It validates only semantically relevant list columns, returns matching metadata immediately, and queues detail snapshots in the background.",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://cse.seu.edu.cn"),
-    cacheDir: z.string().default(".cvstream/cse"),
+    cacheDir: z.string().default(".seudaily/cse"),
     query: z.string().min(1).describe("The user's original information need"),
     categories: z
       .array(z.enum([
@@ -426,14 +506,14 @@ export const searchCseNoticesTool = createTool({
   execute: async (context, options) => runPythonTool("search-cse", context, options?.abortSignal),
 });
 
-export const getCseNoticeTool = createTool({
+const getCseNoticeTool = createTool({
   ...pythonToolOutput,
   id: "get-seu-cse-notice",
   description:
     "Read one Computer Science, Software and AI school notice by the stable article id returned from search, including normalized body and attachment links.",
   inputSchema: z.object({
     baseUrl: z.string().url().default("https://cse.seu.edu.cn"),
-    cacheDir: z.string().default(".cvstream/cse"),
+    cacheDir: z.string().default(".seudaily/cse"),
     articleId: z.string().startsWith("seu-cse-"),
     refresh: z.boolean().default(true),
     timeoutSeconds: z.number().int().min(5).max(60).default(15),
@@ -441,7 +521,60 @@ export const getCseNoticeTool = createTool({
   execute: async (context, options) => runPythonTool("get-cse-article", context, options?.abortSignal),
 });
 
-export const listCourseDatesTool = createTool({
+const jwcNoticeCategories = ["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"] as const;
+const cseNoticeCategories = ["undergraduate_notices", "teaching", "student_affairs", "employment", "research", "academic_events", "recruitment", "undergraduate_downloads", "graduate_downloads"] as const;
+const jwcNoticePaths = ["/zxdt/list.htm", "/jwxx/list.htm", "/cbxx/list.htm", "/xjgl/list.htm", "/sjjx/list.htm", "/jxyj/list.htm", "/xzzq/list.htm"] as const;
+const cseNoticePaths = ["/49469/list.htm", "/49470/list.htm", "/49447/list.htm", "/jyxx/list.htm", "/49441/list.htm", "/xshd_53564/list.htm", "/rczp/list.htm", "/xzzq_53939/list.htm", "/xzzq_52683/list.htm"] as const;
+const noticeCategorySchema = z.enum([...jwcNoticeCategories, ...cseNoticeCategories]);
+const noticePathSchema = z.enum([...jwcNoticePaths, ...cseNoticePaths]);
+
+export const queryCampusNoticesTool = createTool({
+  ...pythonToolOutput,
+  id: "query-campus-notices",
+  description: "统一查询东南大学教务处（jwc）或计算机科学与工程学院、软件学院、人工智能学院（cse）通知。mode=latest 读取最新栏目列表，mode=search 使用站内 WebPlus 搜索。",
+  inputSchema: z.object({
+    source: z.enum(["jwc", "cse"]),
+    mode: z.enum(["latest", "search"]),
+    query: z.string().trim().min(1).optional(),
+    categories: z.array(noticeCategorySchema).min(1).max(9).optional(),
+    paths: z.array(noticePathSchema).min(1).max(9).optional(),
+    freshness: z.enum(["latest", "balanced", "archive", "cache_only"]).default("latest"),
+    timeScope: z.enum(["latest", "recent", "any"]).default("any"),
+    recentDays: z.number().int().min(1).max(3650).default(7),
+    limit: z.number().int().min(1).max(20).default(5),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }).strict().superRefine((value, context) => {
+    if (value.mode === "search" && !value.query) context.addIssue({ code: "custom", path: ["query"], message: "search 模式必须提供 query" });
+    const categories = new Set(value.source === "jwc" ? jwcNoticeCategories : cseNoticeCategories);
+    const paths = new Set(value.source === "jwc" ? jwcNoticePaths : cseNoticePaths);
+    value.categories?.forEach((item, index) => { if (!categories.has(item as never)) context.addIssue({ code: "custom", path: ["categories", index], message: `栏目 ${item} 不属于 ${value.source}` }); });
+    value.paths?.forEach((item, index) => { if (!paths.has(item as never)) context.addIssue({ code: "custom", path: ["paths", index], message: `路径 ${item} 不属于 ${value.source}` }); });
+  }),
+  execute: async (input, options) => {
+    const defaults = input.source === "jwc" ? [...jwcNoticeCategories] : [...cseNoticeCategories];
+    const payload = input.mode === "latest" && !input.categories?.length && !input.paths?.length ? { ...input, categories: defaults } : input;
+    const action = input.mode === "latest" ? `list-${input.source}` : `search-${input.source}`;
+    return runPythonTool(action, payload, options?.abortSignal);
+  },
+});
+
+export const readCampusNoticeTool = createTool({
+  ...pythonToolOutput,
+  id: "read-campus-notice",
+  description: "根据 query-campus-notices 返回的稳定 articleId 读取一条教务处或计软智通知正文和附件。",
+  inputSchema: z.object({
+    source: z.enum(["jwc", "cse"]),
+    articleId: z.string().min(10),
+    refresh: z.boolean().default(true),
+    timeoutSeconds: z.number().int().min(5).max(60).default(15),
+  }).strict().superRefine((value, context) => {
+    if (value.source === "cse" && !value.articleId.startsWith("seu-cse-")) context.addIssue({ code: "custom", path: ["articleId"], message: "CSE articleId 必须以 seu-cse- 开头" });
+    if (value.source === "jwc" && value.articleId.startsWith("seu-cse-")) context.addIssue({ code: "custom", path: ["articleId"], message: "articleId 与 source 不匹配" });
+  }),
+  execute: async (input, options) => runPythonTool(`get-${input.source}-article`, input, options?.abortSignal),
+});
+
+const listCourseDatesTool = createTool({
   ...pythonToolOutput,
   id: "list-course-dates",
   description: "List all available lecture dates from the authenticated course page.",
@@ -449,7 +582,7 @@ export const listCourseDatesTool = createTool({
   execute: async (context, options) => runPythonTool("list-dates", context, options?.abortSignal),
 });
 
-export const listCoursesTool = createTool({
+const listCoursesTool = createTool({
   ...pythonToolOutput,
   id: "list-courses",
   description:
@@ -458,7 +591,7 @@ export const listCoursesTool = createTool({
   execute: async (context, options) => runPythonTool("list-courses", context, options?.abortSignal),
 });
 
-export const searchCoursesTool = createTool({
+const searchCoursesTool = createTool({
   ...pythonToolOutput,
   id: "search-courses",
   description:
@@ -471,7 +604,7 @@ export const searchCoursesTool = createTool({
   execute: async (context, options) => runPythonTool("search-courses", context, options?.abortSignal),
 });
 
-export const listCourseSessionsTool = createTool({
+const listCourseSessionsTool = createTool({
   ...pythonToolOutput,
   id: "list-course-sessions",
   description: "List published session dates and periods for one exact course and teacher in the replay catalog.",
@@ -519,41 +652,41 @@ const captureOptions = {
   asrModel: z.string().default("paraformer-realtime-v2"),
 };
 
-export const findCourseSessionTool = createTool({
+const findCourseSessionTool = createTool({
   ...pythonToolOutput,
   id: "find-course-session",
   description:
     "Resolve a course target in the selected on-demand semester. Use source=schedule with a scheduleId for timetable courses; use source=manual with model-filled course name, teacher, and periods for courses outside the timetable.",
   inputSchema: z.object({
     ...commonPortalFields,
-    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
     target: courseTarget,
   }),
   execute: async (context, options) => runPythonTool("find-course-session", context, options?.abortSignal),
 });
 
-export const captureCourseSessionTool = createTool({
+const captureCourseSessionTool = createTool({
   ...pythonToolOutput,
   id: "capture-course-session",
   description:
     "Capture every lesson segment for one target date. Timetable targets use scheduleId; courses outside the timetable use a manual target filled from the user's semantic request. Date defaults to latest.",
   inputSchema: z.object({
     ...commonPortalFields,
-    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
     target: courseTarget,
     ...captureOptions,
   }),
   execute: async (context, options) => runPythonTool("capture-course-session", context, options?.abortSignal),
 });
 
-export const captureCourseSessionsTool = createTool({
+const captureCourseSessionsTool = createTool({
   ...pythonToolOutput,
   id: "capture-course-sessions",
   description:
     "Capture a queue of course sessions. The current shared-browser worker serializes portal access to control memory use; video, ASR fallback, and slide processing are also serialized.",
   inputSchema: z.object({
     ...commonPortalFields,
-    scheduleCacheFile: z.string().default(".cvstream/schedule.json"),
+    scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
     targets: z.array(courseTarget).min(1),
     maxConcurrency: z.number().int().min(1).max(2).default(2),
     ...captureOptions,
@@ -561,7 +694,7 @@ export const captureCourseSessionsTool = createTool({
   execute: async (context, options) => runPythonTool("capture-course-sessions", context, options?.abortSignal),
 });
 
-export const captureCourseTool = createTool({
+const captureCourseTool = createTool({
   ...pythonToolOutput,
   id: "capture-course",
   description:
@@ -579,7 +712,7 @@ export const captureCourseTool = createTool({
   execute: async (context, options) => runPythonTool("capture-course", context, options?.abortSignal),
 });
 
-export const transcribeMediaTool = createTool({
+const transcribeMediaTool = createTool({
   ...pythonToolOutput,
   id: "transcribe-local-media",
   description: "Transcribe a local audio or video file with Faster Whisper.",
@@ -592,7 +725,7 @@ export const transcribeMediaTool = createTool({
   execute: async (context, options) => runPythonTool("transcribe-local", context, options?.abortSignal),
 });
 
-export const transcribeCloudAudioTool = createTool({
+const transcribeCloudAudioTool = createTool({
   ...pythonToolOutput,
   id: "transcribe-cloud-audio",
   description: "Transcribe a local MP3 or WAV file with the configured cloud ASR service.",
@@ -605,7 +738,7 @@ export const transcribeCloudAudioTool = createTool({
   execute: async (context, options) => runPythonTool("transcribe-cloud", context, options?.abortSignal),
 });
 
-export const extractSlidesTool = createTool({
+const extractSlidesTool = createTool({
   ...pythonToolOutput,
   id: "extract-course-slides",
   description: "Detect slide changes in a lecture video and create a PDF.",
@@ -618,7 +751,7 @@ export const extractSlidesTool = createTool({
   execute: async (context, options) => runPythonTool("extract-slides", context, options?.abortSignal),
 });
 
-export const summarizeCourseTool = createTool({
+const summarizeCourseTool = createTool({
   ...pythonToolOutput,
   id: "summarize-course-transcripts",
   description:

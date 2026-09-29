@@ -11,19 +11,21 @@ import time
 from pathlib import Path
 from typing import IO
 
+from .runtime_paths import env_value, runtime_root
+
 
 BACKEND_PORT = 4111
 WEB_PORT = 4173
 
 
 def _project_root() -> Path:
-    configured = os.getenv("CVSTREAM_PROJECT_ROOT")
+    configured = env_value("SEUDAILY_PROJECT_ROOT")
     candidates = [Path(configured).expanduser()] if configured else []
     candidates.extend([Path.cwd(), *Path.cwd().parents, Path(__file__).resolve().parents[2]])
     for candidate in candidates:
         if (candidate / "package.json").is_file() and (candidate / "apps" / "web").is_dir():
             return candidate.resolve()
-    raise RuntimeError("找不到 SEUdaily 项目目录；请在仓库内运行，或设置 CVSTREAM_PROJECT_ROOT。")
+    raise RuntimeError("找不到 SEUdaily 项目目录；请在仓库内运行，或设置 SEUDAILY_PROJECT_ROOT。")
 
 
 def _npm_executable() -> str:
@@ -92,7 +94,7 @@ def start() -> int:
 
     root = _project_root()
     npm = _npm_executable()
-    log_dir = root / ".cvstream" / "logs"
+    log_dir = runtime_root(root) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     backend_path = log_dir / "backend.log"
     web_path = log_dir / "web.log"

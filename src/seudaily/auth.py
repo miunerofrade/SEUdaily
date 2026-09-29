@@ -45,7 +45,7 @@ def execute_login(page, target_url, username, password, cookie_file="cookies.jso
                 yield f"[{get_time()}] 历史 Cookie 已失效，将重新登录..."
             
             if not username or not password:
-                raise ValueError("登录会话已失效，且未配置 CVSTREAM_USERNAME/CVSTREAM_PASSWORD")
+                raise ValueError("登录会话已失效，且未配置 SEUDAILY_USERNAME/SEUDAILY_PASSWORD")
 
             yield f"[{get_time()}] 正在扫描页面认证组件..."
                 

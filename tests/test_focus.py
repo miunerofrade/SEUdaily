@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import cvstream.focus as focus_module
-from cvstream.focus import FocusSemanticModel, FocusService
-from cvstream.jwc import JwcService
-from cvstream.schedule import ScheduleService
-from cvstream.service import CourseService
+import seudaily.focus as focus_module
+from seudaily.focus import FocusSemanticModel, FocusService
+from seudaily.jwc import JwcService
+from seudaily.schedule import ScheduleService
+from seudaily.service import CourseService
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")

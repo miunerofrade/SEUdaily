@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
 from pathlib import Path
 from typing import Any
+
+from .runtime_paths import env_value, runtime_root
 
 
 _SUCCESS_STATUSES = {
@@ -23,8 +24,7 @@ _AUTH_STATUSES = {"auth_required"}
 
 
 def _runtime_root() -> Path:
-    project_root = Path(os.getenv("CVSTREAM_PROJECT_ROOT") or os.getcwd()).resolve()
-    return project_root / ".cvstream"
+    return runtime_root(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
 
 
 def _safe_task_id(value: str | None) -> str:

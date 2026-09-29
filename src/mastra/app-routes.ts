@@ -4,14 +4,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { projectRoot } from "./runtime-paths.js";
+import { envValue, projectRoot } from "./runtime-paths.js";
 import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
 import { courseAgentMemory, mastraStorage } from "./storage.js";
 import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, type FocusAgentItem } from "./focus-runtime.js";
-import { isFullAccessEnabled, setFullAccessEnabled } from "./permission-state.js";
+import { isFullAccessEnabled, isFullAccessExtraEnabled, setFullAccessEnabled, setFullAccessExtraEnabled } from "./permission-state.js";
 import { storeDocumentContext } from "./document-context.js";
-import { activateActionRequest } from "./action-request-store.js";
+import { activateActionRequest, claimActionRequest, completeActionRequest, failActionRequest } from "./action-request-store.js";
+import { localActionExecutionPayload, localActionProposalSchema } from "./local-action-schema.js";
+import { executeAuthResume } from "./auth-resume-store.js";
 
 const FOCUS_RESOURCE_ID = "seudaily-focus-local";
 
@@ -19,14 +21,15 @@ const editableEnvironment = [
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_MODEL",
   "TAVILY_API_KEY",
-  "CVSTREAM_USERNAME",
-  "CVSTREAM_PASSWORD",
-  "CVSTREAM_ASR_API_KEY",
-  "CVSTREAM_WHISPER_MODEL",
-  "CVSTREAM_FULL_ACCESS",
+  "SEUDAILY_USERNAME",
+  "SEUDAILY_PASSWORD",
+  "SEUDAILY_ASR_API_KEY",
+  "SEUDAILY_WHISPER_MODEL",
+  "SEUDAILY_FULL_ACCESS",
+  "SEUDAILY_FULL_ACCESS_EXTRA",
 ] as const;
 
-const secretEnvironment = new Set(["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "CVSTREAM_PASSWORD", "CVSTREAM_ASR_API_KEY"]);
+const secretEnvironment = new Set(["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "SEUDAILY_PASSWORD", "SEUDAILY_ASR_API_KEY"]);
 const agentInstructionsPath = resolve(projectRoot, "AGENTS.md");
 const supportedDocumentExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
 const documentMediaTypes: Record<string, string> = {
@@ -178,7 +181,7 @@ async function fullResultData(result: ToolResult): Promise<unknown> {
 
 type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
 
-const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".cvstream", "uploads", "images")];
+const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images")];
 
 function safeLibraryTarget(path: string) {
   const target = resolve(path);
@@ -281,6 +284,10 @@ async function updateEnvFile(updates: Record<string, string>) {
   await rename(temporary, target);
 }
 
+function legacyEnvironmentName(name: string) {
+  return name.startsWith("SEUDAILY_") ? `CVSTREAM_${name.slice("SEUDAILY_".length)}` : undefined;
+}
+
 export const appRoutes = [
   registerApiRoute("/app/conversations/title", {
     method: "POST",
@@ -338,6 +345,39 @@ export const appRoutes = [
         return c.json({ status: "completed", actionRequest });
       } catch (error) {
         return c.json({ error: error instanceof Error ? error.message : "操作请求激活失败" }, 409);
+      }
+    },
+  }),
+  registerApiRoute("/app/action-requests/:id/execute", {
+    method: "POST", requiresAuth: false,
+    handler: async (c: any) => {
+      let claimed: Awaited<ReturnType<typeof claimActionRequest>> | undefined;
+      try {
+        claimed = await claimActionRequest(c.req.param("id"));
+        if (claimed.state === "consumed") return c.json(claimed.request.result ?? { status: "completed", summary: "操作已执行" });
+        if (claimed.state === "executing") return c.json({ error: "操作正在执行，请勿重复提交" }, 409);
+        const data = claimed.request.payload as Record<string, unknown>;
+        const proposal = localActionProposalSchema.parse({
+          kind: data.kind,
+          ...(data.kind === "create_focus" ? { focus: data.payload } : { schedule: data.payload }),
+        });
+        const payload = localActionExecutionPayload(proposal) as Record<string, unknown>;
+        let result: ToolResult;
+        if (proposal.kind === "create_focus") {
+          const id = `focus-${randomUUID()}`;
+          result = await runPythonTool<ToolResult>("upsert-focus", { item: { ...payload, id, threadId: id, resourceId: FOCUS_RESOURCE_ID, enabled: true } });
+        } else result = await runPythonTool<ToolResult>("apply-agent-schedule-change", payload);
+        if (result.status === "failed" || result.status === "cancelled") {
+          const error = new Error(result.summary || "本地操作执行失败");
+          await failActionRequest(claimed.request.id, claimed.request.attemptId!, error);
+          return c.json({ ...resultResponse(result), data: await fullResultData(result) }, 422);
+        }
+        const response = { ...resultResponse(result), data: await fullResultData(result) };
+        await completeActionRequest(claimed.request.id, claimed.request.attemptId!, response);
+        return c.json(response, 200);
+      } catch (error) {
+        if (claimed?.state === "claimed") await failActionRequest(claimed.request.id, claimed.request.attemptId!, error);
+        return c.json({ error: error instanceof Error ? error.message : "本地操作执行失败" }, 409);
       }
     },
   }),
@@ -494,13 +534,25 @@ export const appRoutes = [
       return c.json(resultResponse(result));
     },
   }),
+  registerApiRoute("/app/auth-resumes/:id/execute", {
+    method: "POST",
+    requiresAuth: false,
+    handler: async (c: any) => {
+      try {
+        const resume = await executeAuthResume(c.req.param("id"));
+        return c.json({ status: resume.status, resumeId: resume.id, target: resume.target });
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : "登录续接失败" }, 409);
+      }
+    },
+  }),
   registerApiRoute("/app/library", {
     method: "GET",
     requiresAuth: false,
     handler: async (c: any) => {
       const root = resolve(projectRoot, "exports");
       const files = await walkFiles(root);
-      const imageRoot = resolve(projectRoot, ".cvstream", "uploads", "images");
+      const imageRoot = resolve(projectRoot, ".seudaily", "uploads", "images");
       const images = await walkFiles(imageRoot);
       files.push(...images.map((file) => ({ ...file, category: "images", course: "临时图片", teacher: "本地上传" })));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -545,7 +597,7 @@ export const appRoutes = [
       const bytes = Buffer.from(match[2], "base64");
       if (!bytes.length || bytes.length > 10 * 1024 * 1024) return c.json({ error: "图片大小必须在 10 MB 以内" }, 400);
       const extension = match[1] === "image/jpeg" ? "jpg" : match[1].slice(6);
-      const directory = resolve(projectRoot, ".cvstream", "uploads", "images");
+      const directory = resolve(projectRoot, ".seudaily", "uploads", "images");
       await mkdir(directory, { recursive: true });
       const target = resolve(directory, `${Date.now()}-${randomUUID()}.${extension}`);
       await writeFile(target, bytes);
@@ -574,7 +626,7 @@ export const appRoutes = [
         : bytes[0] === 0x50 && bytes[1] === 0x4b;
       if (!validSignature) return c.json({ error: "文件内容与扩展名不匹配或文件已损坏" }, 400);
 
-      const temporaryDirectory = await mkdtemp(join(tmpdir(), "cvstream-document-"));
+      const temporaryDirectory = await mkdtemp(join(tmpdir(), "seudaily-document-"));
       const temporaryPath = join(temporaryDirectory, `${randomUUID()}${extension}`);
       try {
         await writeFile(temporaryPath, bytes);
@@ -608,7 +660,7 @@ export const appRoutes = [
     method: "GET",
     requiresAuth: false,
     handler: async (c: any) => {
-      const imageRoot = resolve(projectRoot, ".cvstream", "uploads", "images");
+      const imageRoot = resolve(projectRoot, ".seudaily", "uploads", "images");
       const ref = c.req.query("ref");
       const sha256 = c.req.query("sha256")?.toLowerCase();
       if (ref) {
@@ -654,12 +706,12 @@ export const appRoutes = [
         fields: editableEnvironment.map((name) => ({
           name,
           secret: secretEnvironment.has(name),
-          configured: Boolean(values[name] || process.env[name]),
+          configured: Boolean(values[name] || values[legacyEnvironmentName(name) ?? ""] || envValue(name)),
           value: secretEnvironment.has(name)
             ? ""
-            : name === "CVSTREAM_FULL_ACCESS"
-              ? String(isFullAccessEnabled())
-              : (values[name] ?? process.env[name] ?? ""),
+            : name === "SEUDAILY_FULL_ACCESS" || name === "SEUDAILY_FULL_ACCESS_EXTRA"
+              ? String(name === "SEUDAILY_FULL_ACCESS_EXTRA" ? isFullAccessExtraEnabled() : isFullAccessEnabled())
+              : (values[name] ?? values[legacyEnvironmentName(name) ?? ""] ?? envValue(name) ?? ""),
         })),
       });
     },
@@ -671,16 +723,20 @@ export const appRoutes = [
       const body = await c.req.json() as { values?: Record<string, unknown>; agentInstructions?: unknown };
       const values: Record<string, string> = {};
       for (const name of editableEnvironment) {
-        const value = body.values?.[name];
+        const legacyName = legacyEnvironmentName(name);
+        const value = body.values?.[name] ?? (legacyName ? body.values?.[legacyName] : undefined);
         if (typeof value === "string" && value.trim()) values[name] = value.trim();
       }
-      if (Object.hasOwn(values, "CVSTREAM_FULL_ACCESS")) {
-        setFullAccessEnabled(values.CVSTREAM_FULL_ACCESS === "true" || values.CVSTREAM_FULL_ACCESS === "1" || values.CVSTREAM_FULL_ACCESS === "yes" || values.CVSTREAM_FULL_ACCESS === "on");
+      if (Object.hasOwn(values, "SEUDAILY_FULL_ACCESS")) {
+        setFullAccessEnabled(values.SEUDAILY_FULL_ACCESS === "true" || values.SEUDAILY_FULL_ACCESS === "1" || values.SEUDAILY_FULL_ACCESS === "yes" || values.SEUDAILY_FULL_ACCESS === "on");
+      }
+      if (Object.hasOwn(values, "SEUDAILY_FULL_ACCESS_EXTRA")) {
+        setFullAccessExtraEnabled(values.SEUDAILY_FULL_ACCESS_EXTRA === "true" || values.SEUDAILY_FULL_ACCESS_EXTRA === "1" || values.SEUDAILY_FULL_ACCESS_EXTRA === "yes" || values.SEUDAILY_FULL_ACCESS_EXTRA === "on");
       }
       await updateEnvFile(values);
       const agentInstructionsSaved = typeof body.agentInstructions === "string";
       if (agentInstructionsSaved) await writeFile(agentInstructionsPath, body.agentInstructions as string, "utf8");
-      const restartRequired = Object.keys(values).some((name) => name !== "CVSTREAM_FULL_ACCESS");
+      const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA"].includes(name));
       return c.json({ saved: Object.keys(values), agentInstructionsSaved, restartRequired });
     },
   }),

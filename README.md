@@ -40,7 +40,7 @@ src/
 │   ├── native-command-sandbox.ts  # WSL2/Bubblewrap 与宿主机 fallback
 │   ├── storage.ts                 # LibSQL 对话记忆与上下文压缩
 │   └── runtime-paths.ts           # 稳定的项目/运行时路径
-└── cvstream/
+└── seudaily/
     ├── service.py                 # 与 UI 无关的业务服务
     ├── cli.py                     # JSON 工具协议入口
     ├── worker.py                  # 无控制台窗口的常驻工具进程
@@ -70,6 +70,21 @@ npm ci
 uv sync --frozen
 ```
 
+默认安装不包含本地 ASR 和视频幻灯片提取依赖。只有需要这些功能时才安装对应 extra：
+
+```bash
+# 本地 Faster Whisper ASR
+uv sync --extra asr
+
+# 视频 PPT 抽帧（OpenCV、NumPy、img2pdf）
+uv sync --extra ppt
+
+# 两类媒体功能一次安装
+uv sync --extra media
+```
+
+基础课表、教务通知、网页、文档和课程门户查询不需要上述媒体 extra。未安装时，相关功能会在真正调用时返回缺少可选依赖的提示；启动 Python Worker 不会预先导入 Faster Whisper 或 OpenCV。
+
 浏览器自动化直接复用系统 Microsoft Edge，无需额外下载浏览器运行时。
 
 仓库提交 `package-lock.json` 与 `uv.lock`。CI、部署和复现环境应使用 `npm ci` 与 `uv sync --frozen`，不要在未审查锁文件差异的情况下更新依赖。
@@ -80,20 +95,20 @@ uv sync --frozen
 DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_API_KEY=
 TAVILY_API_KEY=
-CVSTREAM_PROJECT_ROOT=
-CVSTREAM_OBSERVATIONAL_MEMORY=true
-CVSTREAM_CONTEXT_WINDOW_TOKENS=512000
-CVSTREAM_OBSERVATION_COMPRESSION_RATIO=0.8
-CVSTREAM_MEMORY_LAST_MESSAGES=200
-CVSTREAM_PREVIOUS_OBSERVER_TOKENS=1500
-CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS=120000
-CVSTREAM_WSL_SANDBOX=true
-CVSTREAM_WSL_DISTRO=Ubuntu-24.04
-CVSTREAM_SANDBOX_NETWORK=false
-CVSTREAM_USERNAME=
-CVSTREAM_PASSWORD=
-CVSTREAM_WHISPER_MODEL=
-CVSTREAM_ASR_API_KEY=
+SEUDAILY_PROJECT_ROOT=
+SEUDAILY_OBSERVATIONAL_MEMORY=true
+SEUDAILY_CONTEXT_WINDOW_TOKENS=512000
+SEUDAILY_OBSERVATION_COMPRESSION_RATIO=0.8
+SEUDAILY_MEMORY_LAST_MESSAGES=200
+SEUDAILY_PREVIOUS_OBSERVER_TOKENS=1500
+SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS=120000
+SEUDAILY_WSL_SANDBOX=true
+SEUDAILY_WSL_DISTRO=Ubuntu-24.04
+SEUDAILY_SANDBOX_NETWORK=false
+SEUDAILY_USERNAME=
+SEUDAILY_PASSWORD=
+SEUDAILY_WHISPER_MODEL=
+SEUDAILY_ASR_API_KEY=
 ```
 
 ## 启动
@@ -116,7 +131,7 @@ seudaily start
 - Studio Agent 页面：`http://localhost:4111/agents`
 - Agent API：`http://localhost:4111/api`
 
-后端和前端日志分别写入 `.cvstream/logs/backend.log` 与 `.cvstream/logs/web.log`。按 `Ctrl+C` 会同时停止两个服务。
+后端和前端日志分别写入 `.seudaily/logs/backend.log` 与 `.seudaily/logs/web.log`。按 `Ctrl+C` 会同时停止两个服务。
 
 也可以分别启动后端和前端：
 
@@ -131,7 +146,7 @@ npm run dev:web
 npm run dev:all
 ```
 
-前端通过 Vite 代理访问本机 Agent API。会话和消息以 `.cvstream/mastra/mastra.db` 为主存储，不同浏览器读取同一服务端历史；浏览器本地存储只用于兼容旧记录与短暂 fallback。删除会话会同时清理服务端线程和本地镜像。
+前端通过 Vite 代理访问本机 Agent API。会话和消息以 `.seudaily/mastra/mastra.db` 为主存储，不同浏览器读取同一服务端历史；浏览器本地存储只用于兼容旧记录与短暂 fallback。删除会话会同时清理服务端线程和本地镜像。
 
 `npm run dev` 与 `npm start` 等价，适合开发时使用：
 
@@ -165,7 +180,7 @@ Web 工作台入口为 `http://127.0.0.1:4173`，包含以下页面：
 - **教务通知**：读取已适配站点的通知列表并打开原始来源。
 - **设置**：展示当前 Provider，维护 API Key 与允许写入的运行环境变量。敏感值由后端保存，不进入对话提示词。
 
-输入框的 `+` 按钮可选择图片或文档，也可直接按 `Ctrl+V` 粘贴剪贴板图片。图片暂存在 `.cvstream/library/images`，消息只保存稳定引用、摘要和哈希，不保存整段 Base64；文档在服务端解析后以受标记的附件上下文送入当前对话。历史图片不存在时前端隐藏损坏缩略图并保留文字消息。
+输入框的 `+` 按钮可选择图片或文档，也可直接按 `Ctrl+V` 粘贴剪贴板图片。图片暂存在 `.seudaily/uploads/images`，消息只保存稳定引用、摘要和哈希，不保存整段 Base64；文档在服务端解析后以受标记的附件上下文送入当前对话。历史图片不存在时前端隐藏损坏缩略图并保留文字消息。
 
 检查 Python 工具桥：
 
@@ -183,21 +198,21 @@ echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload"
 
 ### 1.x compatibility identifiers
 
-产品、仓库和新包元数据统一使用 **SEUdaily**。为避免升级后丢失既有会话、课表缓存和外部脚本，1.x 继续兼容 Python import 命名空间 `cvstream`、旧命令别名 `cvstream-tool` / `cvstream-worker`、`.cvstream` 运行数据目录、`CVSTREAM_*` 环境变量以及旧浏览器会话键。这些名称仅作为兼容接口保留，不再作为产品或仓库名称；新集成应使用 `seudaily-tool` 与 `seudaily-worker`。
+产品、代码与新包元数据统一使用 **SEUdaily** / `seudaily`。Python 正式包目录为 `src/seudaily`，旧 `cvstream.*` 导入由薄兼容包转发；新运行数据目录为 `.seudaily`，环境变量使用 `SEUDAILY_*`。为兼容旧安装，`cvstream-tool` / `cvstream-worker` 仍是命令别名；旧 `CVSTREAM_*` 环境变量只在对应 `SEUDAILY_*` 未设置时作为 fallback。浏览器会话键、Mastra 资源 ID、附件标记、图片引用和请求上下文均使用新名称写入，并在读取历史值时接受旧名称。
 
-运行数据统一写入项目根目录的 `.cvstream`。Mastra 对话、线程与 Observational Memory 保存在 `.cvstream/mastra/mastra.db`，不再受 Studio 当前工作目录变化影响。默认上下文预算为 512000 tokens，未压缩消息达到 80%（409600 tokens）时同步启动 Observation；提前后台 buffering 已关闭。最近消息数量上限设为 200，防止在达到 token 阈值前仅因消息条数过早丢失历史，并最多带入 1500 tokens 的既有观察。窗口、比例和消息数量均可通过环境变量调整，也可用 `CVSTREAM_OBSERVATIONAL_MEMORY=false` 临时关闭压缩。`CVSTREAM_OBSERVATION_MESSAGE_TOKENS` 仍可作为高级配置直接覆盖计算后的阈值。
+首次启动时会把 `.cvstream` 的文件逐项迁移到 `.seudaily`。目标目录已有同名文件时以 `.seudaily` 为准，旧文件保留在 `.seudaily/.migration-conflicts/cvstream/`；迁移状态写入 `.migration-cvstream-v1.json`。每个文件原子移动或先完整复制再删除来源，失败和中断会保留来源并在下次启动重试；符号链接或权限错误会写入 `.migration-status.json` 并中止启动，待问题修复后重试。迁移完成后应用只向 `.seudaily` 写入。Mastra 对话、线程与 Observational Memory 保存在 `.seudaily/mastra/mastra.db`，不再受 Studio 当前工作目录变化影响。默认上下文预算为 512000 tokens，未压缩消息达到 80%（409600 tokens）时同步启动 Observation；提前后台 buffering 已关闭。最近消息数量上限设为 200，防止在达到 token 阈值前仅因消息条数过早丢失历史，并最多带入 1500 tokens 的既有观察。窗口、比例和消息数量均可通过 `SEUDAILY_*` 环境变量调整，也可用 `SEUDAILY_OBSERVATIONAL_MEMORY=false` 临时关闭压缩。`SEUDAILY_OBSERVATION_MESSAGE_TOKENS` 可作为高级配置直接覆盖计算后的阈值。
 
 Mastra 启动一个长期运行的 Python Worker，而不是每次工具调用都打开 PowerShell 和浏览器。普通抓取使用系统 Microsoft Edge 的无头模式，并统一静音；同一门户复用 Browser Context，每个任务使用独立 Page。只有登录、验证码或二次确认会临时打开可见浏览器。Studio 的停止信号会先请求任务协作取消，未能及时退出时再清理 Worker 及其子进程树。
 
 Web 端通过 SSE 接收回答、reasoning 和工具事件。reasoning 仅展示 Provider 实际返回的 reasoning 流；工具过程使用紧凑行展示，在最终回答出现后默认折叠。工具完整结果仍以 `resultRef` 落盘，避免把大对象反复写入上下文。
 
-工具结果采用统一结构：`status`、`taskId`、`summary`、`data`、`artifacts`、`citations`、`warnings`、`metrics`。完整清洗结果写入 `.cvstream/tasks/<taskId>/result.json`，对话只保存经过列表、字符串和层级限制的结果及 `resultRef`；大段日志另存为 `diagnostics.json`。传给模型的关键数据最多约 6000 字符，并继续执行敏感信息脱敏。课程总结正文使用 `[S1]` 形式的行内引用，并在末尾生成来源表。
+工具结果采用统一结构：`status`、`taskId`、`summary`、`data`、`artifacts`、`citations`、`warnings`、`metrics`。完整清洗结果写入 `.seudaily/tasks/<taskId>/result.json`，对话只保存经过列表、字符串和层级限制的结果及 `resultRef`；大段日志另存为 `diagnostics.json`。传给模型的关键数据最多约 6000 字符，并继续执行敏感信息脱敏。课程总结正文使用 `[S1]` 形式的行内引用，并在末尾生成来源表。
 
 Agent Workspace 的文件系统被限制在项目根目录。读取、列目录、文件状态和正文搜索可直接执行；写入、编辑、建目录、终端命令和终止后台进程会在 Studio 中请求审批；删除工具关闭。
 
-Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙盒。宿主机项目只读映射到 `/project`，`.cvstream/sandbox-workspace` 作为可写、持久的 `/workspace`；沙盒只挂载运行命令所需的 Linux 系统目录，清空继承环境，并默认隔离网络。Mastra 继续负责无窗口启动、输出流、超时、后台进程和进程树终止。课程 Python Worker、Playwright 浏览器、FFmpeg 与 ASR 仍在宿主机运行。
+Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙盒。宿主机项目只读映射到 `/project`，`.seudaily/sandbox-workspace` 作为可写、持久的 `/workspace`；沙盒只挂载运行命令所需的 Linux 系统目录，清空继承环境，并默认隔离网络。Mastra 继续负责无窗口启动、输出流、超时、后台进程和进程树终止。课程 Python Worker、Playwright 浏览器、FFmpeg 与 ASR 仍在宿主机运行。
 
-如果 WSL2、指定发行版或 `bwrap` 不可用，启动时会自动降级为宿主机 `LocalSandbox`。Fallback 仍使用固定暂存目录、最小环境变量、无窗口进程与超时控制，但不提供操作系统级文件或网络隔离。可通过 `CVSTREAM_WSL_SANDBOX=false` 主动使用 fallback；`CVSTREAM_SANDBOX_NETWORK=true` 仅影响 WSL/Bubblewrap 模式。Ubuntu 中安装 Bubblewrap：`wsl -d Ubuntu-24.04 -u root -- apt-get install -y bubblewrap`。
+如果 WSL2、指定发行版或 `bwrap` 不可用，启动时会自动降级为宿主机 `LocalSandbox`。Fallback 仍使用固定暂存目录、最小环境变量、无窗口进程与超时控制，但不提供操作系统级文件或网络隔离。可通过 `SEUDAILY_WSL_SANDBOX=false` 主动使用 fallback；`SEUDAILY_SANDBOX_NETWORK=true` 仅影响 WSL/Bubblewrap 模式。Ubuntu 中安装 Bubblewrap：`wsl -d Ubuntu-24.04 -u root -- apt-get install -y bubblewrap`。
 
 ## Available tools
 
@@ -205,7 +220,7 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 - `authorize-schedule-portal`：默认清理旧的 eHall Cookie，在全新的可见窗口中自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。它只清理课表门户会话，不会删除 Mastra 对话或课表缓存；如需保留 Cookie，可传 `resetSession: false`。
 - `get-course-schedule`：默认读取当前学期的完整课表，返回全部课程，不截取前 12 门；可传 `semester: "2025-2026-2"` 切换并读取往年课表。传 `date: "YYYY-MM-DD"` 时按学期起始日期、教学周、星期、单双周和日期调整筛选当天课程；`date` 省略或为空时返回完整课表。通常 `1=暑期学校`、`2=秋季学期`、`3=春季学期`，但实际可用值始终以学校动态返回的 `availableSemesters` 为准，其他数字尾码也会保留。各学期使用独立缓存，`refresh: true` 只更新选中的学期；设置 `includeAvailableSemesters: true` 可读取完整列表，配合 `prefetchAvailableSemesters: true` 会在同一认证会话中顺序获取并缓存全部可访问课表。返回值还包含 `currentSemester`、`currentSemesterLabel`、`selectedSemester`、`selectedSemesterLabel` 和批量同步结果。
 - `get-current-date`：返回 Asia/Shanghai 当前日期、星期和时间戳，供“今天/明天”等相对日期查询使用；不应通过终端命令或读取本地文件获取日期。
-- 当前远端课表保存在 `.cvstream/schedule.json`，指定往年学期的课表保存在 `.cvstream/schedule.<semester>.json`；学期展示设置和用户修改保存在 `.cvstream/schedule-user.json`，重新抓取不会覆盖用户修改。Focus 规则、事件与任务幂等记录保存在 `.cvstream/focus.json`。
+- 当前远端课表保存在 `.seudaily/schedule.json`，指定往年学期的课表保存在 `.seudaily/schedule.<semester>.json`；学期展示设置和用户修改保存在 `.seudaily/schedule-user.json`，重新抓取不会覆盖用户修改。Focus 规则、事件与任务幂等记录保存在 `.seudaily/focus.json`。
 - `search-seu-academic-affairs`：先用条件请求校验相关公告列表并立即返回，命中详情交给后台并发同步；支持“最新一条”“最近 N 天”和历史查询。
 - `get-seu-academic-affairs-notice`：按搜索返回的稳定 ID 读取一条公告正文与附件链接，需要时可同步校验详情页。
 - `search-seu-cse-notices`：分栏查询计算机科学与工程学院、软件学院、人工智能学院官网，命中详情在后台并发同步。
@@ -226,7 +241,7 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 - `playwright_browser_*`：仅暴露导航、无障碍树快照、快照查找、点击、输入、下拉选择、按键和标签页 8 个工具。独立浏览器会话不共享 Python Worker 的门户登录状态；点击、输入、选择、按键等交互需要 Studio 审批。
 - `mastra_workspace_read_file`、`list_files`、`file_stat`、`grep`：读取和搜索项目内文件，结果设有 token 上限。
 - `mastra_workspace_write_file`、`edit_file`、`mkdir`：经用户审批后修改项目文件；覆盖现有文件前要求先读取。
-- `mastra_workspace_execute_command`：经用户审批后优先在 WSL/Bubblewrap 的 `/workspace` 暂存区执行前台或后台命令；宿主项目在 `/project` 只读可见。WSL 不可用时自动退回宿主机暂存目录。默认超时 120 秒，可通过 `CVSTREAM_WORKSPACE_COMMAND_TIMEOUT_MS` 调整。
+- `mastra_workspace_execute_command`：经用户审批后优先在 WSL/Bubblewrap 的 `/workspace` 暂存区执行前台或后台命令；宿主项目在 `/project` 只读可见。WSL 不可用时自动退回宿主机暂存目录。默认超时 120 秒，可通过 `SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS` 调整。
 - `mastra_workspace_get_process_output`、`kill_process`：查看或经审批终止 Workspace 自己启动的后台进程。
 
 请仅处理本人具有合法访问权限的课程内容。
@@ -235,6 +250,6 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 
 抓取工具支持两种课程目标：课表内课程传入 `{ source: "schedule", scheduleId }`；课表外课程传入 `{ source: "manual", courseName, teacherName, weeklyPeriods }`。两种目标都可选传 `courseDate`，未传时默认抓取最新日期。
 
-教务处查询缓存位于 `.cvstream/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。
+教务处查询缓存位于 `.seudaily/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。
 
-计软智官网使用同一套 WebPlus 查询与后台缓存机制，缓存隔离在 `.cvstream/cse`。适配层单独配置栏目、语义路由、详情标题与日期类名；当前覆盖本科通知、教学动态、学生工作、就业、科研、学术活动、人才招聘以及本科/研究生下载专区。
+计软智官网使用同一套 WebPlus 查询与后台缓存机制，缓存隔离在 `.seudaily/cse`。适配层单独配置栏目、语义路由、详情标题与日期类名；当前覆盖本科通知、教学动态、学生工作、就业、科研、学术活动、人才招聘以及本科/研究生下载专区。

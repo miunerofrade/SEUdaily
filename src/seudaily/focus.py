@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from openai import OpenAI
 
 from .jwc import JWC_CATEGORIES, JwcService
+from .runtime_paths import env_value
 from .schedule import ScheduleService
 from .service import CourseService, summarize_course
 
@@ -52,7 +53,7 @@ class FocusSemanticModel:
 
     def __init__(self) -> None:
         api_key = os.getenv("DEEPSEEK_API_KEY", "") or os.getenv(
-            "CVSTREAM_LLM_API_KEY", ""
+            env_value("SEUDAILY_LLM_API_KEY", "") or ""
         )
         if not api_key:
             raise ValueError("未配置大模型 API Key，无法执行语义 Focus")
@@ -140,9 +141,9 @@ class FocusService:
     def __init__(
         self,
         *,
-        state_file: str | Path = ".cvstream/focus.json",
-        schedule_cache_file: str | Path = ".cvstream/schedule.json",
-        schedule_customization_file: str | Path = ".cvstream/schedule-user.json",
+        state_file: str | Path = ".seudaily/focus.json",
+        schedule_cache_file: str | Path = ".seudaily/schedule.json",
+        schedule_customization_file: str | Path = ".seudaily/schedule-user.json",
         export_dir: str | Path = "exports",
     ) -> None:
         self.state_file = Path(state_file)

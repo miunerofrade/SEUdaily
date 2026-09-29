@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from cvstream.capture import find_mp4_url, process_official_json, sanitize_filename
-from cvstream.cli import dispatch
-from cvstream.service import CourseService
-from cvstream.summary import AISummarizer
+from seudaily.capture import find_mp4_url, process_official_json, sanitize_filename
+from seudaily.cli import dispatch
+from seudaily.service import CourseService
+from seudaily.summary import AISummarizer
 
 
 def test_sanitize_filename_removes_windows_reserved_characters():

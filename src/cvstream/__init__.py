@@ -1,6 +1,13 @@
-"""SEUdaily automation services exposed to the Mastra agent layer.
+"""Compatibility import bridge for installations using the former package name.
 
-The ``cvstream`` import namespace remains available for 1.x compatibility.
+New code and all packaged entry points use :mod:`seudaily`. This bridge only
+redirects legacy submodule imports to the canonical package directory.
 """
 
-__version__ = "1.1.0"
+from pathlib import Path
+
+from seudaily import __version__
+
+__path__ = [str(Path(__file__).resolve().parent.parent / "seudaily")]
+
+__all__ = ["__version__"]

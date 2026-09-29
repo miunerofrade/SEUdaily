@@ -43,13 +43,15 @@ function inside(parent: string, child: string): boolean {
 }
 
 async function resolveResultPath(resultRef: string): Promise<string> {
-  const candidate = resolve(projectRoot, resultRef);
-  const [tasksRoot, target] = await Promise.all([
-    realpath(taskRuntimeRoot),
-    realpath(candidate),
-  ]);
+  let candidate = resolve(projectRoot, resultRef);
+  const legacyRoot = resolve(projectRoot, ".cvstream");
+  if (inside(legacyRoot, candidate)) {
+    const migrated = resolve(taskRuntimeRoot, relative(legacyRoot, candidate));
+    if (await realpath(candidate).catch(() => null) === null) candidate = migrated;
+  }
+  const [tasksRoot, target] = await Promise.all([realpath(taskRuntimeRoot), realpath(candidate)]);
   if (!inside(tasksRoot, target) || basename(target).toLowerCase() !== "result.json") {
-    throw new Error("resultRef must point to .cvstream/tasks/<taskId>/result.json");
+    throw new Error("resultRef must point to .seudaily/tasks/<taskId>/result.json");
   }
   return target;
 }

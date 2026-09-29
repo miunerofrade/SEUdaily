@@ -12,6 +12,7 @@ from . import __version__
 from .cancellation import TaskCancelledError, set_current_cancel_event
 from .cli import dispatch
 from .protocol import normalize_tool_result
+from .runtime_paths import env_value, migrate_runtime_directory
 
 
 def _write(message: dict[str, Any]) -> None:
@@ -25,7 +26,10 @@ def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
-    os.environ["CVSTREAM_SHARED_BROWSER"] = "1"
+    os.environ["SEUDAILY_SHARED_BROWSER"] = "1"
+    migration = migrate_runtime_directory(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
+    if migration["errors"] or migration["skipped"]:
+        raise RuntimeError("旧运行数据迁移未完成；请检查 .seudaily/.migration-status.json 后重试")
     requests: queue.Queue[dict[str, Any] | None] = queue.Queue()
     cancellation_events: dict[str, threading.Event] = {}
     cancelled_requests: set[str] = set()

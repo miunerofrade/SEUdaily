@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-import cvstream.jwc as jwc_module
-from cvstream.document_parser import parse_document as real_parse_document
-from cvstream.jwc import JWC_CATEGORIES, CseService, JwcService, _article_id
+import seudaily.jwc as jwc_module
+from seudaily.document_parser import parse_document as real_parse_document
+from seudaily.jwc import JWC_CATEGORIES, CseService, JwcService, _article_id
 
 
 def _list_html(items: list[tuple[str, str]]) -> str:

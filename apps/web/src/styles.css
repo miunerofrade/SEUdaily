@@ -94,11 +94,25 @@ button { color: inherit; }
 .composer-add { width:36px; height:36px; aspect-ratio:1; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:#333; cursor:pointer; transition:background .15s, color .15s; }
 .composer-add:hover, .composer-add[aria-expanded="true"] { background:#ededed; color:#111; }
 .composer-add:focus-visible { outline:2px solid rgba(0,0,0,.28); outline-offset:2px; }
-.composer-permission { width:36px; height:36px; flex:0 0 36px; align-self:flex-end; display:grid; place-items:center; padding:0; border:0; border-radius:9px; background:transparent; color:#777; cursor:pointer; transition:background .15s, color .15s; }
+.composer-permission-wrap { position:relative; width:36px; height:36px; flex:0 0 36px; align-self:flex-end; }
+.composer-permission { width:36px; height:36px; display:grid; place-items:center; padding:0; border:0; border-radius:9px; background:transparent; color:#777; cursor:pointer; transition:background .15s, color .15s; }
 .composer-permission:hover, .composer-permission:focus-visible { background:#f1f1f1; color:#333; outline:0; }
 .composer-permission.enabled { color:#e05b28; }
 .composer-permission.failed { color:#b42318; }
 .composer-permission:disabled { opacity:.55; cursor:default; }
+.composer-permission-menu { position:absolute; left:-8px; bottom:45px; z-index:22; width:310px; padding:9px; border:1px solid #dedede; border-radius:16px; background:#fff; box-shadow:0 14px 40px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.06); }
+.composer-permission-heading { display:flex; align-items:baseline; justify-content:space-between; padding:4px 9px 8px; color:#222; }
+.composer-permission-heading small { color:#999; font-size:12px; }
+.composer-permission-menu button { width:100%; display:grid; grid-template-columns:20px minmax(0,1fr); gap:8px; padding:9px; border:0; border-radius:10px; background:transparent; color:#222; text-align:left; cursor:pointer; }
+.composer-permission-menu button:hover, .composer-permission-menu button:focus-visible, .composer-permission-menu button.selected { background:#f4f4f4; outline:0; }
+.composer-permission-menu button > span:last-child { display:grid; gap:2px; }
+.composer-permission-menu button strong { font-size:14px; font-weight:550; }
+.composer-permission-menu button small { color:#777; font-size:12px; line-height:1.4; }
+.composer-permission-mode-icon { width:20px; height:20px; display:grid; place-items:center; margin-top:1px; color:#777; }
+.composer-permission-mode-icon.mode-normal { color:#6f7782; }
+.composer-permission-mode-icon.mode-full { color:#d85b2a; }
+.composer-permission-mode-icon.mode-extra { color:#9a55c7; }
+.composer-permission-menu button.selected .composer-permission-mode-icon { filter:saturate(1.15); transform:scale(1.08); }
 .composer-add-menu { position:absolute; left:-7px; bottom:46px; z-index:20; width:min(360px, calc(100vw - 32px)); padding:8px; border:1px solid #dedede; border-radius:16px; background:#fff; box-shadow:0 14px 40px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.06); }
 .composer-add-menu button { width:100%; min-height:46px; display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:11px; padding:9px 11px; border:0; border-radius:10px; background:transparent; color:#222; text-align:left; cursor:pointer; }
 .composer-add-menu button:hover, .composer-add-menu button:focus-visible { background:#f1f1f1; color:#111; outline:0; }

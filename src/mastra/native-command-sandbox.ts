@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { LocalSandbox } from "@mastra/core/workspace";
+import { envValue } from "./runtime-paths.js";
 
 export type CommandSandboxMode = "wsl-bwrap" | "host-fallback" | "native";
 
@@ -119,8 +120,8 @@ Network access is ${options.allowNetwork ? "enabled" : "blocked"}. Host secrets 
       "--setenv", "HOME", "/tmp/home",
       "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
       "--setenv", "LANG", "C.UTF-8",
-      "--setenv", "CVSTREAM_PROJECT_READONLY", "/project",
-      "--setenv", "CVSTREAM_SANDBOX_WORKSPACE", "/workspace",
+      "--setenv", "SEUDAILY_PROJECT_READONLY", "/project",
+      "--setenv", "SEUDAILY_SANDBOX_WORKSPACE", "/workspace",
       "--",
       "bash",
       "-lc",
@@ -136,11 +137,11 @@ export function createCommandSandbox(options: {
   workingDirectory: string;
   timeout: number;
 }): CommandSandboxSelection {
-  const allowNetwork = enabled(process.env.CVSTREAM_SANDBOX_NETWORK, false);
+  const allowNetwork = enabled(envValue("SEUDAILY_SANDBOX_NETWORK"), false);
 
   if (process.platform === "win32") {
-    const distro = process.env.CVSTREAM_WSL_DISTRO?.trim() || "Ubuntu-24.04";
-    const useWsl = enabled(process.env.CVSTREAM_WSL_SANDBOX, true);
+    const distro = envValue("SEUDAILY_WSL_DISTRO")?.trim() || "Ubuntu-24.04";
+    const useWsl = enabled(envValue("SEUDAILY_WSL_SANDBOX"), true);
     if (useWsl && hasWslBubblewrap(distro)) {
       return {
         sandbox: new WslBubblewrapSandbox({

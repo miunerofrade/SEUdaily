@@ -1,6 +1,12 @@
-playwright
-faster-whisper
-openai
-opencv-python
-img2pdf
 dashscope
+openai
+playwright
+tzdata
+openpyxl
+pypdfium2
+python-docx
+python-pptx
+
+# Optional media features:
+#   uv sync --extra media
+#   uv pip install -e ".[media]"
