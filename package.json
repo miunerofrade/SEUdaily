@@ -1,6 +1,7 @@
 {
   "name": "seudaily",
   "version": "1.1.0",
+  "private": true,
   "packageManager": "npm@10.9.9",
   "repository": {
     "type": "git",
@@ -20,9 +21,7 @@
     "build:web": "vite build --config apps/web/vite.config.ts",
     "start:server": "node .mastra/output/index.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
-    "test:python": "uv run pytest",
-    "check:package": "node scripts/prepare-template.mjs && node scripts/check-package.mjs",
-    "prepack": "npm run typecheck && npm run check:package"
+    "test:python": "uv run pytest"
   },
   "dependencies": {
     "@mastra/core": "^1.67.0",
@@ -55,42 +54,5 @@
   "engines": {
     "node": "^22.22.0 || >=24.12.0",
     "npm": ">=10"
-  },
-  "description": "Local-first SEU study and campus assistant; npm CLI scaffolds a reproducible local workspace",
-  "license": "MIT",
-  "keywords": [
-    "seudaily",
-    "seu",
-    "assistant",
-    "mastra",
-    "campus"
-  ],
-  "bin": {
-    "seudaily": "bin/seudaily.mjs"
-  },
-  "files": [
-    "bin/",
-    "scripts/",
-    "docs/",
-    "src/mastra/**/*.ts",
-    "src/seudaily/**/*.py",
-    "src/cvstream/**/*.py",
-    "apps/web/index.html",
-    "apps/web/**/*.ts",
-    "apps/web/**/*.tsx",
-    "apps/web/**/*.css",
-    "skills/",
-    "tsconfig.json",
-    "pyproject.toml",
-    "uv.lock",
-    "requirements*.txt",
-    ".env.example",
-    ".node-version",
-    ".python-version",
-    "CHANGELOG.md",
-    "template/npm-lock.json"
-  ],
-  "publishConfig": {
-    "access": "public"
   }
 }

@@ -63,19 +63,6 @@ Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量�
 
 要求：Node.js 22.22+（22.x）或 24.12+、npm 10+、Python 3.13 和 uv。校园门户与浏览器工具按平台选择 Windows Edge、macOS WebKit、Linux Firefox；媒体抓取、云 ASR 和视频抽帧需要系统 FFmpeg。基础对话、通知和文档解析不需要 FFmpeg。Windows 上推荐启用 WSL2 Ubuntu；终端沙盒不依赖 Docker Desktop。
 
-当前 npm 发行方式是**本地应用源码模板 CLI**，安装后初始化到你选择的目录，再安装 Node/Python 依赖。运行数据保存在该项目目录，升级 npm 包不会直接覆盖你的配置或数据；不提供全局安装后免配置的生产服务器。发布后可运行：
-
-```bash
-npx seudaily init my-seudaily
-cd my-seudaily
-npm ci
-uv sync --frozen
-# 填写本目录 .env
-npx --no-install seudaily start
-```
-
-也可 `npm install -g seudaily`，再执行 `seudaily init` / `seudaily start`。`seudaily doctor` 检查 Node、uv 和可选 FFmpeg。请完整安装模板依赖：`npm ci --omit=dev` 无法运行当前 Mastra/Vite 开发服务器。
-
 如果 `cd` 时 fnm 提示找不到 Node，本项目及 Mastra 1.x 无法支持 Node 20。锁文件的 Babel、日志和 Linux 可选压缩依赖要求更高的 Node 补丁版本，因此用 Node 22 最新版本，不能只降低 `engines`。项目 `.node-version` 指向 22，使用已有 fnm：
 
 ```bash
@@ -84,7 +71,7 @@ fnm use 22
 node --version
 ```
 
-无需改变 fnm 全局默认版本。完整发布扫描、支持边界和依赖清单见 [npm 发布检查](docs/npm-release-audit.md)。从 Git 仓库开发安装：
+无需改变 fnm 全局默认版本。当前按 Git 仓库开发运行：
 
 ```bash
 git clone https://github.com/miunerofrade/SEUdaily.git
@@ -115,17 +102,6 @@ uv run --frozen playwright install webkit
 Linux 将上述 `webkit` 换为 `firefox`，并根据 Playwright 官方提示安装对应系统依赖。Windows 默认已有 Edge 时不需要下载 WebKit/Firefox。更新 Node/Python Playwright 后可能需要重新安装匹配的运行时。
 
 校园工具遇到校园域名 DNS、连接失败或导航网络超时时，捕获异常并显示“需要校园网环境”；不自动重试或修复网络。登录失效、缺浏览器和非校园服务错误保持原有提示。
-
-填好密钥后，可运行可选的真实 Agent 对话测试（使用实际 API，可能产生费用）：
-
-```bash
-node scripts/smoke-chat.mjs basic
-node scripts/smoke-chat.mjs web
-node scripts/smoke-chat.mjs browser
-node scripts/smoke-chat.mjs campus
-```
-
-先启动服务。脱敏测试记录保存在 `.seudaily/smoke-tests`，测试使用独立 resource/thread，不混入 Web 工作台已有聊天。
 
 仓库提交 `package-lock.json` 与 `uv.lock`。CI、部署和复现环境应使用 `npm ci` 与 `uv sync --frozen`，不要在未审查锁文件差异的情况下更新依赖。
 
@@ -295,9 +271,3 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 教务处查询缓存位于 `.seudaily/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。
 
 计软智官网使用同一套 WebPlus 查询与后台缓存机制，缓存隔离在 `.seudaily/cse`。适配层单独配置栏目、语义路由、详情标题与日期类名；当前覆盖本科通知、教学动态、学生工作、就业、科研、学术活动、人才招聘以及本科/研究生下载专区。
-
-## npm 发布
-
-本地运行 `npm pack` 后，可将 tarball 安装到临时目录验证 `seudaily init`。确认密钥填写后的真实集成测试完成，再通过自己的 npm 账号运行 `npm publish --access public`。仓库的 `res/` ImDisk Windows 安装程序不进入 npm 包；Windows 内存盘用户需自行安装驱动，macOS/Linux 未实现内存盘挂载。
-
-真实 Agent 对话、跨平台浏览器和校园网提示的本轮结果见 [对话实测报告](docs/chat-smoke-report.md)。

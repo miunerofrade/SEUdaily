@@ -39,8 +39,7 @@ cookies.json
 src/mastra/public/temp_workspace/
 tmp/
 
-# npm source template and local packages
-template/
+# local packages and configuration
 *.tgz
 .env.*
 !.env.example
