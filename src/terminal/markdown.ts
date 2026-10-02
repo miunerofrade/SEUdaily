@@ -1,4 +1,5 @@
 import stringWidth from "string-width";
+import { readTable, renderTable, inlineSpans } from "./markdown-table.js";
 import { clean } from "./client.js";
 export interface Span {
   text: string;
@@ -19,7 +20,7 @@ export function messageLines(
   const hit = cache.get(message);
   if (hit?.text === message.text && hit.width === width) return hit.lines;
   const lines: Span[][] = [];
-  let fenced = false;
+  let fence = "";
   const append = (spans: Span[]) => {
     let row: Span[] = [],
       used = 0;
@@ -46,16 +47,35 @@ export function messageLines(
     lines.push(row.length ? row : [{ text: " " }]);
   };
   append([{ text: message.role, role: message.role, bold: true }]);
-  for (const original of clean(message.text).split("\n")) {
-    if (original.trim().startsWith("```")) {
-      fenced = !fenced;
+  const source = clean(message.text).split("\n");
+  for (let index = 0; index < source.length; index++) {
+    const original = source[index],
+      marker = original.trim().match(/^(`{3,}|~{3,})/);
+    if (
+      marker &&
+      (!fence ||
+        (marker[1][0] === fence[0] && marker[1].length >= fence.length))
+    ) {
+      const opening = !fence;
+      fence = opening ? marker[1] : "";
       append([
-        { text: fenced ? "  " + original.trim().slice(3) : " ", muted: true },
+        {
+          text: opening ? "  " + original.trim().slice(marker[1].length) : " ",
+          muted: true,
+        },
       ]);
       continue;
     }
-    if (fenced) {
+    if (fence) {
       append([{ text: "  " + original, code: true }]);
+      continue;
+    }
+    const table = readTable(source, index);
+    if (table) {
+      lines.push(
+        ...renderTable(table.header, table.separator, table.body, width),
+      );
+      index = table.end - 1;
       continue;
     }
     const heading = /^#{1,6}\s/.test(original),
@@ -63,16 +83,7 @@ export function messageLines(
         .replace(/^#{1,6}\s+/, "")
         .replace(/^(\s*)[-*] /, "$1• ")
         .replace(/^> /, "│ ");
-    const spans: Span[] = line
-      .split(/(\*\*[^*]+\*\*|`[^`]+`)/)
-      .filter(Boolean)
-      .map((part) =>
-        part.startsWith("**") && part.endsWith("**")
-          ? { text: part.slice(2, -2), bold: true }
-          : part.startsWith("`") && part.endsWith("`")
-            ? { text: part.slice(1, -1), code: true }
-            : { text: part, bold: heading },
-      );
+    const spans = inlineSpans(line, heading);
     append(spans);
   }
   lines.push([{ text: " " }]);

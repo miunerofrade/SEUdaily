@@ -11,7 +11,7 @@ import {
   measureElement,
   type DOMElement,
 } from "ink";
-import { Select } from "@inkjs/ui";
+import { Select, Spinner } from "@inkjs/ui";
 import { editorRows } from "./editor.js";
 import { messageLines } from "./markdown.js";
 import { Composer } from "./composer.js";
@@ -119,7 +119,16 @@ export function App({ session }: { session: Session }) {
   const hasSuggestions =
     page === "chat" && input.startsWith("/") && !input.includes("\n");
   const suggestionHeight = hasSuggestions ? 9 : 0;
-  const height = Math.max(3, rows - inputHeight - suggestionHeight - 2);
+  const showThinking =
+    page === "chat" &&
+    session.busy &&
+    session.thinking &&
+    !session.pending &&
+    !session.confirmation;
+  const height = Math.max(
+    3,
+    rows - inputHeight - suggestionHeight - 2 - (showThinking ? 1 : 0),
+  );
   const inputTop = Math.max(0, inputLayout.cursorRow - inputCapacity + 1);
   const fields = useRef<(DOMElement | null)[]>([]),
     tableRows = useRef<(DOMElement | null)[]>([]);
@@ -1170,6 +1179,11 @@ export function App({ session }: { session: Session }) {
           </>
         )}
       </Box>
+      {showThinking && (
+        <Box height={1} flexShrink={0}>
+          <Spinner label="Thinking…" type="dots" />
+        </Box>
+      )}
       {page === "chat" && (
         <>
           {hasSuggestions && (

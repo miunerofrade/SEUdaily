@@ -114,6 +114,7 @@ export class Session extends EventEmitter {
   messages: { role: string; text: string }[] = [];
   status = "就绪";
   busy = false;
+  thinking = false;
   page = "chat";
   schedule: any = { courses: [], availableSemesters: [] };
   programs: any = { plans: [] };
@@ -318,6 +319,7 @@ export class Session extends EventEmitter {
     const message = { role: "SEUdaily", text: "" };
     this.messages.push(message);
     this.status = "正在回答";
+    this.thinking = true;
     this.changed();
     let code = 0;
     try {
@@ -339,15 +341,21 @@ export class Session extends EventEmitter {
       )) {
         this.emit("event", event);
         const p = event.payload ?? {};
-        if (event.type === "text-delta") message.text += clean(p.text ?? "");
-        else if (event.type === "reasoning-start") this.status = "正在思考";
-        else if (event.type === "reasoning-end") this.status = "正在回答";
+        if (event.type === "text-delta") {
+          message.text += clean(p.text ?? "");
+          if (p.text) this.thinking = false;
+        } else if (event.type === "reasoning-start") {
+          this.status = "正在思考";
+          this.thinking = true;
+        } else if (event.type === "reasoning-end") this.status = "正在回答";
         else if (event.type === "reasoning-delta" && this.options.verbose)
           this.emit("diagnostic", clean(p.text));
         else if (event.type === "tool-call") {
           this.status = "工具：" + p.toolName;
+          this.thinking = false;
           if (!this.options.quiet) this.show(`[${p.toolName}] 执行中`);
         } else if (event.type === "tool-result") {
+          this.thinking = true;
           this.tool(p.result);
           if (!this.options.quiet)
             this.show(p.result?.summary ?? `[${p.toolName}] 完成`);
@@ -374,6 +382,7 @@ export class Session extends EventEmitter {
       throw error;
     } finally {
       if (this.controller === controller) this.controller = null;
+      this.thinking = false;
       this.status = this.pending ? "待审批" : "就绪";
       this.changed();
     }
