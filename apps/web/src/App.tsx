@@ -657,6 +657,8 @@ export default function App() {
   const [permissionError, setPermissionError] = useState("");
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const panelToggleRef = useRef<HTMLButtonElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -667,6 +669,20 @@ export default function App() {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!rightOpen || view !== "chat") return;
+    const updateOrigin = () => {
+      const button = panelToggleRef.current;
+      const panel = inspectorRef.current;
+      if (!button || !panel) return;
+      const anchor = button.getBoundingClientRect();
+      panel.style.transformOrigin = `${anchor.left + anchor.width / 2 - panel.offsetLeft}px ${anchor.top + anchor.height / 2 - panel.offsetTop}px`;
+    };
+    updateOrigin();
+    window.addEventListener("resize", updateOrigin);
+    return () => window.removeEventListener("resize", updateOrigin);
+  }, [rightOpen, view]);
 
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
   const recentConversations = useMemo(() => [
@@ -1333,7 +1349,7 @@ export default function App() {
           <button className="icon-button menu-button" onClick={() => setNavOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
           {active.messages.length ? <h1>{active.title}</h1> : <span className="topbar-product">SEUdaily</span>}
           <div className="topbar-actions">
-            <button className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => setRightOpen((value) => !value)} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
+            <button ref={panelToggleRef} className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => setRightOpen((value) => !value)} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="5" cy="6" r="2.5" /><path d="M13 6h8" /><circle cx="5" cy="18" r="2.5" /><path d="M13 18h8" /></svg>
             </button>
           </div>
@@ -1366,7 +1382,7 @@ export default function App() {
         </div>
       </main>}
 
-      <aside className={`inspector ${rightOpen && view === "chat" ? "open" : ""}`}>
+      <aside ref={inspectorRef} className={`inspector ${rightOpen && view === "chat" ? "open" : ""}`}>
         <div className="inspector-head"><div><span className="eyebrow">WORKSPACE</span><h2>任务与资料</h2></div><button className="icon-button" onClick={() => setRightOpen(false)} aria-label="关闭任务面板" title="关闭任务面板"><X size={17} /></button></div>
         <div className="inspector-scroll">
           <RamDiskPanel active={rightOpen && view === "chat"} />
