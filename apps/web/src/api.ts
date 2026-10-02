@@ -191,6 +191,7 @@ type StoredMessage = {
   content?: {
     content?: string;
     parts?: Array<Record<string, unknown>>;
+    runToken?: string;
   };
 };
 
@@ -202,7 +203,8 @@ function storedTools(parts: Array<Record<string, unknown>> = []): ToolRun[] {
     return [{
       id: String(invocation.toolCallId ?? crypto.randomUUID()),
       name: String(invocation.toolName ?? "工具调用"),
-      state: invocation.state === "result" ? (result?.status === "failed" ? "failed" : "completed") : "completed",
+      approvalId: typeof invocation.approvalId === "string" ? invocation.approvalId : undefined,
+      state: invocation.state !== "result" && typeof invocation.approvalId === "string" ? "approval-requested" : invocation.state === "result" ? (result?.status === "failed" ? "failed" : "completed") : "completed",
       args: invocation.args as Record<string, unknown> | undefined,
       result,
     } satisfies ToolRun];
@@ -336,6 +338,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       createdAt: Date.parse(item.createdAt),
       attachments,
       documents,
+      brokerRunToken: item.content?.runToken,
       tools: item.role === "assistant" ? storedTools(parts) : undefined,
       process: item.role === "assistant" ? storedProcess(parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),

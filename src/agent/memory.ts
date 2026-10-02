@@ -3,7 +3,7 @@ import { redactValue } from './redaction.js';
 import type { AgentStore, Summary } from './storage.js';
 import type { ModelProvider } from './provider.js';
 import type { ContentPart, ModelMessage, StoredMessage } from './types.js';
-import { compactToolResultForModel } from '../mastra/tools/tool-result.js';
+import { compactToolResultForModel } from '../runtime/tools/tool-result.js';
 
 const list = z.array(z.union([z.string(), z.record(z.string(), z.unknown())]));
 export const summarySchema = z.object({ goals: list, constraints: list, confirmedFacts: list, completedActions: list, pendingTasks: list, references: z.array(z.string()) }).strict();
@@ -36,7 +36,7 @@ export function modelMessages(message: StoredMessage): ModelMessage[] {
       const call = part.toolInvocation;
       result.push({ role: 'assistant', content: text || null, ...(reasoning ? { reasoning_content: reasoning } : {}), tool_calls: [{ id: call.toolCallId, type: 'function', function: { name: call.toolName, arguments: JSON.stringify(call.args ?? {}) } }] });
       text = ''; reasoning = '';
-      result.push({ role: 'tool', tool_call_id: call.toolCallId, content: call.result ? compactToolResultForModel(call.result).value : '历史调用未完成；不得重放执行。' });
+      result.push({ role: 'tool', tool_call_id: call.toolCallId, content: call.result !== undefined ? historicalToolOutput(call.result) : '历史调用未完成；不得重放执行。' });
     }
   }
   flush();
@@ -129,4 +129,11 @@ export function repairToolPairs(messages: ModelMessage[]): ModelMessage[] {
   }
   flush();
   return out;
+}
+
+function historicalToolOutput(result: any): string {
+  if (typeof result === 'string') return result;
+  if (result && typeof result === 'object' && 'status' in result && 'taskId' in result) return compactToolResultForModel(result).value;
+  if (Array.isArray(result?.content)) return result.content.filter((part: any) => part.type === 'text').map((part: any) => part.text ?? '').join('\n');
+  return JSON.stringify(redactValue(result));
 }
