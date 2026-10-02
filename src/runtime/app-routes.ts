@@ -373,6 +373,8 @@ export const appRoutes = [
       const prefetchAvailableSemesters = c.req.query("prefetchSemesters") !== "false";
       const result = await runPythonTool<ToolResult>("get-schedule", {
         refresh,
+        localOnly: c.req.query("localOnly") === "true",
+        ...(c.req.query("date") ? { date: c.req.query("date") } : {}),
         includeAvailableSemesters,
         prefetchAvailableSemesters,
         ...(semester ? { semester } : {}),
