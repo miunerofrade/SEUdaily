@@ -10,7 +10,7 @@ const namePattern = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const namespaces = ['schedule', 'course-materials', 'notices', 'training-plan', 'web', 'browser', 'local-actions', 'workspace'];
 
 export class SkillCatalog {
-    constructor(private root = resolve(projectRoot, 'skills')) {}
+    constructor(private root = resolve(projectRoot, '.agent', 'skills')) {}
     private async file(name: string, path = 'SKILL.md') {
         if (!namePattern.test(name)) throw new Error('无效 Skill 名称');
         if (path.split(/[\\/]/).includes('..')) throw new Error('Skill 路径不得包含上级目录');

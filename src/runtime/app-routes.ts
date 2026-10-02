@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-import { envValue, projectRoot } from "./runtime-paths.js";
+import { envValue, projectRoot, agentInstructionsPath } from "./runtime-paths.js";
 import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
 import { agentStore } from "./storage.js";
@@ -32,7 +32,6 @@ const editableEnvironment = [
 ] as const;
 
 const secretEnvironment = new Set(["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "SEUDAILY_PASSWORD", "SEUDAILY_ASR_API_KEY"]);
-const agentInstructionsPath = resolve(projectRoot, "AGENTS.md");
 const supportedDocumentExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
 const documentMediaTypes: Record<string, string> = {
   ".pdf": "application/pdf",

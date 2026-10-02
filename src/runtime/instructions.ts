@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { projectRoot } from "./runtime-paths.js";
+import { agentInstructionsPath } from "./runtime-paths.js";
 import { resolveDocumentContexts } from "./document-context.js";
 import { authResumeContext } from "./auth-resume-store.js";
 import type { TurnContext } from "../agent/types.js";
@@ -51,7 +50,7 @@ const baseAgentInstructions = `
 `;
 
 export async function agentInstructions(context: TurnContext): Promise<string> {
-  const global = await readFile(resolve(projectRoot, 'AGENTS.md'), 'utf8').catch(() => '');
+  const global = await readFile(agentInstructionsPath, 'utf8').catch(() => '');
   const documents = resolveDocumentContexts(context.documentRefs);
   const resumed = authResumeContext(context.authResumeId, context.threadId);
   const skills = await skillCatalog.instructions(context.skills ?? [], [...context.namespaces ?? [], ...context.capabilityTickets?.map(ticket => ticket.namespace) ?? []]);

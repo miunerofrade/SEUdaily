@@ -204,6 +204,8 @@ echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload"
 
 ## Runtime and memory
 
+项目 Skill 统一放在项目根目录的 `.agent/skills/<名称>/SKILL.md`，Web 和 CLI 使用同一目录。全局 Agent 指令读取根目录 `AGENT.md`；设置页面直接编辑该文件，保存后在下一轮对话生效，不另建指令配置。`AGENT.md` 属于本地用户配置，不纳入 Git。
+
 ### 1.x compatibility identifiers
 
 产品、代码与新包元数据统一使用 **SEUdaily** / `seudaily`。Python 正式包目录为 `src/seudaily`，旧 `cvstream.*` 导入由薄兼容包转发；新运行数据目录为 `.seudaily`，环境变量使用 `SEUDAILY_*`。为兼容旧安装，`cvstream-tool` / `cvstream-worker` 仍是命令别名；旧 `CVSTREAM_*` 环境变量只在对应 `SEUDAILY_*` 未设置时作为 fallback。浏览器会话键、会话资源 ID、附件标记、图片引用和请求上下文均使用新名称写入，并在读取历史值时接受旧名称。

@@ -146,6 +146,7 @@ function migrateLegacyRuntimeDirectory(): void {
 migrateLegacyRuntimeDirectory();
 
 export const runtimeRoot = resolve(projectRoot, ".seudaily");
+export const agentInstructionsPath = resolve(projectRoot, 'AGENT.md');
 export const taskRuntimeRoot = resolve(runtimeRoot, "tasks");
 export const sandboxWorkspaceRoot = resolve(runtimeRoot, "sandbox-workspace");
 
