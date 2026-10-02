@@ -176,6 +176,55 @@ uv run seudaily --version
 
 检查类型：`npm run typecheck`。当前使用源码和 Vite 启动，不需要生产构建。
 
+## CLI / TUI（cli 分支）
+
+`cli` 分支提供 prompt_toolkit 终端界面，复用现有 Node Agent 和本地数据库。CLI 代码与依赖留在该分支；通用 Skill、Web Skill 选择、课表查询和取消修复已同步到 `main`。不需要生产构建或安装 Torch。
+
+```bash
+uv sync
+uv run seudaily                  # 默认进入 TUI
+uv run seudaily -c               # --chat 的短名称
+uv run seudaily chat --resume    # 恢复最近使用的会话
+uv run seudaily -h
+uv run seudaily -V               # --version；-v 表示详细日志
+uv run seudaily exec -p "今天有什么课？"
+printf '只回复你好' | uv run seudaily exec --json
+uv run seudaily skills
+uv run seudaily sessions
+```
+
+激活 `.venv` 后可以直接输入 `seudaily`。`--cwd` 选择本仓库目录，`--no-start` 只连接已有后端，`--timeout` 设置 HTTP 读取超时，`--skill NAME` 显式选择 Skill，`--vi` 切换输入按键，`--no-color` 禁用颜色，`-q/--quiet` 隐藏工具过程。帮助和版本不会初始化后端、数据库、模型或 Worker。
+
+没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，Tab 补全，上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 在空输入时退出。多行粘贴不会自动发送。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
+
+主要斜杠命令：
+
+| 命令 | 作用 |
+| --- | --- |
+| `/help`、`/new`、`/sessions`、`/resume ID或序号`、`/history` | 帮助、会话与原始历史 |
+| `/schedule`、`/课表` | 默认只读取本地课表 |
+| `/schedule --date YYYY-MM-DD --semester YYYY-YYYY-N` | 按日期或学期查看课表 |
+| `/schedule --sync`、`/schedule --semesters` | 显式同步近四年的可选学期、列出缓存学期 |
+| `/schedule --start-date YYYY-MM-DD` | 确认后保存当前学期起始日期 |
+| `/programs --page 1 --limit 20`、`/培养方案` | 培养方案与学分；支持 `--plan ID`、`--filter 名称`、`--sync` |
+| `/audit 问题`、`/training-plan-audit 问题` | 调用培养方案核查 Skill |
+| `/skills`、`/skill NAME 问题`、`/skill off` | 发现、调用或取消显式 Skill；无问题时选择后续消息使用的 Skill |
+| `/notices 问题`、`/focus` | 校园通知、关注列表；`/focus 需求` 由 Agent 提出操作 |
+| `/login schedule`、`/login 登录ID` | 主动登录或登录后自动续接原任务 |
+| `/approve`、`/reject` | 处理当前运行的待审批工具，批准只消费一次 |
+| `/apply 操作ID` | 确认后执行 Agent 提出的本地操作 |
+| `/mode normal或full或extra` | 确认后设置权限；与连接的 Web 共享并持久保存 |
+| `/attach "文档路径"`、`/detach` | 添加或清空待发送的 Office/PDF 文档 |
+| `/cancel`、`/quit` | 取消、退出 |
+
+项目 Skill 位于 `.agent/skills/<名称>/SKILL.md`，包含 YAML `name`、`description`，可选 `namespaces` 列表。目录可通过 `/skills` 刷新，`/名称 问题` 可直接调用；模型也能通过 `list-skills`、`read-skill` 发现和加载规则，参考资料限定在该 Skill 的 `references/*.md` 内。当前提供 `training-plan-audit`。
+
+单次模式的标准输出为回答，`--json` 为逐行 SSE 事件对象；诊断写标准错误。退出码：0 完成、1 失败、2 参数错误、3 等待审批、130 中断。等待审批时用提示中的会话 ID 进入 TUI，再执行 `/approve` 或 `/reject`；不会自动批准或重放工具。校园网异常只显示“需要校园网环境”，不重试。
+
+`seudaily completion bash|zsh|fish|powershell` 只输出补全脚本，由用户自行加载。例如在 Bash/Zsh 中运行 `source <(seudaily completion zsh)`（Bash 改为 bash）。当前完成了命令与参数补全；交互输入支持斜杠命令、Skill 名称和附件路径补全。
+
+多媒体文件粘贴与复制暂缓；终端交互式子程序的 PTY/ConPTY 转接也暂未实现。需要运行命令时，明确向 Agent 提出请求并使用现有工作区权限与沙盒工具。
+
 ## Web workspace
 
 Web 工作台入口为 `http://127.0.0.1:4173`，包含以下页面：

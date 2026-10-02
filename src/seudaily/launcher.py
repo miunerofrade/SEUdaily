@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import json
 import os
 import shutil
 import signal
@@ -9,7 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import IO
+from typing import IO, Iterator
 from urllib.request import urlopen
 
 from .runtime_paths import env_value, runtime_root
@@ -20,8 +22,13 @@ BACKEND_PORT = 4111
 WEB_PORT = 4173
 
 
-def _project_root() -> Path:
+def _project_root(directory: str | None = None) -> Path:
     configured = env_value("SEUDAILY_PROJECT_ROOT")
+    if directory:
+        candidate = Path(directory).expanduser().resolve()
+        if (candidate / "package.json").is_file() and (candidate / "pyproject.toml").is_file():
+            return candidate
+        raise RuntimeError("--cwd 必须指向 SEUdaily 项目目录。")
     candidates = [Path(configured).expanduser()] if configured else []
     candidates.extend([Path.cwd(), *Path.cwd().parents, Path(__file__).resolve().parents[2]])
     for candidate in candidates:
@@ -103,6 +110,41 @@ def _backend_ready() -> bool:
         return False
 
 
+@contextmanager
+def backend_session(root: Path, *, auto_start: bool = True, verbose: bool = False) -> Iterator[None]:
+    """Attach to a live server; stop only a backend owned by this invocation."""
+    if _port_open(BACKEND_PORT):
+        try:
+            with urlopen(f"http://127.0.0.1:{BACKEND_PORT}/api", timeout=2) as response:
+                identity = json.load(response)
+            if identity.get("name") != "SEUdaily" or identity.get("runtime") != "agent" or not _backend_ready():
+                raise RuntimeError("端口 4111 上的服务不是已就绪的 SEUdaily Agent。")
+        except (OSError, ValueError) as error:
+            raise RuntimeError("无法连接已就绪的 SEUdaily 后端。") from error
+        if verbose:
+            print("连接已有 SEUdaily 后端，退出 CLI 时保持服务运行。", file=sys.stderr)
+        yield
+        return
+    if not auto_start:
+        raise RuntimeError("后端未启动；先运行 seudaily start，或去掉 --no-start。")
+    log_dir = runtime_root(root) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "cli-backend.log"
+    with log_path.open("wb") as log:
+        process = _spawn([_npm_executable(), "start"], root, log)
+        try:
+            deadline = time.monotonic() + 45
+            while not _backend_ready():
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError(f"后端启动失败，请检查 {log_path}")
+                time.sleep(0.1)
+            if verbose:
+                print(f"CLI 后端已就绪，日志：{log_path}", file=sys.stderr)
+            yield
+        finally:
+            _stop(process)
+
+
 def _wait_until_ready(processes: list[subprocess.Popen[bytes]], timeout: float = 45) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -158,21 +200,117 @@ def start() -> int:
                 _stop(process)
 
 
+def _common_options(parser: argparse.ArgumentParser, *, child: bool = False) -> None:
+    def default(value):
+        return argparse.SUPPRESS if child else value
+    parser.add_argument("--cwd", default=default(None), help="SEUdaily 项目目录")
+    parser.add_argument("-r", "--resume", nargs="?", const="latest", default=default(None), metavar="ID", help="恢复会话；省略 ID 使用最近会话")
+    parser.add_argument("--no-start", action="store_true", default=default(False), help="只连接已有后端")
+    parser.add_argument("--timeout", type=float, default=default(300), metavar="SECONDS", help="HTTP 读取超时，默认 300 秒")
+    parser.add_argument("--no-color", action="store_true", default=default(False), help="禁用颜色")
+    parser.add_argument("--vi", action="store_true", default=default(False), help="交互输入使用 Vi 按键")
+    parser.add_argument("-v", "--verbose", action="store_true", default=default(False), help="显示连接与运行详情")
+    parser.add_argument("-q", "--quiet", action="store_true", default=default(False), help="只显示回答，隐藏工具过程")
+    parser.add_argument("--skill", action="append", default=default([]), metavar="NAME", help="为本轮显式加载 Skill，可重复指定")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="seudaily", description="SEUdaily：终端助手与本地 Web 工作台", allow_abbrev=False)
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("-c", "--chat", action="store_true", help="进入终端交互聊天（也可使用 chat 子命令）")
+    parser.add_argument("-p", "--prompt", help="单次提问（也可使用 exec 子命令）")
+    parser.add_argument("--json", action="store_true", help="单次运行输出 JSONL 事件")
+    _common_options(parser)
+    subparsers = parser.add_subparsers(dest="command")
+    start_parser = subparsers.add_parser("start", help="同时启动 Agent 后端和 Web 前端")
+    start_parser.add_argument("--cwd", default=argparse.SUPPRESS, help="SEUdaily 项目目录")
+    chat_parser = subparsers.add_parser("chat", help="终端交互聊天")
+    _common_options(chat_parser, child=True)
+    chat_parser.add_argument("-p", "--prompt", default=argparse.SUPPRESS, help="进入 TUI 后发送的首条问题")
+    exec_parser = subparsers.add_parser("exec", help="单次运行，支持管道和 JSONL")
+    _common_options(exec_parser, child=True)
+    exec_parser.add_argument("message", nargs="?", help="问题；省略时读取标准输入")
+    exec_parser.add_argument("-p", "--prompt", default=argparse.SUPPRESS, help="单次提问")
+    exec_parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="输出 JSONL 事件")
+    for name, help_text in (("sessions", "列出历史会话"), ("skills", "列出可用 Skill")):
+        _common_options(subparsers.add_parser(name, help=help_text), child=True)
+    completion = subparsers.add_parser("completion", help="输出 Shell 补全脚本")
+    completion.add_argument("shell", choices=("bash", "zsh", "fish", "powershell"))
+    return parser
+
+
+def completion_script(shell: str) -> str:
+    words = "chat exec start sessions skills completion --chat --prompt --resume --cwd --no-start --timeout --no-color --vi --verbose --quiet --skill --json --help --version -c -p -r -v -q -h -V"
+    if shell == "bash":
+        return f'''_seudaily_complete() {{
+  if [[ "${{COMP_WORDS[COMP_CWORD-1]}}" == "--cwd" ]]; then
+    COMPREPLY=()
+    while IFS= read -r line; do COMPREPLY+=("$line"); done < <(compgen -d -- "${{COMP_WORDS[COMP_CWORD]}}")
+  else
+    COMPREPLY=()
+    while IFS= read -r line; do COMPREPLY+=("$line"); done < <(compgen -W '{words}' -- "${{COMP_WORDS[COMP_CWORD]}}")
+  fi
+}}
+complete -o default -F _seudaily_complete seudaily'''
+    if shell == "zsh":
+        return f'''#compdef seudaily
+_seudaily() {{
+  local -a choices
+  choices=({words})
+  if [[ "$words[CURRENT-1]" == "--cwd" ]]; then _files -/; else compadd -- $choices; fi
+}}
+compdef _seudaily seudaily'''
+    if shell == "fish":
+        commands = "chat exec start sessions skills completion"
+        lines = [f"complete -c seudaily -f -n '__fish_use_subcommand' -a '{commands}'"]
+        lines += [f"complete -c seudaily -l {word[2:]}" for word in words.split() if word.startswith("--")]
+        lines += ["complete -c seudaily -l cwd -r -a '(__fish_complete_directories)'", "complete -c seudaily -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish powershell'"]
+        return "\n".join(lines)
+    return """Register-ArgumentCompleter -Native -CommandName seudaily -ScriptBlock {
+ param($wordToComplete, $commandAst, $cursorPosition)
+ foreach ($choice in '""" + words.replace(" ", "','") + """') {
+   if ($choice.StartsWith($wordToComplete)) {
+     [System.Management.Automation.CompletionResult]::new($choice, $choice, 'ParameterValue', $choice)
+   }
+ }
+}"""
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(prog="seudaily", description="SEUdaily 本地服务启动器")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("start", help="同时启动 Agent 后端和 Web 前端")
+    parser = build_parser()
     args = parser.parse_args()
+    if args.chat and args.command not in (None, "chat"):
+        parser.error("--chat 不能与其他子命令一起使用")
+    command = args.command or ("chat" if args.chat or not args.prompt else "exec")
+    if command == "completion":
+        print(completion_script(args.shell))
+        return
+    if args.timeout <= 0 or args.timeout != args.timeout or args.timeout == float("inf"):
+        parser.error("--timeout 必须是有限正数")
+    if args.quiet and args.verbose:
+        parser.error("--quiet 与 --verbose 不能同时使用")
+    if args.json and command != "exec":
+        parser.error("--json 仅用于 exec 或 --prompt 单次运行")
+    if command == "chat" and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+        parser.error("交互聊天需要终端；管道请使用 seudaily exec 或 -p")
     try:
-        if args.command == "start":
+        if command == "start":
+            if args.cwd:
+                os.environ["SEUDAILY_PROJECT_ROOT"] = str(_project_root(args.cwd))
             raise SystemExit(start())
+        root = _project_root(args.cwd)
+        os.environ["SEUDAILY_PROJECT_ROOT"] = str(root)
+        from .terminal import run_terminal
+        with backend_session(root, auto_start=not args.no_start, verbose=args.verbose):
+            raise SystemExit(run_terminal(args, command, root))
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
     except RuntimeError as error:
-        print(f"启动失败：{error}", file=sys.stderr)
+        print(f"SEUdaily：{error}", file=sys.stderr)
         raise SystemExit(1) from error
 
 
