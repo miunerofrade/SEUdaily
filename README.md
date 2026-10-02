@@ -195,7 +195,7 @@ uv run seudaily sessions
 
 激活 `.venv` 后可以直接输入 `seudaily`。`--cwd` 选择本仓库目录，`--no-start` 只连接已有后端，`--timeout` 设置 HTTP 读取超时，`--skill NAME` 显式选择 Skill，`--vi` 切换输入按键，`--no-color` 禁用颜色，`-q/--quiet` 隐藏工具过程。帮助和版本不会初始化后端、数据库、模型或 Worker。
 
-没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，Tab 补全，上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 在空输入时退出。多行粘贴不会自动发送。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
+没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。聊天采用全屏 TUI：对话区独立滚动，底部固定多行输入框和运行状态，支持基础 Markdown 显示。PgUp/PgDn 或鼠标滚轮查看历史，Ctrl+End 返回最新回答；退出后恢复原终端画面。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，Tab 补全，上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 在空输入时退出。多行粘贴不会自动发送。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
 
 主要斜杠命令：
 

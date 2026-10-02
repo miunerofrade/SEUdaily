@@ -1,4 +1,4 @@
-"""Scrollback-friendly prompt_toolkit UI and one-shot command execution."""
+"""Full-screen prompt_toolkit UI and one-shot command execution."""
 from __future__ import annotations
 
 import asyncio
@@ -11,12 +11,19 @@ from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.layout import Layout, HSplit, Window, FloatContainer, Float
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.margins import ScrollbarMargin
+from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.mouse_events import MouseEventType
+from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 
 from .terminal_client import AgentClient, ClientError, RESOURCE_ID, terminal_text
@@ -41,9 +48,21 @@ class Terminal:
         self.status = "就绪"
         self.closed = False
         self.state_path = root / ".seudaily" / "cli-state.json"
+        self.ui: Application | None = None
+        self.transcript = ""
+        self.scroll_line: int | None = None
+        self.ui_mode = False
+        self._rendered_source: str | None = None
+        self._rendered_fragments: list[tuple[str, str]] = []
 
     def show(self, text: Any = "", *, end: str = "\n", error: bool = False) -> None:
-        print(terminal_text(text), end=end, flush=True, file=sys.stderr if error else sys.stdout)
+        text = terminal_text(text)
+        if self.ui_mode:
+            self.transcript += ("\n错误 · " if error and text else "") + text + end
+            if self.ui:
+                self.ui.invalidate()
+        else:
+            print(text, end=end, flush=True, file=sys.stderr if error else sys.stdout)
 
     def save_session(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,10 +84,10 @@ class Terminal:
         if self.args.resume:
             await self.resume(self.args.resume, display=display)
             self.skills = list(self.args.skill)
-        elif display:
+        elif display and not self.ui_mode:
             self.show("SEUdaily 终端助手 · /help 查看命令 · Tab 补全 · Alt+Enter 换行 · Ctrl+C 取消 · Ctrl+D 退出")
         if display:
-            self.show(f"会话：{self.thread_id}")
+            self.show("输入消息开始对话，或输入 / 查看可用命令。" if self.ui_mode else f"会话：{self.thread_id}")
 
     async def resume(self, target: str, *, display: bool = True) -> None:
         latest = target == 'latest'
@@ -108,7 +127,8 @@ class Terminal:
             content = message.get("content") or {}
             parts = content.get("parts") or []
             text = content.get("content") or "\n".join(str(part.get("text", "")) for part in parts if part.get("type") == "text")
-            self.show(f"\n{'你' if message.get('role') == 'user' else 'SEUdaily'} › {text}")
+            role = "你" if message.get("role") == "user" else "SEUdaily"
+            self.show(f"\n{role}\n{text}\n" if self.ui_mode else f"\n{role} › {text}")
             for part in parts:
                 if part.get("type") == "tool-invocation":
                     invocation = part.get("toolInvocation") or {}
@@ -153,6 +173,8 @@ class Terminal:
             self.pending = None
         self.save_session()
         self.status = "正在回答"
+        if self.ui_mode:
+            self.show("\nSEUdaily\n")
         self.active_run_token = run_token
         failed = False
         try:
@@ -425,7 +447,50 @@ class Terminal:
         finally:
             self.status = "待确认" if self.confirmation else "待审批" if self.pending else "就绪"
 
+    def transcript_fragments(self) -> list[tuple[str, str]]:
+        """Render Markdown without passing model escape sequences to the terminal."""
+        if self.transcript == self._rendered_source:
+            return self._rendered_fragments
+        fragments = []
+        fenced = False
+        for line in self.transcript.splitlines(keepends=True):
+            if line.strip().startswith("```"):
+                fenced = not fenced
+                label = line.strip()[3:]
+                fragments.append(("class:muted", (f"  {label}" if fenced else "") + "\n"))
+                continue
+            if fenced:
+                fragments.append(("class:code", "  " + line))
+                continue
+            if line.strip() in {"你", "SEUdaily"}:
+                fragments.append(("class:user" if line.strip() == "你" else "class:assistant", line))
+                continue
+            if line.startswith("错误 · "):
+                fragments.append(("class:error", line))
+                continue
+            heading = re.match(r"^#{1,6}\s+(.+?)(\n?)$", line)
+            if heading:
+                fragments.append(("class:heading", heading[1] + heading[2]))
+                continue
+            line = re.sub(r"^(\s*)[-*] ", r"\1• ", line)
+            # Basic Markdown emphasis, inline code and links; fenced code remains literal.
+            parts = re.split(r"(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))", line)
+            for part in parts:
+                if part.startswith("**") and part.endswith("**"):
+                    fragments.append(("class:strong", part[2:-2]))
+                elif part.startswith("`") and part.endswith("`"):
+                    fragments.append(("class:code", part[1:-1]))
+                elif re.fullmatch(r"\[[^\]]+\]\([^)]+\)", part):
+                    label, url = part[1:-1].split("](", 1)
+                    fragments.append(("class:link", f"{label} ({url})"))
+                else:
+                    fragments.append(("", part))
+        self._rendered_source = self.transcript
+        self._rendered_fragments = fragments
+        return fragments
+
     async def interactive(self) -> int:
+        self.ui_mode = True
         await self.initialize()
         history_path = self.root / ".seudaily" / "cli-history"
         history_path.parent.mkdir(parents=True, exist_ok=True)
@@ -433,61 +498,134 @@ class Terminal:
         if os.name != "nt":
             os.chmod(history_path, 0o600)
         bindings = KeyBindings()
+        completer = SlashCompleter([item["name"] for item in self.catalog])
+        editor = TextArea(
+            multiline=True, history=FileHistory(str(history_path)),
+            auto_suggest=AutoSuggestFromHistory(), completer=completer,
+            complete_while_typing=True, height=lambda: Dimension.exact(min(7, max(3, editor.buffer.document.line_count))),
+            prompt="› ", style="class:input", name="message-input",
+        )
+        def submit_text(text: str) -> None:
+            if not text:
+                return
+            if text in {"/quit", "/exit"}:
+                self.closed = True
+                self.ui.exit()
+            elif text == "/cancel":
+                asyncio.create_task(self.cancel())
+            elif self.worker and not self.worker.done():
+                self.show("当前任务正在运行；可用 /cancel 或 Ctrl+C 停止。")
+            else:
+                self.scroll_line = None
+                self.show(f"\n你\n{text}\n")
+                self.worker = asyncio.create_task(self.work(text))
         @bindings.add("enter")
         def submit(event):
-            if event.current_buffer.complete_state:
-                event.current_buffer.cancel_completion()
-            event.current_buffer.validate_and_handle()
+            buffer = editor.buffer
+            text = buffer.text.strip()
+            if self.worker and not self.worker.done() and text not in {"/cancel", "/quit", "/exit"}:
+                self.show("当前任务正在运行；输入已保留。Ctrl+C 取消。")
+                return
+            buffer.append_to_history()
+            buffer.reset()
+            submit_text(text)
         @bindings.add("escape", "enter")
         def newline(event):
-            event.current_buffer.insert_text("\n")
+            editor.buffer.insert_text("\n")
         @bindings.add("c-c")
         def interrupt(event):
             if self.worker and not self.worker.done():
                 asyncio.create_task(self.cancel())
             else:
                 self.confirmation = None
-                event.current_buffer.reset()
+                editor.buffer.reset()
         @bindings.add("c-d")
         def end(event):
-            if not event.current_buffer.text:
-                event.app.exit(result="/quit")
+            if not editor.buffer.text:
+                self.closed = True
+                event.app.exit()
             else:
-                event.current_buffer.delete()
-        completer = SlashCompleter([item["name"] for item in self.catalog])
-        session = PromptSession(
-            history=FileHistory(str(history_path)), auto_suggest=AutoSuggestFromHistory(),
-            completer=completer, complete_while_typing=True, multiline=True,
-            key_bindings=bindings, editing_mode=EditingMode.VI if self.args.vi else EditingMode.EMACS,
-            refresh_interval=.2,
-            style=Style.from_dict({"prompt": "bold ansicyan", "bottom-toolbar": "ansibrightblack"}) if not self.args.no_color and not os.environ.get("NO_COLOR") else Style.from_dict({}),
-            bottom_toolbar=lambda: terminal_text(f"{self.status} · 会话 {self.thread_id[:8]} · {'Skill ' + ', '.join(self.skills) if self.skills else '自动 Skill'} · /help"),
+                editor.buffer.delete()
+        def scroll(amount: int) -> None:
+            lines = self.transcript_fragments()
+            last = max(0, "".join(fragment[1] for fragment in lines).count("\n"))
+            current = last if self.scroll_line is None else self.scroll_line
+            self.scroll_line = min(last, max(0, current + amount))
+            if self.scroll_line == last:
+                self.scroll_line = None
+            if self.ui:
+                self.ui.invalidate()
+        @bindings.add("pageup")
+        def page_up(event):
+            scroll(-max(1, event.app.output.get_size().rows - 12))
+        @bindings.add("pagedown")
+        def page_down(event):
+            scroll(max(1, event.app.output.get_size().rows - 12))
+        @bindings.add("c-home")
+        def head(event):
+            self.scroll_line = 0
+        @bindings.add("c-end")
+        def tail(event):
+            self.scroll_line = None
+        def mouse(event):
+            if event.event_type == MouseEventType.SCROLL_UP:
+                scroll(-3)
+            elif event.event_type == MouseEventType.SCROLL_DOWN:
+                scroll(3)
+            else:
+                return NotImplemented
+        def content():
+            return [(style, text, mouse) for style, text in self.transcript_fragments()]
+        def cursor():
+            lines = "".join(text for _, text in self.transcript_fragments()).split("\n")
+            y = len(lines) - 1 if self.scroll_line is None else min(self.scroll_line, len(lines) - 1)
+            return Point(x=len(lines[y]), y=y)
+        conversation = Window(
+            FormattedTextControl(content, get_cursor_position=cursor, show_cursor=False),
+            wrap_lines=True, get_line_prefix=lambda line, wrap: "  ",
+            right_margins=[ScrollbarMargin(display_arrows=False)],
+            style="class:conversation", always_hide_cursor=True,
         )
-        with patch_stdout():
-            if self.args.prompt:
-                self.worker = asyncio.create_task(self.work(self.args.prompt))
-            try:
-                while not self.closed:
-                    completer.skill_names = [item["name"] for item in self.catalog]
-                    try:
-                        text = (await session.prompt_async([("class:prompt", "seudaily › ")])).strip()
-                    except (EOFError, KeyboardInterrupt):
-                        self.closed = True
-                        break
-                    if not text:
-                        continue
-                    if text in {"/quit", "/exit"}:
-                        self.closed = True
-                        break
-                    if text == "/cancel":
-                        await self.cancel()
-                    elif self.worker and not self.worker.done():
-                        self.show("当前任务正在运行；可用 /cancel 或 Ctrl+C 停止。")
-                    else:
-                        self.worker = asyncio.create_task(self.work(text))
-            finally:
-                if self.worker and not self.worker.done():
-                    await self.cancel()
+        def status():
+            completer.skill_names = [item["name"] for item in self.catalog]
+            return [("class:status", f" {self.status}  ·  会话 {self.thread_id[:8]}  ·  " +
+                     ("Skill " + ", ".join(self.skills) if self.skills else "自动 Skill") +
+                     ("  ·  正在查看历史，Ctrl+End 回到底部" if self.scroll_line is not None else ""))]
+        style = Style.from_dict({
+            "": "bg:#20242c #dce1ea", "header": "bg:#292f3a #ffffff bold",
+            "conversation": "bg:#20242c #dce1ea", "user": "#80cbc4 bold",
+            "assistant": "#a8bfff bold", "strong": "bold #ffffff", "heading": "bold #a8bfff",
+            "muted": "#8993a4", "code": "#e5c07b", "link": "#80cbc4 underline",
+            "error": "#ff9292", "input": "bg:#292f3a #ffffff", "status": "#a8bfff",
+            "frame.border": "#64738a", "frame.label": "#a8bfff",
+            "completion-menu": "bg:#343d4c #dce1ea",
+            "completion-menu.completion.current": "bg:#536585 #ffffff",
+            "auto-suggestion": "#8993a4",
+        }) if not self.args.no_color and not os.environ.get("NO_COLOR") else Style.from_dict({})
+        layout = HSplit([
+            Window(FormattedTextControl([("class:header", "  SEUdaily  /  终端助手")]), height=1),
+            Window(height=1), conversation, Window(height=1),
+            Window(FormattedTextControl(status), height=1),
+            Frame(editor, title="消息 · Enter 发送 · Alt+Enter 换行"),
+            Window(FormattedTextControl([("class:muted", " /help 命令  ·  Tab 补全  ·  PgUp/PgDn 滚动  ·  Ctrl+C 取消  ·  Ctrl+D 退出")]), height=1),
+        ])
+        self.ui = Application(
+            layout=Layout(FloatContainer(content=layout, floats=[
+                Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=8, scroll_offset=1)),
+            ]), focused_element=editor), key_bindings=bindings,
+            full_screen=True, mouse_support=True, style=style,
+            editing_mode=EditingMode.VI if self.args.vi else EditingMode.EMACS,
+            refresh_interval=.2,
+        )
+        if self.args.prompt:
+            submit_text(self.args.prompt)
+        try:
+            await self.ui.run_async()
+        finally:
+            if self.worker and not self.worker.done():
+                await self.cancel()
+            self.ui = None
+            self.ui_mode = False
         return 0
 
 
