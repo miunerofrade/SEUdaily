@@ -477,3 +477,9 @@ button { color: inherit; }
 .inspector .resource-item small { color: #aaa; font-size: 11px; }
 .task-panel-toggle { border-radius: 10px; }
 .task-panel-toggle.is-open { background: #f1f1f1; color: #222; }
+
+.disk-details .disk-location { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.disk-location > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disk-reveal { flex-shrink: 0; display: inline-flex; align-items: center; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: #777; cursor: pointer; }
+.disk-reveal:hover { background: #f3f3f3; color: #222; }
+.disk-reveal:disabled { opacity: .4; cursor: default; }

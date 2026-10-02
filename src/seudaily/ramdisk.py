@@ -265,3 +265,24 @@ def manage_ramdisk(action: str, size: str = "1G") -> dict:
         return ramdisk_status()
     ok, message = setup_ramdisk(size=size) if action == "mount" else remove_ramdisk() if action == "unmount" else (False, "未知内存盘操作")
     return {"status": "completed" if ok else "failed", "summary": message, "data": ramdisk_status()}
+
+
+def reveal_ramdisk() -> dict:
+    state = ramdisk_status()
+    if not state["mounted"] or not state["path"]:
+        raise RamDiskError("内存盘尚未挂载或已经卸载")
+    path = str(Path(state["path"]).resolve(strict=True))
+    if sys.platform == "darwin":
+        _run("/usr/bin/open", "-R", path)
+    elif sys.platform == "win32":
+        os.startfile(path)
+    elif sys.platform == "linux":
+        if shutil.which("xdg-open"):
+            _run("xdg-open", path)
+        elif shutil.which("gio"):
+            _run("gio", "open", path)
+        else:
+            raise RamDiskError("未找到桌面文件管理器，请安装 xdg-utils 或使用桌面环境的 gio")
+    else:
+        raise RamDiskError("当前系统暂不支持打开文件管理器")
+    return {"status": "completed", "summary": "已在系统文件管理器中显示"}

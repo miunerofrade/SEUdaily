@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Share } from 'lucide-react';
 
 type DiskState = {
   mounted: boolean;
@@ -17,6 +18,8 @@ export function RamDiskPanel({ active }: { active: boolean }) {
   const [size, setSize] = useState('1G');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [revealing, setRevealing] = useState(false);
+  const [revealError, setRevealError] = useState('');
   useEffect(() => {
     if (!active) return;
     let stopped = false;
@@ -50,12 +53,23 @@ export function RamDiskPanel({ active }: { active: boolean }) {
       setError(cause instanceof Error ? cause.message : '内存盘操作失败');
     } finally { setBusy(false); }
   };
+  const revealLabel = state?.platform === 'darwin' ? '在 Finder 中显示' : state?.platform === 'win32' ? '在文件资源管理器中显示' : '在文件管理器中显示';
+  const reveal = async () => {
+    setRevealing(true); setRevealError('');
+    try {
+      const response = await fetch('/app/ramdisk/reveal', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok || result.status !== 'completed') throw new Error(result.error || result.summary || '无法打开文件管理器');
+    } catch (cause) { setRevealError(cause instanceof Error ? cause.message : '无法打开文件管理器'); }
+    finally { setRevealing(false); }
+  };
   return <section className="inspector-section ramdisk-section">
     <div className="section-title"><span>内存盘</span><span className="disk-state">{state ? state.mounted ? '已启用' : '未启用' : '读取中'}</span></div>
     <p className="inspector-description">用于媒体临时文件。macOS / Linux 退出服务后自动卸载。</p>
     <div className="disk-control-row"><label htmlFor="ramdisk-size">容量</label><select id="ramdisk-size" value={size} onChange={event => setSize(event.target.value)} disabled={busy || state?.mounted}><option value="512M">512 MB</option><option value="1G">1 GB</option><option value="2G">2 GB</option><option value="4G">4 GB</option></select><button type="button" className="disk-action" disabled={busy || !state || Boolean(state.activeTasks)} onClick={() => void change()}>{busy ? '处理中…' : state?.mounted ? '卸载' : '启用'}</button></div>
-    {state?.mounted && <dl className="disk-details"><div><dt>已用 / 可用</dt><dd>{bytes(state.usedBytes)} / {bytes(state.availableBytes)}</dd></div><div><dt>处理任务</dt><dd>{state.activeTasks}</dd></div><div><dt>位置</dt><dd>{state.path}</dd></div></dl>}
+    {state?.mounted && <dl className="disk-details"><div><dt>已用 / 可用</dt><dd>{bytes(state.usedBytes)} / {bytes(state.availableBytes)}</dd></div><div><dt>处理任务</dt><dd>{state.activeTasks}</dd></div><div><dt>位置</dt><dd className="disk-location"><span title={state.path ?? undefined}>…/{state.path?.split(/[\\/]/).filter(Boolean).at(-1)}</span><button type="button" className="disk-reveal" title={revealLabel} aria-label={revealLabel} disabled={revealing || busy} onClick={() => void reveal()}><Share size={15} /></button></dd></div></dl>}
     {state?.platform === 'linux' && !state.mounted && <p className="inspector-description">挂载需要 root 权限或已授权的 sudo。</p>}
+    {revealError && <p className="disk-error" role="status">{revealError}</p>}
     {error && <p className="disk-error" role="status">{error} 媒体处理可继续使用普通临时目录。</p>}
   </section>;
 }

@@ -139,6 +139,9 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
+    if action == "reveal-ramdisk":
+        from .ramdisk import reveal_ramdisk
+        return reveal_ramdisk()
     if action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk"}:
         from .ramdisk import manage_ramdisk
         operation = {"ramdisk-status": "status", "mount-ramdisk": "mount", "unmount-ramdisk": "unmount"}[action]

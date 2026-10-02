@@ -321,6 +321,10 @@ function legacyEnvironmentName(name: string) {
 }
 
 export const appRoutes = [
+  registerApiRoute("/app/ramdisk/reveal", { method: "POST", handler: async (c: any) => {
+    const result = await runPythonTool<ToolResult>("reveal-ramdisk", {});
+    return c.json(resultResponse(result));
+  } }),
   registerApiRoute("/app/ramdisk", { method: "GET", handler: async (c: any) => {
     const result = await runPythonTool<ToolResult>("ramdisk-status", {});
     return c.json(await fullResultData(result));
