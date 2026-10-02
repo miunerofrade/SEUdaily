@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { createTool } from "./create-tool.js";
 import { z } from "zod";
 
 import { runPythonTool } from "./python-bridge.js";

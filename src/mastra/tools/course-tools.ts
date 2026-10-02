@@ -1,4 +1,4 @@
-import { createTool } from "@mastra/core/tools";
+import { createTool } from "./create-tool.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 

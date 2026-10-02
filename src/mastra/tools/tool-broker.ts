@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createTool } from "@mastra/core/tools";
+import { createTool } from "./create-tool.js";
 import { z } from "zod";
 
 import { isUnapprovedAccessEnabled } from "../permission-state.js";
