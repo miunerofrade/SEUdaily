@@ -103,7 +103,7 @@ export class AgentRuntime {
         }
     }
     private async persist(run: RunState) {
-        await this.config.store.saveTurn(run, { id: `${run.id}-assistant`, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken } });
+        await this.config.store.saveTurn(run, { id: `${run.id}-assistant`, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage } });
     }
     private async *drive(run: RunState, signal: AbortSignal, decision?: {
         callId: string;

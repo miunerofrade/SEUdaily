@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve, extname, isAbsolute } from "node:path";
+import { normalizedUsage, type Usage } from "./telemetry.js";
 import { Client, RESOURCE, clean } from "./client.js";
 export interface Options {
   command: string;
@@ -98,6 +99,10 @@ export class Session extends EventEmitter {
   threadId = randomUUID() as string;
   resource = RESOURCE;
   runToken = "";
+  model = "—";
+  effort = "默认";
+  usage: Usage = {};
+  usageByRun = new Map<string, Usage>();
   pending: any = null;
   confirmation: { kind: string; payload: any; text: string } | null = null;
   auth = new Map<string, any>();
@@ -182,6 +187,9 @@ export class Session extends EventEmitter {
       }
     } catch {}
     this.catalog = (await this.client.json("/app/skills")).skills;
+    const info = await this.client.json("/app/agent-info").catch(() => ({}));
+    this.model = typeof info.model === "string" ? clean(info.model) : "—";
+    this.effort = typeof info.effort === "string" ? clean(info.effort) : "默认";
     for (const skill of this.skills)
       if (!this.catalog.some((s) => s.name === skill))
         throw new Error(`Skill 不存在：${skill}`);
@@ -218,11 +226,21 @@ export class Session extends EventEmitter {
       }
     }
   }
+  recordUsage(runToken: string, usage: unknown) {
+    const valid = normalizedUsage(usage);
+    if (Object.keys(valid).length) this.usageByRun.set(runToken, valid);
+    this.usage = {};
+    for (const item of this.usageByRun.values())
+      for (const [key, amount] of Object.entries(item))
+        this.usage[key] = (this.usage[key] ?? 0) + amount;
+  }
   async history(count = 100) {
     const result = await this.client.json(
       this.path("messages") + `&perPage=${count}`,
     );
     for (const m of result.messages ?? []) {
+      if (m.content?.runToken)
+        this.recordUsage(m.content.runToken, m.content.usage);
       const parts = m.content?.parts ?? [];
       const text =
         m.content?.content ??
@@ -260,6 +278,8 @@ export class Session extends EventEmitter {
     this.actions.clear();
     this.pending = (await this.client.json(this.path("run"))).pending;
     this.messages = [];
+    this.usageByRun.clear();
+    this.usage = {};
     await this.save();
     await this.history(100);
     if (this.pending) this.show(`待审批：${this.pending.toolName}`);
@@ -337,8 +357,11 @@ export class Session extends EventEmitter {
         } else if (event.type === "error") {
           code = 1;
           this.show(p.error?.message ?? "模型错误", "错误");
-        } else if (event.type === "finish" && this.options.verbose)
-          this.emit("diagnostic", JSON.stringify(p.usage ?? {}));
+        } else if (event.type === "finish") {
+          this.recordUsage(this.runToken, p.usage);
+          if (this.options.verbose)
+            this.emit("diagnostic", JSON.stringify(p.usage ?? {}));
+        }
         this.changed();
       }
       this.documents = [];
@@ -473,6 +496,8 @@ export class Session extends EventEmitter {
     if (name === "new") {
       if (this.pending) this.show("原会话的待审批状态保留，可 /resume 恢复。");
       this.threadId = randomUUID();
+      this.usageByRun.clear();
+      this.usage = {};
       this.resource = RESOURCE;
       this.pending = this.confirmation = null;
       this.auth.clear();

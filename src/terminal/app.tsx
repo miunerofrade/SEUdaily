@@ -14,7 +14,16 @@ import {
 import { Select } from "@inkjs/ui";
 import { editorRows } from "./editor.js";
 import { messageLines } from "./markdown.js";
-import { Session } from "./session.js";
+import { Composer } from "./composer.js";
+import { telemetryLabel } from "./telemetry.js";
+import {
+  programDocument,
+  semesterOptions,
+  currentWeek,
+  periodTimes,
+} from "./course-layout.js";
+import { Timetable, gridGeometry } from "./timetable.js";
+import { Session, commands } from "./session.js";
 import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
@@ -78,47 +87,40 @@ export function App({ session }: { session: Session }) {
   const [page, setPage] = useState<Page>("chat");
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
-  const editor = useRef({ text: "", cursor: 0 });
+  const editor = useRef(new Composer());
   const historyIndex = useRef(-1);
   const historyDraft = useRef("");
   const edit = (text: string, cursor: number) => {
-    editor.current = { text, cursor };
-    setInput(text);
-    setCaret(cursor);
+    editor.current.set(text, cursor);
+    setInput(editor.current.text);
+    setCaret(editor.current.cursor);
   };
   const messages = session.messages;
-  const status = session.status,
-    busy = session.busy;
+  const busy = session.busy;
   const [offset, setOffset] = useState<number | null>(null);
   const [field, setField] = useState(0);
   const [modal, setModal] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
   const [term, setTerm] = useState(schedule.selectedSemester);
   const [courses, setCourses] = useState<any[]>(schedule.courses);
-  const [week, setWeek] = useState("all");
+  const [week, setWeek] = useState(currentWeek(schedule));
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState(0);
   const [tableTop, setTableTop] = useState(0);
   const [planIndex, setPlanIndex] = useState(0);
   const [courseState, setCourseState] = useState("all");
-  const [grid, setGrid] = useState(false);
-  const inputHeight =
-    page === "chat"
-      ? Math.min(
-          8,
-          Math.max(
-            4,
-            wrap(input, width - 4).length + 3 + (input.startsWith("/") ? 1 : 0),
-          ),
-        )
-      : 4;
-  const height = Math.max(3, rows - inputHeight - 8);
+  const [grid, setGrid] = useState(true);
+  const [dayStart, setDayStart] = useState(0);
+  const [programSemester, setProgramSemester] = useState("all");
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
   const inputLayout = editorRows(input, caret, width - 4);
-  const inputCapacity = inputHeight - 3 - (input.startsWith("/") ? 1 : 0);
-  const inputTop = Math.max(
-    0,
-    inputLayout.cursorRow - Math.max(1, inputCapacity) + 1,
-  );
+  const inputCapacity = Math.min(7, Math.max(1, inputLayout.rows.length));
+  const inputHeight = page === "chat" ? inputCapacity + 2 : 0;
+  const hasSuggestions =
+    page === "chat" && input.startsWith("/") && !input.includes("\n");
+  const suggestionHeight = hasSuggestions ? 9 : 0;
+  const height = Math.max(3, rows - inputHeight - suggestionHeight - 2);
+  const inputTop = Math.max(0, inputLayout.cursorRow - inputCapacity + 1);
   const fields = useRef<(DOMElement | null)[]>([]),
     tableRows = useRef<(DOMElement | null)[]>([]);
   const gridCells = useRef<{ element: DOMElement | null; items: any[] }[]>([]),
@@ -139,6 +141,9 @@ export function App({ session }: { session: Session }) {
       ) {
         setCourses(session.schedule.courses ?? []);
         setTerm(session.schedule.selectedSemester);
+        setWeek(currentWeek(session.schedule));
+        setDayStart(0);
+        setProgramSemester("all");
         setFilter(session.viewOptions.filter ?? "");
         setPlanIndex(
           Math.max(
@@ -212,7 +217,7 @@ export function App({ session }: { session: Session }) {
   const termLabel =
     (schedule.availableSemesters ?? []).find((s: any) => s.value === term)
       ?.label ?? term;
-  const choices = useMemo(
+  const filteredCourses = useMemo(
     () =>
       page === "schedule"
         ? courses.filter(
@@ -221,12 +226,22 @@ export function App({ session }: { session: Session }) {
               c.courseName.includes(filter),
           )
         : (plan?.courses ?? []).filter(
-            (c: any) =>
-              (courseState === "all" || c.status === courseState) &&
-              (c.name.includes(filter) || c.code?.includes(filter)),
+            (c: any) => c.name.includes(filter) || c.code?.includes(filter),
           ),
     [page, courses, week, filter, courseState, plan],
   );
+  const programView = useMemo(
+    () =>
+      programDocument(
+        plan,
+        filteredCourses,
+        width,
+        programSemester,
+        courseState,
+      ),
+    [plan, filteredCourses, width, programSemester, courseState],
+  );
+  const choices = page === "programs" ? programView.entries : filteredCourses;
   const displayLines = useMemo(
     () => messages.flatMap((message) => messageLines(message, width)),
     [messages, width],
@@ -234,8 +249,8 @@ export function App({ session }: { session: Session }) {
   const maxOffset = Math.max(0, displayLines.length - height);
   const top = offset === null ? maxOffset : Math.min(maxOffset, offset);
   const visibleCount = Math.max(2, height - (page === "programs" ? 6 : 5));
-  const gridCount = Math.max(1, Math.floor((height - 5) / 2));
-  const isGrid = grid && page === "schedule" && columns >= 110;
+  const gridCount = Math.max(1, Math.floor((height - 8) / 3));
+  const isGrid = grid && page === "schedule";
   const [pathSuggestions, setPathSuggestions] = useState<{
     input: string;
     values: string[];
@@ -261,6 +276,56 @@ export function App({ session }: { session: Session }) {
         input,
         session.catalog.map((s) => s.name),
       );
+  useEffect(() => setSuggestionIndex(0), [input]);
+  const selectedSuggestion =
+    suggestions[Math.min(suggestionIndex, Math.max(0, suggestions.length - 1))];
+  const suggestionTop = Math.max(
+    0,
+    Math.min(suggestionIndex - 4, suggestions.length - 5),
+  );
+  const suggestionDescription = (value: string) => {
+    const parts = value.trim().split(/\s+/),
+      name = parts[0].slice(1);
+    if (parts.length > 1) {
+      const last = parts.at(-1)!;
+      return (
+        (
+          {
+            "--sync": "重新同步校园数据",
+            "--semester": "选择学期",
+            "--date": "筛选日期",
+            "--start-date": "设置学期起始日期",
+            "--semesters": "查看学期列表",
+            "--plan": "选择培养方案",
+            "--page": "跳转页码",
+            "--limit": "设置每页数量",
+            "--filter": "按课程名筛选",
+            "--help": "查看命令帮助",
+            off: "清除 Skill",
+            normal: "普通权限",
+            full: "完整权限",
+            extra: "工作区权限",
+            latest: "最近会话",
+            schedule: "登录教务系统",
+          } as Record<string, string>
+        )[last] ?? (name === "attach" ? "添加文档" : "调用项目 Skill")
+      );
+    }
+    const alias =
+      (
+        {
+          课表: "schedule",
+          培养方案: "programs",
+          技能: "skills",
+          exit: "quit",
+        } as Record<string, string>
+      )[name] ?? name;
+    return (
+      commands[alias]?.split(" [")[0] ??
+      session.catalog.find((s) => s.name === name)?.description ??
+      "返回聊天"
+    );
+  };
   const changePage = (next: Page) => {
     if (next === "chat") {
       session.page = "chat";
@@ -307,7 +372,11 @@ export function App({ session }: { session: Session }) {
           Math.min(
             Math.max(
               0,
-              isGrid ? 13 - gridCount : choices.length - visibleCount,
+              isGrid
+                ? 13 - gridCount
+                : page === "programs"
+                  ? programView.rows.length - (height - 4)
+                  : choices.length - visibleCount,
             ),
             current + amount,
           ),
@@ -333,6 +402,7 @@ export function App({ session }: { session: Session }) {
         if (index === 0) setModal(page === "schedule" ? "semester" : "plan");
         if (index === 1) setModal(page === "schedule" ? "week" : "state");
         if (index === 3) setDetail(choices[selected]);
+        if (index === 4) setModal("program-semester");
         return;
       }
     }
@@ -367,8 +437,13 @@ export function App({ session }: { session: Session }) {
         y >= box.y &&
         y < box.y + box.height
       ) {
-        setSelected(tableTop + index);
-        setDetail(choices[tableTop + index]);
+        const selectedIndex =
+          page === "programs"
+            ? programView.rows[tableTop + index]?.index
+            : tableTop + index;
+        if (selectedIndex === undefined) return;
+        setSelected(selectedIndex);
+        setDetail(choices[selectedIndex]);
         return;
       }
     }
@@ -403,6 +478,26 @@ export function App({ session }: { session: Session }) {
   const newSelection = (index: number) => {
     index = Math.max(0, Math.min(choices.length - 1, index));
     setSelected(index);
+    if (page === "programs") {
+      const line = programView.rows.findIndex((row) => row.index === index);
+      setTableTop((current) =>
+        line < current
+          ? line
+          : line >= current + height - 4
+            ? line - height + 5
+            : current,
+      );
+      return;
+    }
+    if (isGrid) {
+      setTableTop(
+        Math.max(
+          0,
+          Math.min(13 - gridCount, (choices[index]?.startPeriod ?? 1) - 1),
+        ),
+      );
+      return;
+    }
     setTableTop((current) =>
       index < current
         ? index
@@ -412,7 +507,11 @@ export function App({ session }: { session: Session }) {
     );
   };
   usePaste((text) => {
-    if (page === "chat" && !modal && !detail && !decisions) insert(text);
+    if (page === "chat" && !modal && !detail && !decisions) {
+      editor.current.paste(clean(text));
+      setInput(editor.current.text);
+      setCaret(editor.current.cursor);
+    }
   });
   useInput((value, key) => {
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
@@ -473,8 +572,29 @@ export function App({ session }: { session: Session }) {
     }
     if (detail) return;
     if (page !== "chat") {
+      if (
+        page === "schedule" &&
+        isGrid &&
+        field !== 2 &&
+        (key.leftArrow || key.rightArrow)
+      ) {
+        setDayStart((start) =>
+          Math.max(
+            0,
+            Math.min(
+              7 - gridGeometry(width).days,
+              start + (key.rightArrow ? 1 : -1),
+            ),
+          ),
+        );
+        return;
+      }
       if (key.tab) {
-        setField((old) => (old + (key.shift ? 3 : 1)) % 4);
+        setField(
+          (old) =>
+            (old + (key.shift ? (page === "programs" ? 4 : 3) : 1)) %
+            (page === "programs" ? 5 : 4),
+        );
         return;
       }
       if (field === 2) {
@@ -507,6 +627,7 @@ export function App({ session }: { session: Session }) {
         if (field === 0) setModal(page === "schedule" ? "semester" : "plan");
         else if (field === 1) setModal(page === "schedule" ? "week" : "state");
         else if (field === 3) setDetail(choices[selected]);
+        else if (field === 4) setModal("program-semester");
         return;
       }
       if (value === "r") {
@@ -520,8 +641,23 @@ export function App({ session }: { session: Session }) {
       }
       return;
     }
-    if (key.tab && suggestions.length) {
-      edit(suggestions[0], suggestions[0].length);
+    if (
+      suggestions.length &&
+      !key.ctrl &&
+      (key.tab ||
+        (key.rightArrow &&
+          editor.current.cursor === editor.current.text.length))
+    ) {
+      edit(selectedSuggestion, selectedSuggestion.length);
+      return;
+    }
+    if (suggestions.length && (key.upArrow || key.downArrow)) {
+      setSuggestionIndex((index) =>
+        Math.max(
+          0,
+          Math.min(suggestions.length - 1, index + (key.upArrow ? -1 : 1)),
+        ),
+      );
       return;
     }
     if (session.options.vi && viMode.current) {
@@ -569,7 +705,7 @@ export function App({ session }: { session: Session }) {
         insert("\n");
         return;
       }
-      const text = editor.current.text.trim();
+      const text = editor.current.expanded().trim();
       if (!text) return;
       if (busy && text !== "/cancel") return;
       if (text === "/quit" || text === "/exit") {
@@ -591,7 +727,7 @@ export function App({ session }: { session: Session }) {
     }
     if (key.upArrow || key.downArrow) {
       if (historyIndex.current < 0) {
-        historyDraft.current = editor.current.text;
+        historyDraft.current = editor.current.expanded();
         historyIndex.current = session.inputHistory.length;
       }
       historyIndex.current = Math.max(
@@ -605,7 +741,10 @@ export function App({ session }: { session: Session }) {
         historyIndex.current === session.inputHistory.length
           ? historyDraft.current
           : (session.inputHistory[historyIndex.current] ?? "");
-      edit(value, value.length);
+      edit("", 0);
+      editor.current.paste(value);
+      setInput(editor.current.text);
+      setCaret(editor.current.cursor);
       return;
     }
     const { text, cursor } = editor.current;
@@ -650,46 +789,74 @@ export function App({ session }: { session: Session }) {
     if (kind === "grid-courses") setDetail(gridOptions.current[Number(value)]);
     if (kind === "week") setWeek(value);
     if (kind === "state") setCourseState(value);
-    if (kind === "plan") setPlanIndex(Number(value));
+    if (kind === "plan") {
+      setPlanIndex(Number(value));
+      setProgramSemester("all");
+    }
+    if (kind === "program-semester") setProgramSemester(value);
   };
   const options =
-    modal === "grid-courses"
-      ? gridOptions.current.map((c: any, i: number) => ({
-          label: c.courseName + " · " + c.teacherName,
-          value: String(i),
-        }))
-      : modal === "semester"
-        ? (schedule.availableSemesters ?? []).map((s: any) => ({
-            label: s.label,
-            value: s.value,
+    modal === "program-semester"
+      ? [
+          { label: "全部学期", value: "all" },
+          ...Array.from(
+            new Map(
+              (plan.courses ?? []).flatMap((course: any) =>
+                semesterOptions(course).map((option: any) => [
+                  option.value,
+                  option.label,
+                ]),
+              ),
+            ).entries(),
+          )
+            .sort(([a], [b]) => String(a).localeCompare(String(b)))
+            .map(([value, label]) => ({
+              value: String(value),
+              label: String(label),
+            })),
+        ]
+      : modal === "grid-courses"
+        ? gridOptions.current.map((c: any, i: number) => ({
+            label: c.courseName + " · " + c.teacherName,
+            value: String(i),
           }))
-        : modal === "week"
-          ? [
-              { label: "全部周次", value: "all" },
-              ...Array.from({ length: 20 }, (_, i) => ({
-                label: `第 ${i + 1} 周`,
-                value: String(i + 1),
-              })),
-            ]
-          : modal === "plan"
-            ? (programs.plans ?? []).map((p: any, i: number) => ({
-                label: p.title,
-                value: String(i),
-              }))
-            : [
-                { label: "全部状态", value: "all" },
-                ...Object.entries(states).map(([value, label]) => ({
-                  value,
-                  label,
+        : modal === "semester"
+          ? (schedule.availableSemesters ?? []).map((s: any) => ({
+              label: s.label,
+              value: s.value,
+            }))
+          : modal === "week"
+            ? [
+                { label: "全部周次", value: "all" },
+                ...Array.from({ length: 20 }, (_, i) => ({
+                  label: `第 ${i + 1} 周`,
+                  value: String(i + 1),
                 })),
-              ];
+              ]
+            : modal === "plan"
+              ? (programs.plans ?? []).map((p: any, i: number) => ({
+                  label: p.title,
+                  value: String(i),
+                }))
+              : [
+                  { label: "全部状态", value: "all" },
+                  ...Object.entries(states).map(([value, label]) => ({
+                    value,
+                    label,
+                  })),
+                ];
   const fieldBox = (index: number, label: string, value: string) => (
     <Box
       key={index}
       ref={(element) => {
         fields.current[index] = element;
       }}
-      width={Math.floor(width * [0.34, 0.17, 0.28, 0.16][index])}
+      width={Math.floor(
+        width *
+          (page === "programs"
+            ? [0.3, 0.13, 0.22, 0.13, 0.17]
+            : [0.34, 0.17, 0.28, 0.16])[index],
+      )}
       height={4}
       flexShrink={0}
       flexDirection="column"
@@ -740,35 +907,15 @@ export function App({ session }: { session: Session }) {
     page === "schedule"
       ? ["课程", "星期", "节次", "地点", "教师"]
       : ["课程", "代码", "学分", "修读状态", "分类"];
+  gridCells.current = [];
+  tableRows.current = [];
   return (
     <Box width={columns} height={rows} flexDirection="column" paddingX={1}>
-      <Box height={2} flexShrink={0}>
-        <Text bold color={color.accent}>
-          SEUdaily
-        </Text>
-        <Text color={color.muted}>
-          {" "}
-          / 终端助手 · 会话 {session.threadId.slice(0, 8)} ·{" "}
-          {session.skills.join(", ") || "自动 Skill"}
-        </Text>
-      </Box>
-      <Box height={1} flexShrink={0}>
-        <Text color={page === "chat" ? color.accent : color.muted}>聊天</Text>
-        <Text> </Text>
-        <Text color={page === "schedule" ? color.accent : color.muted}>
-          课表
-        </Text>
-        <Text> </Text>
-        <Text color={page === "programs" ? color.accent : color.muted}>
-          培养方案
-        </Text>
-      </Box>
       <Box
         flexDirection="column"
         height={height}
         flexShrink={0}
         overflow="hidden"
-        marginTop={1}
       >
         {decisions ? (
           <Box
@@ -819,7 +966,7 @@ export function App({ session }: { session: Session }) {
           >
             <Text bold>
               选择
-              {modal === "semester"
+              {modal === "semester" || modal === "program-semester"
                 ? "学期"
                 : modal === "week"
                   ? "周次"
@@ -853,6 +1000,10 @@ export function App({ session }: { session: Session }) {
                 <Text>
                   时间：周{weekdays[detail.weekday - 1]} · 第{" "}
                   {detail.startPeriod}–{detail.endPeriod} 节
+                  {" · " +
+                    (periodTimes[detail.startPeriod]?.split("–")[0] ?? "—") +
+                    "–" +
+                    (periodTimes[detail.endPeriod]?.split("–")[1] ?? "—")}
                 </Text>
                 <Text wrap="wrap">周次：{detail.weeks?.join("、")}</Text>
               </>
@@ -864,8 +1015,18 @@ export function App({ session }: { session: Session }) {
                 <Text>
                   分类：{detail.group} · {detail.nature}
                 </Text>
-                <Text>学期：{detail.semesterLabel ?? detail.semester}</Text>
-                <Text wrap="wrap">备注：{detail.note || "暂无"}</Text>
+                <Text>
+                  学期：
+                  {detail.displaySemester ??
+                    detail.semesterLabel ??
+                    detail.semester}
+                </Text>
+                <Text wrap="wrap">
+                  备注：
+                  {[detail.choiceNote, detail.note]
+                    .filter(Boolean)
+                    .join(" · ") || "暂无"}
+                </Text>
               </>
             )}
             <Text color={color.muted}>Esc 返回列表</Text>
@@ -916,81 +1077,54 @@ export function App({ session }: { session: Session }) {
               )}
               {fieldBox(2, "搜索", filter || "输入课程名")}
               {fieldBox(3, "课程详情", "Enter")}
+              {page === "programs" &&
+                fieldBox(
+                  4,
+                  "查看学期",
+                  programSemester === "all" ? "全部学期" : programSemester,
+                )}
             </Box>
-            {page === "programs" && (
-              <Text color={color.accent}>
-                已修{" "}
-                {plan.officialCompletedCredits ??
-                  plan.completedCredits ??
-                  "未知"}{" "}
-                / 要求 {plan.requiredCredits ?? "未知"} 学分 · {choices.length}{" "}
-                门课程
-              </Text>
-            )}
             {isGrid ? (
-              <Box flexDirection="column">
-                <Box height={1}>
-                  <Box width={5}>
-                    <Text color={color.muted}>节次</Text>
-                  </Box>
-                  {weekdays.map((day) => (
-                    <Box key={day} width={Math.floor((width - 5) / 7)}>
-                      <Text bold color={color.accent}>
-                        周{day}
+              <Timetable
+                courses={choices}
+                width={width}
+                start={tableTop}
+                count={gridCount}
+                dayStart={dayStart}
+                register={(index, element, items) => {
+                  gridCells.current[index] = { element, items };
+                }}
+              />
+            ) : page === "programs" ? (
+              <Box
+                flexDirection="column"
+                height={Math.max(1, height - 4)}
+                overflow="hidden"
+              >
+                {programView.rows
+                  .slice(tableTop, tableTop + height - 4)
+                  .map((row, index) => (
+                    <Box
+                      key={index}
+                      height={1}
+                      flexShrink={0}
+                      ref={(element) => {
+                        tableRows.current[index] = element;
+                      }}
+                    >
+                      <Text
+                        bold={row.kind === "title" || row.kind === "group"}
+                        color={
+                          row.kind === "title"
+                            ? color.accent
+                            : row.kind === "border" || row.kind === "muted"
+                              ? color.muted
+                              : color.text
+                        }
+                        inverse={row.index === selected}
+                      >
+                        {row.text}
                       </Text>
-                    </Box>
-                  ))}
-                </Box>
-                {Array.from({ length: 13 }, (_, i) => i + 1)
-                  .slice(tableTop, tableTop + gridCount)
-                  .map((period) => (
-                    <Box key={period} height={2} flexShrink={0}>
-                      <Box width={5}>
-                        <Text color={color.muted}>{period}</Text>
-                      </Box>
-                      {weekdays.map((day, index) => {
-                        const items = choices.filter(
-                          (c: any) =>
-                            c.weekday === index + 1 &&
-                            c.startPeriod <= period &&
-                            c.endPeriod >= period,
-                        );
-                        const course = items[0];
-                        const cellWidth = Math.floor((width - 5) / 7);
-                        return (
-                          <Box
-                            key={day}
-                            width={cellWidth}
-                            height={2}
-                            flexDirection="column"
-                            ref={(element) => {
-                              gridCells.current[(period - 1) * 7 + index] = {
-                                element,
-                                items,
-                              };
-                            }}
-                          >
-                            <Text
-                              color={
-                                course?.startPeriod === period
-                                  ? color.accent
-                                  : color.text
-                              }
-                              wrap="truncate"
-                            >
-                              {course
-                                ? (course.startPeriod === period ? "" : "↳ ") +
-                                  course.courseName
-                                : " "}
-                            </Text>
-                            <Text color={color.muted} wrap="truncate">
-                              {items.length > 1
-                                ? `含 ${items.length} 个安排，点击选择`
-                                : (course?.classroom ?? " ")}
-                            </Text>
-                          </Box>
-                        );
-                      })}
                     </Box>
                   ))}
               </Box>
@@ -1036,62 +1170,87 @@ export function App({ session }: { session: Session }) {
           </>
         )}
       </Box>
-      <Box height={1} flexShrink={0} marginTop={1}>
-        <Text color={color.strong}>{status}</Text>
-        <Text color={color.muted}>
-          {" "}
-          ·{" "}
-          {page === "chat"
-            ? `${Math.min(displayLines.length, top + height)}/${displayLines.length} 行`
-            : `${choices.length} 门课程 · Tab 切换控件`}{" "}
-          {offset !== null && page === "chat" ? "· 查看历史中" : ""}
-        </Text>
-      </Box>
-      {page === "chat" ? (
-        <Box
-          borderStyle="round"
-          borderColor={color.border}
-          flexDirection="column"
-          paddingX={1}
-          height={inputHeight}
-          flexShrink={0}
-        >
-          <Text color={color.muted}>
-            消息
-            {session.options.vi
-              ? viMode.current
-                ? " · Vi 普通模式"
-                : " · Vi 插入模式"
-              : ""}{" "}
-            · Enter 发送 · Alt+Enter 换行
-          </Text>
-          {inputLayout.rows
-            .slice(inputTop, inputTop + Math.max(1, inputCapacity))
-            .map((row, index) => (
-              <Text key={index}>
-                {index === 0 ? "› " : "  "}
-                {row.map((span, i) => (
-                  <Text key={i} inverse={span.inverse}>
-                    {span.text}
+      {page === "chat" && (
+        <>
+          {hasSuggestions && (
+            <Box
+              flexDirection="column"
+              height={suggestionHeight}
+              flexShrink={0}
+              overflow="hidden"
+            >
+              <Text color={color.border}>
+                {"┌" + "─".repeat(width - 2) + "┐"}
+              </Text>
+              <Text color={color.muted}>
+                {"│ " +
+                  fit("命令", Math.floor(width * 0.38)) +
+                  " │ " +
+                  fit("说明", width - Math.floor(width * 0.38) - 7) +
+                  " │"}
+              </Text>
+              <Text color={color.border}>
+                {"├" + "─".repeat(width - 2) + "┤"}
+              </Text>
+              {suggestions
+                .slice(suggestionTop, suggestionTop + 5)
+                .map((suggestion, index) => (
+                  <Text
+                    key={suggestion}
+                    inverse={suggestion === selectedSuggestion}
+                    color={color.accent}
+                  >
+                    {"│ " +
+                      fit(suggestion, Math.floor(width * 0.38)) +
+                      " │ " +
+                      fit(
+                        suggestionDescription(suggestion),
+                        width - Math.floor(width * 0.38) - 7,
+                      ) +
+                      " │"}
                   </Text>
                 ))}
+              {!suggestions.length && (
+                <Text color={color.muted}>没有匹配的补全命令。</Text>
+              )}
+              <Text color={color.border}>
+                {"└" + "─".repeat(width - 2) + "┘"}
               </Text>
-            ))}
-          {suggestions.length > 0 && (
-            <Text color={color.accent}>{suggestions.join("  ")}</Text>
+            </Box>
           )}
-        </Box>
-      ) : (
-        <Box height={4} flexShrink={0} alignItems="center">
-          <Text color={color.muted}>
-            Tab 控件 · ↑↓ 选行 · Enter 选项/详情 · r 同步 · Esc 返回聊天
-            {page === "schedule" ? " · g 周视图" : ""}
-          </Text>
-        </Box>
+          <Box
+            borderStyle="round"
+            borderColor={color.border}
+            flexDirection="column"
+            paddingX={1}
+            height={inputHeight}
+            flexShrink={0}
+          >
+            {inputLayout.rows
+              .slice(inputTop, inputTop + inputCapacity)
+              .map((row, index) => (
+                <Text key={index}>
+                  {index === 0 ? "› " : "  "}
+                  {row.map((span, i) => (
+                    <Text key={i} inverse={span.inverse}>
+                      {span.text}
+                    </Text>
+                  ))}
+                </Text>
+              ))}
+          </Box>
+        </>
       )}
-      <Text color={color.muted}>
-        PgUp/PgDn / 滚轮 · Ctrl+End 最新 · Ctrl+C 取消 · Ctrl+D 退出
-      </Text>
+      <Box height={1} flexShrink={0}>
+        <Text color={color.muted} wrap="truncate">
+          {telemetryLabel(
+            session.model,
+            session.effort,
+            session.usage,
+            width < 105,
+          )}
+        </Text>
+      </Box>
     </Box>
   );
 }

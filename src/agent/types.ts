@@ -47,6 +47,7 @@ export type StoredMessage = {
         parts: ContentPart[];
         modelMessages?: ModelMessage[];
         runToken?: string;
+        usage?: Record<string, number>;
     };
     sequence?: number;
 };
