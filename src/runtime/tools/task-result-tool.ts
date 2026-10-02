@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, basename, relative, resolve } from "node:path";
 
-import { createTool } from "./create-tool.js";
+import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
 
 import { projectRoot, taskRuntimeRoot } from "../runtime-paths.js";

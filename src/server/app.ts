@@ -10,61 +10,91 @@ import { guardLocalRequests, localOrigins } from '../runtime/local-request-guard
 import { persistImage } from '../runtime/images.js';
 import { redactText } from '../agent/redaction.js';
 import type { ModelMessage, TurnContext } from '../agent/types.js';
-const identifier=z.string().min(1).max(200);
-const contextSchema=z.object({threadId:identifier,resourceId:identifier,runToken:identifier,namespaces:z.array(z.string()).max(8).default([]),documentRefs:z.array(z.string()).max(4).default([]),authResumeId:z.string().optional()});
+const identifier = z.string().min(1).max(200);
+const contextSchema = z.object({ threadId: identifier, resourceId: identifier, runToken: identifier, namespaces: z.array(z.string()).max(8).default([]), documentRefs: z.array(z.string()).max(4).default([]), authResumeId: z.string().optional() });
 export const app = new Hono();
-app.use('*',guardLocalRequests);
-app.use('*',cors({origin:localOrigins}));
-app.use('*',bodyLimit({maxSize:32*1024*1024}));
-app.onError((error,c)=>c.json({error:redactText(error.message)},((error as any).status??(error instanceof z.ZodError?400:500)) as any));
-app.get('/api',c=>c.json({name:'SEUdaily',runtime:'agent'}));
-app.get('/app/health',async c=>{await agentStore.ready;return c.json({status:'ready'});});
-for(const route of appRoutes)app.on(route.method,route.path,route.handler);
-app.get('/api/memory/threads',async c=>c.json({threads:await agentStore.listThreads(c.req.query('resourceId')??'',Math.min(100,Math.max(1,Number(c.req.query('perPage'))||100)),Math.max(0,Number(c.req.query('page'))||0))}));
-app.get('/api/memory/threads/:id/messages',async c=>c.json(await agentStore.listMessages({threadId:c.req.param('id'),resourceId:c.req.query('resourceId'),perPage:Math.min(1000,Math.max(1,Number(c.req.query('perPage'))||100)),page:Math.max(0,Number(c.req.query('page'))||0)})));
-app.delete('/api/memory/threads/:id',async c=>{const id=c.req.param('id');if(agentRuntime.isActive(id))return c.json({error:'当前会话正在运行，请先停止并等待完成'},409);await agentStore.deleteThread(id,c.req.query('resourceId'));return c.json({deleted:true});});
-
-async function normalizeInput(value:unknown):Promise<ModelMessage[]> {
-  const messages=typeof value==='string'?[{role:'user',content:value}]:value;
-  if(!Array.isArray(messages)||!messages.length||messages.length>8)throw new Error('无效用户消息');
-  return Promise.all(messages.map(async message=>{
-    if(message.role!=='user')throw new Error('新轮次仅接受用户消息');
-    if(typeof message.content==='string')return {role:'user' as const,content:message.content};
-    if(!Array.isArray(message.content)||message.content.length>8)throw new Error('无效消息内容');
-    const content=await Promise.all(message.content.map(async(part:any)=>{
-      if(part.type==='text'&&typeof part.text==='string')return {type:'text',text:part.text};
-      if(part.type==='file'||part.type==='image')return persistImage(part);
-      throw new Error('不支持的消息附件');
+app.use('*', guardLocalRequests);
+app.use('*', cors({ origin: localOrigins }));
+app.use('*', bodyLimit({ maxSize: 52 * 1024 * 1024 }));
+app.onError((error, c) => c.json({ error: redactText(error.message) }, ((error as any).status ?? (error instanceof z.ZodError ? 400 : 500)) as any));
+app.get('/api', c => c.json({ name: 'SEUdaily', runtime: 'agent' }));
+app.get('/api/agents', async (c) => { await agentStore.ready; return c.json({ 'seudaily-agent': { id: 'seudaily-agent', name: 'SEUdaily' } }); });
+app.get('/app/health', async (c) => { await agentStore.ready; return c.json({ status: 'ready' }); });
+for (const route of appRoutes)
+    app.on(route.method, route.path, route.handler);
+app.get('/api/memory/threads', async (c) => c.json({ threads: await agentStore.listThreads(c.req.query('resourceId') ?? '', Math.min(100, Math.max(1, Number(c.req.query('perPage')) || 100)), Math.max(0, Number(c.req.query('page')) || 0)) }));
+app.get('/api/memory/threads/:id/messages', async (c) => c.json(await agentStore.listMessages({ threadId: c.req.param('id'), resourceId: c.req.query('resourceId'), perPage: Math.min(1000, Math.max(1, Number(c.req.query('perPage')) || 100)), page: Math.max(0, Number(c.req.query('page')) || 0) })));
+app.delete('/api/memory/threads/:id', async (c) => { const id = c.req.param('id'); if (agentRuntime.isActive(id))
+    return c.json({ error: '当前会话正在运行，请先停止并等待完成' }, 409); await agentStore.deleteThread(id, c.req.query('resourceId')); return c.json({ deleted: true }); });
+async function normalizeInput(value: unknown): Promise<ModelMessage[]> {
+    const messages = typeof value === 'string' ? [{ role: 'user', content: value }] : value;
+    if (!Array.isArray(messages) || !messages.length || messages.length > 8)
+        throw new Error('无效用户消息');
+    return Promise.all(messages.map(async (message) => {
+        if (message.role !== 'user')
+            throw new Error('新轮次仅接受用户消息');
+        if (typeof message.content === 'string')
+            return { role: 'user' as const, content: message.content };
+        if (!Array.isArray(message.content) || message.content.length > 8)
+            throw new Error('无效消息内容');
+        const content = await Promise.all(message.content.map(async (part: any) => {
+            if (part.type === 'text' && typeof part.text === 'string')
+                return { type: 'text', text: part.text };
+            if (part.type === 'file' || part.type === 'image')
+                return persistImage(part);
+            throw new Error('不支持的消息附件');
+        }));
+        return { role: 'user' as const, content };
     }));
-    return {role:'user' as const,content};
-  }));
 }
-app.post('/api/agents/seudaily-agent/stream',async c=>{
-  const body=await c.req.json();
-  const request=body.requestContext??{};
-  const context:TurnContext=contextSchema.parse({threadId:body.memory?.thread,resourceId:body.memory?.resource,runToken:request.seudailyRunToken,namespaces:request.seudailyToolNamespaces,documentRefs:request.seudailyDocumentRefs,authResumeId:request.seudailyAuthResumeId});
-  const controller=new AbortController();
-  const abort=()=>controller.abort();
-  c.req.raw.signal.addEventListener('abort',abort,{once:true});
-  if(c.req.raw.signal.aborted)controller.abort();
-  let events:AsyncIterable<any>;
-  try{
-    const approval=Array.isArray(body.messages)&&body.messages.length===1&&body.messages[0].role==='tool'?body.messages[0].content?.[0]:undefined;
-    if(approval){const parsed=z.object({type:z.literal('tool-approval-response'),approvalId:identifier,approved:z.boolean(),reason:z.string().optional()}).parse(approval);events=await agentRuntime.resumeApproval(parsed,context,controller.signal);}
-    else events=await agentRuntime.runTurn(await normalizeInput(body.messages),context,controller.signal);
-  }catch(error){c.req.raw.signal.removeEventListener('abort',abort);throw error;}
-  return streamSSE(c,async stream=>{
-    stream.onAbort(abort);
-    const iterator=events[Symbol.asyncIterator]();
-    const keepAlive=setInterval(()=>{if(!stream.aborted)void stream.write(': keep-alive\n\n').catch(abort);},15_000);
-    try{
-      while(true){const next=await iterator.next();if(next.done)break;if(stream.aborted){abort();break;}await stream.writeSSE({data:JSON.stringify(next.value)});}
-      if(!stream.aborted)await stream.writeSSE({data:'[DONE]'});
-    }finally{
-      clearInterval(keepAlive);
-      abort();
-      await iterator.return?.();
-      c.req.raw.signal.removeEventListener('abort',abort);
+app.post('/api/agents/seudaily-agent/stream', async (c) => {
+    const body = await c.req.json();
+    const request = body.requestContext ?? {};
+    const context: TurnContext = contextSchema.parse({ threadId: body.memory?.thread, resourceId: body.memory?.resource, runToken: request.seudailyRunToken, namespaces: request.seudailyToolNamespaces, documentRefs: request.seudailyDocumentRefs, authResumeId: request.seudailyAuthResumeId });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    c.req.raw.signal.addEventListener('abort', abort, { once: true });
+    if (c.req.raw.signal.aborted)
+        controller.abort();
+    let events: AsyncIterable<any>;
+    try {
+        const approval = Array.isArray(body.messages) && body.messages.length === 1 && body.messages[0].role === 'tool' ? body.messages[0].content?.[0] : undefined;
+        if (approval) {
+            const parsed = z.object({ type: z.literal('tool-approval-response'), approvalId: identifier, approved: z.boolean(), reason: z.string().optional() }).parse(approval);
+            events = await agentRuntime.resumeApproval(parsed, context, controller.signal);
+        }
+        else
+            events = await agentRuntime.runTurn(await normalizeInput(body.messages), context, controller.signal);
     }
-  });
+    catch (error) {
+        c.req.raw.signal.removeEventListener('abort', abort);
+        throw error;
+    }
+    return streamSSE(c, async (stream) => {
+        stream.onAbort(abort);
+        const iterator = events[Symbol.asyncIterator]();
+        const keepAlive = setInterval(() => { if (!stream.aborted)
+            void stream.write(': keep-alive\n\n').catch(abort); }, 15000);
+        try {
+            while (true) {
+                const next = await iterator.next();
+                if (next.done)
+                    break;
+                if (stream.aborted) {
+                    abort();
+                    break;
+                }
+                await stream.writeSSE({ data: JSON.stringify(next.value) });
+            }
+            if (!stream.aborted)
+                await stream.writeSSE({ data: '[DONE]' });
+        }
+        finally {
+            clearInterval(keepAlive);
+            abort();
+            await iterator.return?.();
+            await agentRuntime.discardUnstartedTurn(context);
+            c.req.raw.signal.removeEventListener('abort', abort);
+        }
+    });
 });

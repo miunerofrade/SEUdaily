@@ -1,6 +1,6 @@
 # SEUdaily
 
-SEUdaily 是一个面向日常学习与校园生活的本地优先 Web 助手。它以 Mastra 负责编排、记忆与流式事件，以 React/Vite 提供对话工作台，并由 Python 自动化核心完成课程门户、课表、教务通知、字幕、媒体和语音处理。
+SEUdaily 是一个面向日常学习与校园生活的本地优先 Web 助手。它使用独立 TypeScript Agent 循环处理模型调用、工具执行、会话记忆与流式事件，以 React/Vite 提供对话工作台，并由 Python 自动化核心完成课程门户、课表、教务通知、字幕、媒体和语音处理。
 
 当前稳定版本为 **1.1.0**。主要能力包括：
 
@@ -29,17 +29,14 @@ apps/
         ├── api.ts                # Agent、记忆与应用 API 客户端
         └── markdown.ts           # Markdown/KaTeX 规范化
 src/
-├── mastra/
-│   ├── agents/course-agent.ts     # SEUdaily 行为、提示词与工具授权
-│   ├── app-routes.ts              # 课表、资料、图片、通知与设置 API
-│   ├── image-reference-processor.ts # 历史图片引用解析与缺失 fallback
-│   ├── tools/course-tools.ts      # Mastra 工具及输入 Schema
-│   ├── tools/task-result-tool.ts  # 完整任务结果的受限分页读取
-│   ├── tools/python-bridge.ts     # 常驻 Python Worker JSONL 桥
-│   ├── workspace.ts               # 项目文件、终端与后台进程工具
-│   ├── native-command-sandbox.ts  # WSL2/Bubblewrap 与宿主机 fallback
-│   ├── storage.ts                 # LibSQL 对话记忆与上下文压缩
-│   └── runtime-paths.ts           # 稳定的项目/运行时路径
+├── agent/                       # 模型循环、审批、会话存储与按需摘要
+├── server/                      # 本地 HTTP 路由和 SSE 适配
+├── runtime/                     # 业务工具、附件、浏览器与工作区适配
+│   ├── instructions.ts          # SEUdaily 行为与领域 Skill
+│   ├── app-routes.ts            # 课表、资料、图片、通知与设置 API
+│   ├── tools/python-bridge.ts   # 常驻 Python Worker JSONL 桥
+│   ├── workspace.ts             # 项目文件、终端与后台进程工具
+│   └── runtime-paths.ts         # 项目和运行数据路径
 └── seudaily/
     ├── service.py                 # 与 UI 无关的业务服务
     ├── cli.py                     # JSON 工具协议入口
@@ -63,7 +60,7 @@ Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量�
 
 要求：Node.js 22.22+（22.x）或 24.12+、npm 10+、Python 3.13 和 uv。校园门户与浏览器工具按平台选择 Windows Edge、macOS WebKit、Linux Firefox；媒体抓取、云 ASR 和视频抽帧需要系统 FFmpeg。基础对话、通知和文档解析不需要 FFmpeg。Windows 上推荐启用 WSL2 Ubuntu；终端沙盒不依赖 Docker Desktop。
 
-如果 `cd` 时 fnm 提示找不到 Node，本项目及 Mastra 1.x 无法支持 Node 20。锁文件的 Babel、日志和 Linux 可选压缩依赖要求更高的 Node 补丁版本，因此用 Node 22 最新版本，不能只降低 `engines`。项目 `.node-version` 指向 22，使用已有 fnm：
+如果 `cd` 时 fnm 提示找不到 Node，当前保留 Node 22 的版本要求，待独立运行时稳定后再验证最低支持版本。项目 `.node-version` 指向 22，使用已有 fnm：
 
 ```bash
 fnm install 22
@@ -144,7 +141,6 @@ seudaily start
 命令会等待两个服务就绪，然后显示：
 
 - Web 工作台：`http://127.0.0.1:4173`
-- Studio Agent 页面：`http://localhost:4111/agents`
 - Agent API：`http://localhost:4111/api`
 
 后端和前端日志分别写入 `.seudaily/logs/backend.log` 与 `.seudaily/logs/web.log`。按 `Ctrl+C` 会同时停止两个服务。
@@ -162,29 +158,23 @@ npm run dev:web
 npm run dev:all
 ```
 
-前端通过 Vite 代理访问本机 Agent API。会话和消息以 `.seudaily/mastra/mastra.db` 为主存储，不同浏览器读取同一服务端历史；浏览器本地存储只用于兼容旧记录与短暂 fallback。删除会话会同时清理服务端线程和本地镜像。
+前端通过 Vite 代理访问本机 Agent API。会话和消息以 `.seudaily/agent.db` 为主存储，旧 `.seudaily/mastra/mastra.db` 首次以只读方式导入并保留，不同浏览器读取同一服务端历史；浏览器本地存储只用于兼容旧记录与短暂 fallback。删除会话会同时清理服务端线程和本地镜像。
 
-`npm run dev` 与 `npm start` 等价，适合开发时使用：
+`npm run dev` 会监听后端源码变化并重启服务：
 
 ```bash
 npm run dev
 ```
 
-如需运行构建后的服务：
+查看启动器帮助或版本：
 
 ```bash
-npm run build
-npm run start:server
+uv run seudaily --help
+uv run seudaily start --help
+uv run seudaily --version
 ```
 
-检查项目（打包会自动执行类型、Node 行为测试和发布白名单检查）：
-
-```bash
-npm run typecheck
-npm run test:tools
-uv run pytest
-npm pack
-```
+检查类型：`npm run typecheck`。当前使用源码和 Vite 启动，不需要生产构建。
 
 ## Web workspace
 
@@ -216,26 +206,26 @@ echo '{"requestId":"health-1","taskId":"task-health","action":"health","payload"
 
 ### 1.x compatibility identifiers
 
-产品、代码与新包元数据统一使用 **SEUdaily** / `seudaily`。Python 正式包目录为 `src/seudaily`，旧 `cvstream.*` 导入由薄兼容包转发；新运行数据目录为 `.seudaily`，环境变量使用 `SEUDAILY_*`。为兼容旧安装，`cvstream-tool` / `cvstream-worker` 仍是命令别名；旧 `CVSTREAM_*` 环境变量只在对应 `SEUDAILY_*` 未设置时作为 fallback。浏览器会话键、Mastra 资源 ID、附件标记、图片引用和请求上下文均使用新名称写入，并在读取历史值时接受旧名称。
+产品、代码与新包元数据统一使用 **SEUdaily** / `seudaily`。Python 正式包目录为 `src/seudaily`，旧 `cvstream.*` 导入由薄兼容包转发；新运行数据目录为 `.seudaily`，环境变量使用 `SEUDAILY_*`。为兼容旧安装，`cvstream-tool` / `cvstream-worker` 仍是命令别名；旧 `CVSTREAM_*` 环境变量只在对应 `SEUDAILY_*` 未设置时作为 fallback。浏览器会话键、会话资源 ID、附件标记、图片引用和请求上下文均使用新名称写入，并在读取历史值时接受旧名称。
 
-首次启动时会把 `.cvstream` 的文件逐项迁移到 `.seudaily`。目标目录已有同名文件时以 `.seudaily` 为准，旧文件保留在 `.seudaily/.migration-conflicts/cvstream/`；迁移状态写入 `.migration-cvstream-v1.json`。每个文件原子移动或先完整复制再删除来源，失败和中断会保留来源并在下次启动重试；符号链接或权限错误会写入 `.migration-status.json` 并中止启动，待问题修复后重试。迁移完成后应用只向 `.seudaily` 写入。Mastra 对话、线程与 Observational Memory 保存在 `.seudaily/mastra/mastra.db`，不再受 Studio 当前工作目录变化影响。默认上下文预算为 512000 tokens，未压缩消息达到 80%（409600 tokens）时同步启动 Observation；提前后台 buffering 已关闭。最近消息数量上限设为 200，防止在达到 token 阈值前仅因消息条数过早丢失历史，并最多带入 1500 tokens 的既有观察。窗口、比例和消息数量均可通过 `SEUDAILY_*` 环境变量调整，也可用 `SEUDAILY_OBSERVATIONAL_MEMORY=false` 临时关闭压缩。`SEUDAILY_OBSERVATION_MESSAGE_TOKENS` 可作为高级配置直接覆盖计算后的阈值。
+首次启动时会把 `.cvstream` 的文件逐项迁移到 `.seudaily`。目标目录已有同名文件时以 `.seudaily` 为准，旧文件保留在 `.seudaily/.migration-conflicts/cvstream/`；迁移状态写入 `.migration-cvstream-v1.json`。每个文件原子移动或先完整复制再删除来源，失败和中断会保留来源并在下次启动重试；符号链接或权限错误会写入 `.migration-status.json` 并中止启动，待问题修复后重试。迁移完成后应用只向 `.seudaily` 写入。会话原文保存在 `.seudaily/agent.db`。旧 Mastra 数据库保留；线程、消息和旧观察记忆通过事务导入，完成后写入迁移标记。上下文默认预算为 512000 tokens，预留 8192 tokens 给回答，在可用预算达到 80% 或未压缩消息超过 200 条时，用当前模型整理旧的完整轮次为结构化摘要，优先保留最近 8 轮和本轮原文。摘要单独保存，历史原文不删除；大工具结果通过 `resultRef` 按需读取。`SEUDAILY_CONTEXT_WINDOW_TOKENS`、`SEUDAILY_OBSERVATION_COMPRESSION_RATIO` 和 `SEUDAILY_MEMORY_LAST_MESSAGES` 继续可用，旧观察器专用开关和阈值不再使用。
 
-Mastra 启动一个长期运行的 Python Worker，而不是每次工具调用都打开 PowerShell 和浏览器。普通抓取使用系统 Microsoft Edge 的无头模式，并统一静音；同一门户复用 Browser Context，每个任务使用独立 Page。只有登录、验证码或二次确认会临时打开可见浏览器。Studio 的停止信号会先请求任务协作取消，未能及时退出时再清理 Worker 及其子进程树。
+工具首次使用时启动一个长期运行的 Python Worker，而不是每次工具调用都打开 PowerShell 和浏览器。普通抓取根据平台使用 Edge（Windows）、WebKit（macOS）或 Firefox（Linux）的无头模式，并统一静音；同一门户复用 Browser Context，每个任务使用独立 Page。只有登录、验证码或二次确认会临时打开可见浏览器。Web 的停止信号会先请求任务协作取消，未能及时退出时再清理 Worker 及其子进程树。
 
 Web 端通过 SSE 接收回答、reasoning 和工具事件。reasoning 仅展示 Provider 实际返回的 reasoning 流；工具过程使用紧凑行展示，在最终回答出现后默认折叠。工具完整结果仍以 `resultRef` 落盘，避免把大对象反复写入上下文。
 
 工具结果采用统一结构：`status`、`taskId`、`summary`、`data`、`artifacts`、`citations`、`warnings`、`metrics`。完整清洗结果写入 `.seudaily/tasks/<taskId>/result.json`，对话只保存经过列表、字符串和层级限制的结果及 `resultRef`；大段日志另存为 `diagnostics.json`。传给模型的关键数据最多约 6000 字符，并继续执行敏感信息脱敏。课程总结正文使用 `[S1]` 形式的行内引用，并在末尾生成来源表。
 
-Agent Workspace 的文件系统被限制在项目根目录。读取、列目录、文件状态和正文搜索可直接执行；写入、编辑、建目录、终端命令和终止后台进程会在 Studio 中请求审批；删除工具关闭。
+Agent Workspace 的文件系统被限制在项目根目录。读取、列目录、文件状态和正文搜索可直接执行；写入、编辑、建目录、终端命令和终止后台进程会在 Web 中按权限模式请求审批；工作区仅在 extra 模式提供。
 
-Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙盒。宿主机项目只读映射到 `/project`，`.seudaily/sandbox-workspace` 作为可写、持久的 `/workspace`；沙盒只挂载运行命令所需的 Linux 系统目录，清空继承环境，并默认隔离网络。Mastra 继续负责无窗口启动、输出流、超时、后台进程和进程树终止。课程 Python Worker、Playwright 浏览器、FFmpeg 与 ASR 仍在宿主机运行。
+Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙盒。宿主机项目只读映射到 `/project`，`.seudaily/sandbox-workspace` 作为可写、持久的 `/workspace`；沙盒只挂载运行命令所需的 Linux 系统目录，清空继承环境，并默认隔离网络。独立运行时负责无窗口启动、输出流、超时、后台进程和进程树终止。macOS 使用 Seatbelt、Linux 使用 Bubblewrap；缺少隔离能力时明确标记为 host-fallback。课程 Python Worker、Playwright 浏览器与媒体处理仍在宿主机运行。
 
-如果 WSL2、指定发行版或 `bwrap` 不可用，启动时会自动降级为宿主机 `LocalSandbox`。Fallback 仍使用固定暂存目录、最小环境变量、无窗口进程与超时控制，但不提供操作系统级文件或网络隔离。可通过 `SEUDAILY_WSL_SANDBOX=false` 主动使用 fallback；`SEUDAILY_SANDBOX_NETWORK=true` 仅影响 WSL/Bubblewrap 模式。Ubuntu 中安装 Bubblewrap：`wsl -d Ubuntu-24.04 -u root -- apt-get install -y bubblewrap`。
+如果 WSL2、指定发行版或 `bwrap` 不可用，启动时会自动降级为宿主机执行模式。Fallback 仍使用固定暂存目录、最小环境变量、无窗口进程与超时控制，但不提供操作系统级文件或网络隔离。可通过 `SEUDAILY_WSL_SANDBOX=false` 主动使用 fallback；`SEUDAILY_SANDBOX_NETWORK=true` 影响原生沙盒模式。Ubuntu 中安装 Bubblewrap：`wsl -d Ubuntu-24.04 -u root -- apt-get install -y bubblewrap`。
 
 ## Available tools
 
 - `authorize-course-portal`：打开可见浏览器并更新登录会话。
-- `authorize-schedule-portal`：默认清理旧的 eHall Cookie，在全新的可见窗口中自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。它只清理课表门户会话，不会删除 Mastra 对话或课表缓存；如需保留 Cookie，可传 `resetSession: false`。
+- `authorize-schedule-portal`：默认清理旧的 eHall Cookie，在全新的可见窗口中自动填写环境变量中的账号密码并提交普通登录；VPN 二次确认或验证码由用户在可见窗口完成。它只清理课表门户会话，不会删除 历史对话或课表缓存；如需保留 Cookie，可传 `resetSession: false`。
 - `get-course-schedule`：默认读取当前学期的完整课表，返回全部课程，不截取前 12 门；可传 `semester: "2025-2026-2"` 切换并读取往年课表。传 `date: "YYYY-MM-DD"` 时按学期起始日期、教学周、星期、单双周和日期调整筛选当天课程；`date` 省略或为空时返回完整课表。通常 `1=暑期学校`、`2=秋季学期`、`3=春季学期`，但实际可用值始终以学校动态返回的 `availableSemesters` 为准，其他数字尾码也会保留。各学期使用独立缓存。联网同步默认复用登录会话直接请求接口，抓取上海时区当前年份减 4 年对应学年起的全部可选学期（2026 年从 2022–2023 学年起），不逐个点击学期。设置 `prefetchAvailableSemesters: false` 可只同步选中学期；本地读取保持离线。`includeAvailableSemesters: true` 返回此范围内的动态学期列表。返回值还包含 `currentSemester`、`currentSemesterLabel`、`selectedSemester`、`selectedSemesterLabel` 和批量同步结果。
 - `get-current-date`：返回 Asia/Shanghai 当前日期、星期和时间戳，供“今天/明天”等相对日期查询使用；不应通过终端命令或读取本地文件获取日期。
 - 当前远端课表保存在 `.seudaily/schedule.json`，指定往年学期的课表保存在 `.seudaily/schedule.<semester>.json`；学期展示设置和用户修改保存在 `.seudaily/schedule-user.json`，重新抓取不会覆盖用户修改。Focus 规则、事件与任务幂等记录保存在 `.seudaily/focus.json`。
@@ -256,10 +246,10 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 - `web-search`：通过 Tavily 查询公共互联网，返回网页摘要、原始链接和 `W1`/`W2` 引用；未配置 `TAVILY_API_KEY` 时返回明确的配置错误。
 - `read-web-page`：本地读取一个明确的公开 HTTP(S) URL，提取网页正文，并在正文为空、过短、提示“详见附件”或问题明确询问附件时，按需解析页面实际发现的 PDF、DOCX、XLSX、PPTX。附件只下载到系统临时目录，解析后立即删除；教务处与计软智页面统一使用此工具。
 - `fetch-web-pages`：通过 Tavily Extract 从最多 5 个明确公共 URL 中提取与 query 最相关的正文片段，返回 `F1`/`F2` 引用；拒绝本地、私网、带凭据或敏感签名参数的 URL。
-- `playwright_browser_*`：仅暴露导航、无障碍树快照、快照查找、点击、输入、下拉选择、按键和标签页 8 个工具。独立浏览器会话不共享 Python Worker 的门户登录状态；点击、输入、选择、按键等交互需要 Studio 审批。
+- `playwright_browser_*`：仅暴露导航、无障碍树快照、快照查找、点击、输入、下拉选择、按键和标签页 8 个工具。独立浏览器会话不共享 Python Worker 的门户登录状态；点击、输入、选择、按键等交互需要 Web 审批。
 - `mastra_workspace_read_file`、`list_files`、`file_stat`、`grep`：读取和搜索项目内文件，结果设有 token 上限。
 - `mastra_workspace_write_file`、`edit_file`、`mkdir`：经用户审批后修改项目文件；覆盖现有文件前要求先读取。
-- `mastra_workspace_execute_command`：经用户审批后优先在 WSL/Bubblewrap 的 `/workspace` 暂存区执行前台或后台命令；宿主项目在 `/project` 只读可见。WSL 不可用时自动退回宿主机暂存目录。默认超时 120 秒，可通过 `SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS` 调整。
+- `mastra_workspace_execute_command`：经用户审批后在暂存区执行前台或后台命令；Windows 优先使用 WSL2/Bubblewrap（只读 `/project`、可写 `/workspace`），macOS 使用 Seatbelt，Linux 使用 Bubblewrap，默认禁用网络。原生隔离不可用时使用明确标记的 `host-fallback`。默认超时 120 秒，可通过 `SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS` 调整。
 - `mastra_workspace_get_process_output`、`kill_process`：查看或经审批终止 Workspace 自己启动的后台进程。
 
 请仅处理本人具有合法访问权限的课程内容。

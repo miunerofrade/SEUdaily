@@ -1,4 +1,4 @@
-import { createTool } from "./create-tool.js";
+import { defineTool as createTool } from "../../agent/tool.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 

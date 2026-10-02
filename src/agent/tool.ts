@@ -11,7 +11,7 @@ export interface ToolDefinition<S extends z.ZodType = any, O = any> {
   inputSchema: S;
   outputSchema?: z.ZodType;
   execute: (input: z.output<S>, options: ToolExecutionOptions) => O | Promise<O>;
-  requireApproval?: boolean | ((input: z.output<S>) => boolean | Promise<boolean>);
+  requireApproval?: boolean | ((input: z.output<S>, options: ToolExecutionOptions) => boolean | Promise<boolean>);
   toModelOutput?: (output: any) => { type: string; value: any } | Promise<{ type: string; value: any }>;
 }
 

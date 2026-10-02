@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createTool } from "./create-tool.js";
+import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
 
 import { isUnapprovedAccessEnabled } from "../permission-state.js";
@@ -98,9 +98,16 @@ async function validateInput(tool: AnyTool, value: unknown) {
   return result?.value ?? value;
 }
 
-function ticketFor(id: string, runToken: string) {
+async function ticketFor(id: string, runToken: string, options: any) {
   pruneTickets();
-  const ticket = tickets.get(id);
+  let ticket = tickets.get(id);
+  if (!ticket) {
+    const saved = options?.requestContext?.get?.("seudailyCapabilityTickets")?.find((entry: any) => entry.id === id);
+    if (saved && saved.expiresAt > Date.now()) {
+      const capability = (await allCapabilities(saved.namespace === "browser")).find(item => item.tool.id === saved.name && item.namespace === saved.namespace);
+      if (capability) ticket = { id, runToken, capability, expiresAt: saved.expiresAt };
+    }
+  }
   if (!ticket || ticket.runToken !== runToken) throw new Error("能力票据不存在、已过期或不属于当前运行");
   return ticket;
 }
@@ -121,7 +128,10 @@ export const searchCapabilitiesTool = createTool({
       .slice(0, 5);
     const results = capabilities.map(({ item }) => {
       const id = `cap-${randomUUID()}`;
-      tickets.set(id, { id, runToken, capability: item, expiresAt: Date.now() + ticketLifetimeMs });
+      const expiresAt = Date.now() + ticketLifetimeMs;
+      tickets.set(id, { id, runToken, capability: item, expiresAt });
+      const saved = options?.requestContext?.get?.("seudailyCapabilityTickets");
+      if (Array.isArray(saved)) { saved.splice(0, saved.length, ...saved.filter((entry: any) => entry.expiresAt > Date.now()).slice(-50)); saved.push({ id, name: item.tool.id, namespace: item.namespace, expiresAt }); }
       return { ticket: id, namespace: item.namespace, name: item.tool.id, description: item.tool.description, inputSchema: jsonSchema(item.tool) };
     });
     return { results, count: results.length, expiresInSeconds: ticketLifetimeMs / 1_000 };
@@ -132,12 +142,12 @@ export const invokeCapabilityTool = createTool({
   id: "invoke-capability",
   description: "使用 search-capabilities 在当前运行中签发的 ticket 调用对应能力。不接受工具名，ticket 与线程、运行和具体能力绑定。",
   inputSchema: z.object({ ticket: z.string().startsWith("cap-"), arguments: z.record(z.string(), z.unknown()).default({}) }).strict(),
-  requireApproval: async ({ ticket }: { ticket: string }) => {
-    const entry = tickets.get(ticket);
+  requireApproval: async ({ ticket }: { ticket: string }, options) => {
+    const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
     return Boolean(entry?.capability.approvalRequired && !isUnapprovedAccessEnabled());
   },
   execute: async ({ ticket, arguments: input }, options) => {
-    const entry = ticketFor(ticket, requestValue(options, "seudailyRunToken"));
+    const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
     const parsed = await validateInput(entry.capability.tool, input);
     if (!entry.capability.tool.execute) throw new Error(`能力 ${entry.capability.tool.id} 不可执行`);
     const output = await entry.capability.tool.execute(parsed, options as any);

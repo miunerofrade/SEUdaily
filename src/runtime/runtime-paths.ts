@@ -146,14 +146,8 @@ function migrateLegacyRuntimeDirectory(): void {
 migrateLegacyRuntimeDirectory();
 
 export const runtimeRoot = resolve(projectRoot, ".seudaily");
-export const mastraRuntimeRoot = resolve(runtimeRoot, "mastra");
 export const taskRuntimeRoot = resolve(runtimeRoot, "tasks");
 export const sandboxWorkspaceRoot = resolve(runtimeRoot, "sandbox-workspace");
 
-mkdirSync(mastraRuntimeRoot, { recursive: true });
 mkdirSync(taskRuntimeRoot, { recursive: true });
 mkdirSync(sandboxWorkspaceRoot, { recursive: true });
-
-export function toLibSqlFileUrl(path: string): string {
-  return `file:${resolve(path).replaceAll("\\", "/")}`;
-}

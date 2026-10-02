@@ -10,8 +10,10 @@ import sys
 import time
 from pathlib import Path
 from typing import IO
+from urllib.request import urlopen
 
 from .runtime_paths import env_value, runtime_root
+from . import __version__
 
 
 BACKEND_PORT = 4111
@@ -73,7 +75,7 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
-        # npm can exit before Mastra and its MCP/worker children finish draining.
+        # npm can exit before the Agent and its MCP/worker children finish draining.
         # Wait for the whole session, so immediate restarts do not hit a live lock.
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -93,13 +95,21 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
+def _backend_ready() -> bool:
+    try:
+        with urlopen(f"http://127.0.0.1:{BACKEND_PORT}/app/health", timeout=0.5) as response:
+            return response.status == 200
+    except OSError:
+        return False
+
+
 def _wait_until_ready(processes: list[subprocess.Popen[bytes]], timeout: float = 45) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         failed = next((process for process in processes if process.poll() is not None), None)
         if failed:
             raise RuntimeError(f"服务进程提前退出（退出码 {failed.returncode}）。")
-        if _port_open(BACKEND_PORT) and _port_open(WEB_PORT):
+        if _port_open(WEB_PORT) and _backend_ready():
             return
         time.sleep(0.25)
     raise RuntimeError("服务启动超时，请检查日志。")
@@ -126,7 +136,6 @@ def start() -> int:
             _wait_until_ready(processes)
             print("\nSEUdaily 已启动")
             print(f"  Web:       http://127.0.0.1:{WEB_PORT}")
-            print(f"  Studio:    http://127.0.0.1:{BACKEND_PORT}")
             print(f"  Agent API: http://127.0.0.1:{BACKEND_PORT}/api")
             print(f"  日志:      {log_dir}")
             print("\n按 Ctrl+C 停止。", flush=True)
@@ -155,6 +164,7 @@ def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(prog="seudaily", description="SEUdaily 本地服务启动器")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("start", help="同时启动 Agent 后端和 Web 前端")
     args = parser.parse_args()

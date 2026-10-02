@@ -8,6 +8,7 @@ import { envValue, projectRoot } from "./runtime-paths.js";
 import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
 import { agentStore } from "./storage.js";
+import { agentRuntime } from "./application.js";
 import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, type FocusAgentItem } from "./focus-runtime.js";
 import { isFullAccessEnabled, isFullAccessExtraEnabled, setFullAccessEnabled, setFullAccessExtraEnabled } from "./permission-state.js";
 import { storeDocumentContext } from "./document-context.js";
@@ -456,6 +457,7 @@ export const appRoutes = [
       const listed = await runPythonTool<ToolResult>("list-focus", {});
       const listData = await fullResultData(listed) as { items?: FocusAgentItem[] };
       const focus = listData.items?.find((item) => item.id === focusId);
+      if (focus?.threadId && agentRuntime.isActive(focus.threadId)) return c.json({ error: "当前关注会话正在运行，请先停止并等待完成" }, 409);
       const result = await runPythonTool<ToolResult>("delete-focus", { focusId });
       if (focus?.threadId) await agentStore.deleteThread(focus.threadId).catch(() => undefined);
       return c.json(resultResponse(result));

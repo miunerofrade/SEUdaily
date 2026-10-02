@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { createTool } from "./create-tool.js";
+import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
 
 import { standardToolOutput, type ToolResult } from "./tool-result.js";
