@@ -7,7 +7,16 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "jsx": "react-jsx"
   },
-  "include": ["src/agent/**/*.ts", "src/runtime/**/*.ts", "src/server/**/*.ts"]
+  "include": [
+    "src/agent/**/*.ts",
+    "src/runtime/**/*.ts",
+    "src/server/**/*.ts",
+    "src/terminal/**/*.ts",
+    "src/terminal/**/*.tsx"
+  ]
 }

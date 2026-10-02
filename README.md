@@ -178,7 +178,7 @@ uv run seudaily --version
 
 ## CLI / TUI（cli 分支）
 
-`cli` 分支提供 prompt_toolkit 终端界面，复用现有 Node Agent 和本地数据库。CLI 代码与依赖留在该分支；通用 Skill、Web Skill 选择、课表查询和取消修复已同步到 `main`。不需要生产构建或安装 Torch。
+`cli` 分支提供 Ink / React / TypeScript 全屏终端界面，复用现有 Node Agent 和本地数据库。Python 仅保留 uv 启动和进程管理，终端业务与界面均由 TypeScript 实现。CLI 代码与依赖留在该分支；通用 Skill、Web Skill 选择、课表查询和取消修复已同步到 `main`。不需要生产构建或安装 Torch。
 
 ```bash
 uv sync
@@ -195,7 +195,7 @@ uv run seudaily sessions
 
 激活 `.venv` 后可以直接输入 `seudaily`。`--cwd` 选择本仓库目录，`--no-start` 只连接已有后端，`--timeout` 设置 HTTP 读取超时，`--skill NAME` 显式选择 Skill，`--vi` 切换输入按键，`--no-color` 禁用颜色，`-q/--quiet` 隐藏工具过程。帮助和版本不会初始化后端、数据库、模型或 Worker。
 
-没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。聊天采用全屏 TUI：对话区独立滚动，底部固定多行输入框和运行状态，支持基础 Markdown 显示。PgUp/PgDn 或鼠标滚轮查看历史，Ctrl+End 返回最新回答；退出后恢复原终端画面。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，Tab 补全，上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 在空输入时退出。多行粘贴不会自动发送。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
+没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。聊天采用 Ink 全屏 TUI：对话区独立滚动，底部固定多行输入框和运行状态，支持基础 Markdown 显示。PgUp/PgDn 或鼠标滚轮查看历史，Ctrl+End 返回最新回答；退出后恢复原终端画面。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，Tab 补全，上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 在空输入时退出。多行粘贴不会自动发送。启动器优先使用满足要求的当前 Node；当前版本不兼容时可使用 fnm 中已有的 22.x，不修改 Shell 默认版本。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
 
 主要斜杠命令：
 
@@ -218,6 +218,8 @@ uv run seudaily sessions
 | `/cancel`、`/quit` | 取消、退出 |
 
 项目 Skill 位于 `.agent/skills/<名称>/SKILL.md`，包含 YAML `name`、`description`，可选 `namespaces` 列表。目录可通过 `/skills` 刷新，`/名称 问题` 可直接调用；模型也能通过 `list-skills`、`read-skill` 发现和加载规则，参考资料限定在该 Skill 的 `references/*.md` 内。当前提供 `training-plan-audit`。
+
+`/schedule` 打开课表页面：Tab 切换学期、周次、课程搜索与详情；Enter 选择，↑↓ 选行，鼠标点击查看详情。宽窗口按 g 切换星期 × 节次周课表，滚轮查看其余节次；窄窗口使用列表。`/programs` 打开培养方案页面，支持方案、修读状态与课程搜索，显示官方已修学分和毕业要求；选中课程查看完整信息。r 显式同步，默认只读缓存。Esc 返回聊天。审批与本地修改使用独立确认面板，默认选中拒绝。
 
 单次模式的标准输出为回答，`--json` 为逐行 SSE 事件对象；诊断写标准错误。退出码：0 完成、1 失败、2 参数错误、3 等待审批、130 中断。等待审批时用提示中的会话 ID 进入 TUI，再执行 `/approve` 或 `/reject`；不会自动批准或重放工具。校园网异常只显示“需要校园网环境”，不重试。
 

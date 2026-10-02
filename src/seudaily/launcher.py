@@ -44,6 +44,24 @@ def _npm_executable() -> str:
     return executable
 
 
+def _runtime_prefix() -> list[str]:
+    """Use a compatible installed Node without changing the user's shell."""
+    node = shutil.which("node")
+    def supported(command: list[str]) -> bool:
+        try:
+            version = subprocess.check_output([*command, "--version"], text=True, stderr=subprocess.DEVNULL).strip().lstrip("v")
+            major, minor, *_ = [int(part) for part in version.split(".")]
+            return major == 22 and minor >= 22 or major == 24 and minor >= 12 or major > 24
+        except (OSError, subprocess.CalledProcessError, ValueError):
+            return False
+    if node and supported([node]):
+        return []
+    fnm = shutil.which("fnm")
+    if fnm and supported([fnm, "exec", "--using", "22", "node"]):
+        return [fnm, "exec", "--using", "22"]
+    raise RuntimeError("需要 Node.js 22.22+（22.x）或 24.12+；请安装或切换到兼容版本。")
+
+
 def _port_open(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.25):
@@ -131,7 +149,7 @@ def backend_session(root: Path, *, auto_start: bool = True, verbose: bool = Fals
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "cli-backend.log"
     with log_path.open("wb") as log:
-        process = _spawn([_npm_executable(), "start"], root, log)
+        process = _spawn([*_runtime_prefix(), _npm_executable(), "start"], root, log)
         try:
             deadline = time.monotonic() + 45
             while not _backend_ready():
@@ -173,8 +191,8 @@ def start() -> int:
     with backend_path.open("wb") as backend_log, web_path.open("wb") as web_log:
         processes: list[subprocess.Popen[bytes]] = []
         try:
-            processes.append(_spawn([npm, "start"], root, backend_log))
-            processes.append(_spawn([npm, "run", "dev:web"], root, web_log))
+            processes.append(_spawn([*_runtime_prefix(), npm, "start"], root, backend_log))
+            processes.append(_spawn([*_runtime_prefix(), npm, "run", "dev:web"], root, web_log))
             _wait_until_ready(processes)
             print("\nSEUdaily 已启动")
             print(f"  Web:       http://127.0.0.1:{WEB_PORT}")
@@ -304,9 +322,24 @@ def main() -> None:
             raise SystemExit(start())
         root = _project_root(args.cwd)
         os.environ["SEUDAILY_PROJECT_ROOT"] = str(root)
-        from .terminal import run_terminal
         with backend_session(root, auto_start=not args.no_start, verbose=args.verbose):
-            raise SystemExit(run_terminal(args, command, root))
+            node = shutil.which("node")
+            if not node:
+                raise RuntimeError("找不到 Node.js，请先安装项目要求的版本。")
+            options = {**vars(args), "command": command, "cwd": str(root)}
+            environment = {**os.environ, "SEUDAILY_CLI_OPTIONS": json.dumps(options, ensure_ascii=False)}
+            prefix = _runtime_prefix()
+            process = subprocess.Popen([*prefix, "node" if prefix else node, str(root / "node_modules/tsx/dist/cli.mjs"), str(root / "src/terminal/main.tsx")], cwd=root, env=environment)
+            try:
+                raise SystemExit(process.wait())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
     except KeyboardInterrupt:
         raise SystemExit(130) from None
     except RuntimeError as error:
