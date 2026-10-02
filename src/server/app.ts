@@ -13,7 +13,7 @@ import type { ModelMessage, TurnContext } from '../agent/types.js';
 import { inferToolNamespaces } from '../agent/namespaces.js';
 import { skillCatalog } from '../runtime/skills.js';
 const identifier = z.string().min(1).max(200);
-const contextSchema = z.object({ threadId: identifier, resourceId: identifier, runToken: identifier, namespaces: z.array(z.string()).max(8).default([]), skills: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/)).max(8).default([]), documentRefs: z.array(z.string()).max(4).default([]), authResumeId: z.string().optional() });
+const contextSchema = z.object({ threadId: identifier, resourceId: identifier, runToken: identifier, namespaces: z.array(z.string()).max(8).default([]), skills: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/)).max(8).default([]), interface: z.enum(['web', 'cli']).default('web'), documentRefs: z.array(z.string()).max(4).default([]), authResumeId: z.string().optional() });
 export const app = new Hono();
 app.use('*', guardLocalRequests);
 app.use('*', cors({ origin: localOrigins }));
@@ -43,9 +43,8 @@ app.post('/api/memory/threads/:id/cancel', async c => {
     const resourceId = identifier.parse(c.req.query('resourceId'));
     const thread = await agentStore.getThreadById({ threadId: c.req.param('id'), resourceId });
     if (!thread) return c.json({ error: '会话不存在' }, 404);
-    const active = agentRuntime.isActive(thread.id);
-    agentRuntime.cancelTurn(thread.id);
-    return c.json({ cancelled: active });
+    const body = z.object({ runToken: identifier.optional() }).parse(await c.req.json().catch(() => ({})));
+    return c.json({ cancelled: agentRuntime.cancelTurn(thread.id, body.runToken) });
 });
 app.delete('/api/memory/threads/:id', async (c) => { const id = c.req.param('id'); if (agentRuntime.isActive(id))
     return c.json({ error: '当前会话正在运行，请先停止并等待完成' }, 409); await agentStore.deleteThread(id, c.req.query('resourceId')); return c.json({ deleted: true }); });
@@ -73,7 +72,7 @@ async function normalizeInput(value: unknown): Promise<ModelMessage[]> {
 app.post('/api/agents/seudaily-agent/stream', async (c) => {
     const body = await c.req.json();
     const request = body.requestContext ?? {};
-    const context: TurnContext = contextSchema.parse({ threadId: body.memory?.thread, resourceId: body.memory?.resource, runToken: request.seudailyRunToken, namespaces: request.seudailyToolNamespaces, skills: request.seudailySkills, documentRefs: request.seudailyDocumentRefs, authResumeId: request.seudailyAuthResumeId });
+    const context: TurnContext = contextSchema.parse({ threadId: body.memory?.thread, resourceId: body.memory?.resource, runToken: request.seudailyRunToken, namespaces: request.seudailyToolNamespaces, skills: request.seudailySkills, interface: request.seudailyInterface, documentRefs: request.seudailyDocumentRefs, authResumeId: request.seudailyAuthResumeId });
     const catalog = await skillCatalog.list();
     for (const name of context.skills ?? []) if (!catalog.some(skill => skill.name === name)) return c.json({ error: `Skill 不存在：${name}` }, 400);
     const text = typeof body.messages === 'string' ? body.messages : '';

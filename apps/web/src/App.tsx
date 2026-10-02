@@ -40,7 +40,7 @@ import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
+import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentContent, AgentInput } from "./api";
 import { normalizeMathMarkdown } from "./markdown";
 import { RamDiskPanel } from "./ramdisk-panel";
@@ -645,6 +645,13 @@ export default function App() {
   const [view, setView] = useState<AppView>("chat");
   const [draft, setDraft] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
+  const [skillError, setSkillError] = useState("");
+  useEffect(() => {
+    let stopped = false;
+    void fetchSkills().then(result => { if (!stopped) setProjectSkills(result.skills); }).catch(() => { if (!stopped) setSkillError("技能目录暂时不可用"); });
+    return () => { stopped = true; };
+  }, []);
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   const [pendingDocuments, setPendingDocuments] = useState<DocumentAttachment[]>([]);
   const [uploadingDocuments, setUploadingDocuments] = useState(false);
@@ -998,7 +1005,7 @@ export default function App() {
     }
   }
 
-  async function executeStream(conversationId: string, assistantId: string, input: AgentInput, documents: DocumentAttachment[] = [], authResumeId?: string, existingRunToken?: string) {
+  async function executeStream(conversationId: string, assistantId: string, input: AgentInput, documents: DocumentAttachment[] = [], authResumeId?: string, existingRunToken?: string, skills: string[] = []) {
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1012,6 +1019,7 @@ export default function App() {
         message: input,
         threadId: conversationId,
         documents,
+        skills,
         authResumeId,
         runToken,
         signal: controller.signal,
@@ -1114,7 +1122,7 @@ export default function App() {
       updatedAt: now,
       messages: [...conversation.messages, userMessage, assistantMessage],
     } : conversation));
-    const assistantText = await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent);
+    const assistantText = await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent, [], undefined, undefined, !options.preserveComposer && selectedSkill ? [selectedSkill] : []);
     if (firstTurn && assistantText.trim()) {
       const titleInput = documents[0]?.name || text || attachments[0]?.name || "新对话";
       void generateConversationTitle({ threadId: conversationId, resourceId: active.resourceId, titleInput })
@@ -1249,10 +1257,10 @@ export default function App() {
     event.target.value = "";
   }
 
-  function selectTrainingPlanAuditSkill() {
+  function selectProjectSkill(name: string) {
     if (sending) return;
     setComposerMenuOpen(false);
-    setSelectedSkill("training-plan-audit");
+    setSelectedSkill(name);
   }
 
   const composer = (
@@ -1267,7 +1275,8 @@ export default function App() {
           {composerMenuOpen && <div className="composer-add-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={19} /><span><strong>添加照片和文件</strong><small>从电脑上传</small></span></button>
             <div className="composer-add-menu-separator" />
-            <button type="button" role="menuitem" onClick={selectTrainingPlanAuditSkill}><ListChecks size={19} /><span><strong>培养方案检查</strong><small>选中后可继续输入要求</small></span></button>
+            {projectSkills.map(skill => <button type="button" role="menuitem" key={skill.name} onClick={() => selectProjectSkill(skill.name)}><ListChecks size={19} /><span><strong>{skill.name === "training-plan-audit" ? "培养方案检查" : skill.name}</strong><small title={skill.description}>选中后可继续补充要求</small></span></button>)}
+            {skillError && <small role="status">{skillError}</small>}
           </div>}
         </div>
         <div className="composer-permission-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPermissionMenuOpen(false); }}>

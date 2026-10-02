@@ -23,6 +23,7 @@ type StreamOptions = {
   documents?: DocumentAttachment[];
   authResumeId?: string;
   runToken?: string;
+  skills?: string[];
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
 };
@@ -79,7 +80,7 @@ function agentErrorMessage(value: unknown) {
   return errorDetail(value) || "Agent 请求失败，但服务端没有提供错误详情。";
 }
 
-export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], authResumeId, runToken, signal, onEvent }: StreamOptions) {
+export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], authResumeId, runToken, skills = [], signal, onEvent }: StreamOptions) {
   const toolNamespaces = inferToolNamespaces(message, typeof window === "undefined" ? "" : window.location.pathname);
   const response = await fetch(AGENT_ENDPOINT, {
     method: "POST",
@@ -88,6 +89,7 @@ export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID,
       messages: message,
       memory: { thread: threadId, resource: resourceId },
       requestContext: {
+        seudailySkills: skills,
         seudailyRunToken: runToken ?? crypto.randomUUID(),
         seudailyThreadId: threadId,
         seudailyToolNamespaces: toolNamespaces,
@@ -868,3 +870,6 @@ export function saveAccessMode(mode: "normal" | "full" | "extra") {
     } }),
   });
 }
+
+export type ProjectSkill = { name: string; description: string; namespaces: string[] };
+export function fetchSkills() { return jsonRequest<{ skills: ProjectSkill[] }>("/app/skills"); }

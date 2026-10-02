@@ -33,6 +33,7 @@ export type TurnContext = {
     documentRefs?: string[];
     authResumeId?: string;
     skills?: string[];
+    interface?: 'web' | 'cli';
     capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
 };
 export type StoredMessage = {

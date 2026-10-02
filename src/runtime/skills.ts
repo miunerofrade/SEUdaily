@@ -1,6 +1,7 @@
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { parseDocument } from 'yaml';
 import { defineTool } from '../agent/tool.js';
 import { projectRoot } from './runtime-paths.js';
 
@@ -12,6 +13,7 @@ export class SkillCatalog {
     constructor(private root = resolve(projectRoot, 'skills')) {}
     private async file(name: string, path = 'SKILL.md') {
         if (!namePattern.test(name)) throw new Error('无效 Skill 名称');
+        if (path.split(/[\\/]/).includes('..')) throw new Error('Skill 路径不得包含上级目录');
         const root = await realpath(this.root);
         const directory = await realpath(resolve(root, name));
         const target = await realpath(resolve(directory, path));
@@ -34,11 +36,14 @@ export class SkillCatalog {
             if (!entry.isDirectory() || !namePattern.test(entry.name)) continue;
             const content = await this.file(entry.name);
             const header = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? '';
-            const declared = header.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-            if (declared && declared !== entry.name) throw new Error(`Skill 名称与目录不一致：${entry.name}`);
-            const description = header.match(/^description:\s*(.+)$/m)?.[1]?.trim() ?? entry.name;
-            const selected = header.match(/^namespaces:\s*\[([^\]]*)\]/m)?.[1]?.split(',').map(value => value.trim()).filter(value => namespaces.includes(value)) ?? [];
-            skills.push({ name: entry.name, description, namespaces: selected });
+            const document = parseDocument(header, { uniqueKeys: true });
+            if (document.errors.length) throw new Error(`Skill 元数据格式错误：${entry.name}`);
+            const metadata = z.object({
+                name: z.string().regex(namePattern).optional(), description: z.string().trim().min(1).max(2000).default(entry.name),
+                namespaces: z.array(z.string().refine(value => namespaces.includes(value))).max(8).default([]),
+            }).parse(document.toJS({ maxAliasCount: 20 }) ?? {});
+            if (metadata.name && metadata.name !== entry.name) throw new Error(`Skill 名称与目录不一致：${entry.name}`);
+            skills.push({ name: entry.name, description: metadata.description, namespaces: metadata.namespaces });
         }
         return skills;
     }

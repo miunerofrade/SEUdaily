@@ -12,7 +12,7 @@ export class ApprovalError extends Error {
     status = 400;
 }
 export class AgentRuntime {
-    private active = new Map<string, AbortController>();
+    private active = new Map<string, AbortController & { runToken: string }>();
     private memory: ContextMemory;
     private unstarted = new Set<string>();
     constructor(private config: {
@@ -31,11 +31,16 @@ export class AgentRuntime {
         this.memory = new ContextMemory(config.store, config.provider, config.memory);
     }
     isActive(threadId: string) { return this.active.has(threadId); }
-    cancelTurn(threadId: string) { this.active.get(threadId)?.abort(); }
+    cancelTurn(threadId: string, runToken?: string) {
+        const controller = this.active.get(threadId);
+        if (!controller || runToken && controller.runToken !== runToken) return false;
+        controller.abort();
+        return true;
+    }
     private claim(context: TurnContext, signal?: AbortSignal) {
         if (this.active.has(context.threadId))
             throw new BusyError('当前会话正在回答，请先停止或等待完成');
-        const controller = new AbortController();
+        const controller = Object.assign(new AbortController(), { runToken: context.runToken });
         this.active.set(context.threadId, controller);
         this.unstarted.add(context.threadId);
         return signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -217,7 +222,7 @@ export class AgentRuntime {
                             if (item.usage) {
                                 run.usage ??= {};
                                 for (const [name, value] of Object.entries(item.usage))
-                                    run.usage[name] = (run.usage[name] ?? 0) + value;
+                                    if (typeof value === 'number' && Number.isFinite(value)) run.usage[name] = (run.usage[name] ?? 0) + value;
                             }
                             completed = true;
                         }

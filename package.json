@@ -37,6 +37,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "yaml": "2.9.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
