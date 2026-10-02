@@ -5,6 +5,7 @@ import warnings
 from pathlib import Path
 
 from seudaily.subprocess_utils import hidden_process_options
+from seudaily.ramdisk import TemporaryWorkspace
 
 warnings.filterwarnings("ignore")
 
@@ -21,12 +22,6 @@ class MyRecognitionCallback(RecognitionCallback):
     def on_event(self, result) -> None: pass
 
 class CloudASRWorker:
-    def _determine_temp_path(self, ext):
-        if os.path.exists("R:\\"): return f"R:/temp_media.{ext}"
-        local_temp_dir = Path("./temp_workspace")
-        local_temp_dir.mkdir(exist_ok=True)
-        return str(local_temp_dir / f"temp_media.{ext}")
-
     def __init__(self, config, export_base_dir):
         self.config = config
         self.export_base_dir = Path(export_base_dir)
@@ -35,12 +30,16 @@ class CloudASRWorker:
         # 🌟 核心修改：读取 UI 中选定的具体 ASR 模型版本
         self.model_version = config.get("asr_model_version", "paraformer-realtime-v2")
         
-        self.temp_audio_path = self._determine_temp_path("mp3")
-        self.temp_video_path = self._determine_temp_path("mp4")
+        self.workspace = TemporaryWorkspace()
+        self.temp_audio_path = ""
+        self.temp_video_path = ""
         self.current_process = None
 
     def extract_media(self, video_url: str, referer_url: str, audio_only: bool = False):
         self._cleanup()
+        scratch = self.workspace.open()
+        self.temp_audio_path = str(scratch / "audio.mp3")
+        self.temp_video_path = str(scratch / "video.mp4")
         
         ffmpeg_cmd = ['ffmpeg', '-headers', f'Referer: {referer_url}\r\n', '-i', video_url]
         
@@ -130,10 +129,9 @@ class CloudASRWorker:
     def abort(self):
         if self.current_process and self.current_process.poll() is None:
             self.current_process.kill()
+            self.current_process.wait(timeout=5)
         self._cleanup()
 
     def _cleanup(self):
-        for path in [self.temp_audio_path, self.temp_video_path]:
-            if os.path.exists(path):
-                try: os.remove(path)
-                except: pass
+        # Only our own workspace is disposable; imported audio belongs to the user.
+        self.workspace.close()

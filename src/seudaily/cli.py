@@ -139,6 +139,10 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
+    if action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk"}:
+        from .ramdisk import manage_ramdisk
+        operation = {"ramdisk-status": "status", "mount-ramdisk": "mount", "unmount-ramdisk": "unmount"}[action]
+        return manage_ramdisk(operation, str(payload.get("size", "1G")))
     if action == "health":
         return {"version": __version__, "tools": [
             "authorize", "authorize-schedule", "get-schedule", "get-current-date", "save-schedule-customizations", "apply-agent-schedule-change", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",

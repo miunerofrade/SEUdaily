@@ -464,11 +464,11 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                             except Exception as e:
                                 yield f"[{get_time()}] PPT 提取级联崩溃: {e}"
 
-                        asr_worker._cleanup()
-
                     except Exception as e:
                         status_item["failure"] = str(e)
                         yield f"[{get_time()}] 媒体处理异常终止: {e}"
+                    finally:
+                        asr_worker._cleanup()
 
                     if stop_event.is_set():
                         yield f"[{get_time()}] 任务打断，清理当前残骸..."

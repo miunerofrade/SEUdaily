@@ -78,7 +78,11 @@ def main() -> None:
                 raw_result = dispatch({"action": action, "payload": {**payload, "taskId": task_id}})
             if event.is_set():
                 raise TaskCancelledError("任务已取消")
-            result = normalize_tool_result(action, raw_result, requested_task_id=task_id)
+            if action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk"}:
+                # UI status polling is transient, not a historical Agent tool result.
+                result = {"status": raw_result.get("status", "completed"), "taskId": task_id, "summary": raw_result.get("summary", "内存盘状态"), "data": raw_result.get("data", raw_result), "artifacts": [], "citations": [], "warnings": [], "metrics": {}}
+            else:
+                result = normalize_tool_result(action, raw_result, requested_task_id=task_id)
             _write({"requestId": request_id, "type": "result", "result": result})
         except TaskCancelledError as exc:
             result = normalize_tool_result(

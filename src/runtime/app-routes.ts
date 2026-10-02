@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { registerApiRoute } from "../server/routes.js";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
@@ -320,6 +321,15 @@ function legacyEnvironmentName(name: string) {
 }
 
 export const appRoutes = [
+  registerApiRoute("/app/ramdisk", { method: "GET", handler: async (c: any) => {
+    const result = await runPythonTool<ToolResult>("ramdisk-status", {});
+    return c.json(await fullResultData(result));
+  } }),
+  registerApiRoute("/app/ramdisk", { method: "POST", handler: async (c: any) => {
+    const input = z.object({ action: z.enum(["mount", "unmount"]), size: z.enum(["512M", "1G", "2G", "4G"]).default("1G") }).strict().parse(await c.req.json());
+    const result = await runPythonTool<ToolResult>(input.action === "mount" ? "mount-ramdisk" : "unmount-ramdisk", { size: input.size });
+    return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+  } }),
   registerApiRoute("/app/conversations/title", {
     method: "POST",
     requiresAuth: false,

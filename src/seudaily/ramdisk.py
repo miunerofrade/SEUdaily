@@ -1,75 +1,267 @@
-# ramdisk.py
-import os
+"""Owned, temporary RAM disks. Importing this module never mounts anything."""
+from __future__ import annotations
+
+import atexit
 import ctypes
+import os
+import re
 import shutil
-import glob
+import subprocess
+import sys
+import tempfile
+import warnings
+from pathlib import Path
+
+from .runtime_paths import env_value
+
+
+class RamDiskError(RuntimeError):
+    pass
+
+
+def size_bytes(size: str) -> int:
+    match = re.fullmatch(r"([1-9]\d*)\s*([KMGT]?)(?:i?B)?", str(size).strip(), re.I)
+    if not match:
+        raise ValueError("内存盘容量必须为正整数，例如 128M、1G 或 1GiB")
+    amount = int(match[1]) * 1024 ** (" KMGT".index(match[2].upper()) if match[2] else 0)
+    if amount < 8 * 1024**2:
+        raise ValueError("内存盘容量至少为 8MiB")
+    return amount
+
+
+def _run(*command: str) -> str:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=60, check=True)
+        return completed.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+        detail = getattr(error, "stderr", "") or str(error)
+        raise RamDiskError(f"{command[0]}: {detail.strip()[:500]}") from error
+
+
+def _linux_run(*command: str) -> str:
+    # Never open a password prompt in the background Worker.
+    if os.geteuid() != 0:
+        if not shutil.which("sudo"):
+            raise RamDiskError("Linux tmpfs 挂载需要 root/CAP_SYS_ADMIN 或已授权的 sudo")
+        return _run("sudo", "-n", *command)
+    return _run(*command)
+
 
 def check_and_install_imdisk():
-    """前置检查系统驱动，支持 exe 安装包和解压后的 bat 安装脚本"""
+    """Retain the existing Windows installer entry point."""
+    if sys.platform != "win32":
+        return False, "ImDisk 仅用于 Windows"
     if shutil.which("imdisk"):
         return True, "驱动已就绪"
-    
-    res_dir = os.path.join(os.getcwd(), "res")
-    if not os.path.exists(res_dir):
-        os.makedirs(res_dir, exist_ok=True)
-        
-    installer_path = None
-    
-    exe_installers = glob.glob(os.path.join(res_dir, "ImDiskTk*.exe"))
-    if exe_installers:
-        installer_path = exe_installers[0]
+    resource = Path(__file__).resolve().parents[2] / "res"
+    installers = sorted(resource.glob("ImDiskTk*.exe")) or sorted(resource.rglob("install.bat"))
+    if not installers:
+        return False, "未安装 ImDisk；请安装 ImDisk Toolkit 后重试"
+    installer = installers[0]
+    if installer.suffix == ".bat":
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{installer}"', str(installer.parent), 1)
     else:
-        for root, dirs, files in os.walk(res_dir):
-            if "install.bat" in files:
-                installer_path = os.path.join(root, "install.bat")
-                break
-    
-    if not installer_path:
-        download_url = "https://sourceforge.net/projects/imdisk-toolkit/"
-        return False, f"系统未安装驱动，且 res 目录下未找到安装文件。\n请前往 {download_url} 下载压缩包，解压后放入 res 文件夹重试。"
-        
-    if installer_path.endswith(".bat"):
-        work_dir = os.path.dirname(installer_path)
-        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{installer_path}"', work_dir, 1)
-    else:
-        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", installer_path, "", None, 1)
-    
-    if ret > 32:
-        return False, "系统缺失底层驱动。已为您自动唤起安装向导（黑框或安装界面），请完成后再次点击开启内存盘。"
-    else:
-        return False, f"自动触发安装失败 (错误码: {ret})，请前往 res 文件夹手动双击安装。"
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(installer), "", None, 1)
+    return False, "请完成 ImDisk 安装后重试" if result > 32 else f"安装请求失败：{result}"
+
+
+class RamDisk:
+    """Only unmount devices created by this instance; never reuse arbitrary mounts."""
+    def __init__(self, size: str = "1G", *, mount_point: str | Path | None = None):
+        self.capacity = size_bytes(size)
+        self.path = Path(mount_point).absolute() if mount_point is not None else None
+        self.device: str | None = None
+        self.mounted = False
+        self._created_directory = False
+        self._platform = sys.platform
+
+    def mount(self) -> Path:
+        if self.mounted:
+            return self.path
+        if self._platform not in {"darwin", "linux"}:
+            raise RamDiskError("此接口用于 macOS/Linux；Windows 使用 setup_ramdisk")
+        if self.path is None:
+            self.path = Path(tempfile.mkdtemp(prefix="seudaily-ramdisk-"))
+            self._created_directory = True
+        else:
+            if self.path.is_symlink() or self.path.exists():
+                raise RamDiskError("内存盘挂载位置必须是尚不存在的目录")
+            self.path.mkdir(parents=True, mode=0o700)
+            self._created_directory = True
+        self.path = self.path.resolve()
+        try:
+            if self._platform == "darwin":
+                output = _run("/usr/bin/hdiutil", "attach", "-nomount", f"ram://{(self.capacity + 511) // 512}")
+                devices = re.findall(r"^(/dev/disk\d+)\s*$", output, re.M)
+                if len(devices) != 1:
+                    raise RamDiskError("hdiutil 未返回唯一的新 RAM 设备")
+                self.device = devices[0]
+                _run("/sbin/newfs_hfs", "-v", "SEUdailyRAM", self.device)
+                _run("/usr/sbin/diskutil", "mount", "nobrowse", "-mountPoint", str(self.path), self.device)
+            else:
+                self.device = "tmpfs"
+                _linux_run("mount", "-t", "tmpfs", "-o", f"size={self.capacity},mode=0700,uid={os.getuid()},gid={os.getgid()},nosuid,nodev,noexec", "seudaily-ramdisk", str(self.path))
+            self.mounted = True
+            self.path.chmod(0o700)
+            atexit.register(self._exit_cleanup)
+            return self.path
+        except Exception:
+            if self._platform == "linux" and os.path.ismount(self.path):
+                self.mounted = True
+            # An attached but unformatted macOS device must also be detached.
+            self.unmount()
+            raise
+
+    def unmount(self) -> None:
+        if self.device and self._platform == "darwin":
+            _run("/usr/bin/hdiutil", "detach", self.device)
+        elif self.mounted and self._platform == "linux":
+            _linux_run("umount", str(self.path))
+        self.device = None
+        self.mounted = False
+        atexit.unregister(self._exit_cleanup)
+        if self._created_directory and self.path:
+            self.path.rmdir()
+            self._created_directory = False
+            self.path = None
+
+    def _exit_cleanup(self):
+        try:
+            self.unmount()
+        except (RamDiskError, OSError) as error:
+            warnings.warn(f"内存盘退出清理失败：{error}", RuntimeWarning)
+
+    def __enter__(self) -> Path:
+        return self.mount()
+
+    def __exit__(self, *_args):
+        self.unmount()
+
+
+class TemporaryWorkspace:
+    """Per-task media scratch space, with explicit RAM opt-in and disk fallback."""
+    def __init__(self, *, use_ram: bool | None = None, size: str | None = None):
+        self.use_ram = use_ram if use_ram is not None else (env_value("SEUDAILY_RAMDISK_ENABLED", "false") or "").lower() in {"1", "true", "yes", "on"}
+        self.size = size or env_value("SEUDAILY_RAMDISK_SIZE", "1G") or "1G"
+        self.ramdisk: RamDisk | None = None
+        self.path: Path | None = None
+        self.fallback_reason: str | None = None
+        self._temporary: tempfile.TemporaryDirectory | None = None
+
+    def open(self) -> Path:
+        if self.path:
+            return self.path
+        shared = _disks.get("R:")
+        shared_path = shared.path if shared and shared.mounted else Path("R:/") if sys.platform == "win32" and Path("R:/").is_dir() else None
+        if shared_path:
+            try:
+                self._temporary = tempfile.TemporaryDirectory(prefix="media-", dir=shared_path)
+                self.path = Path(self._temporary.name)
+                _leases.add(str(self.path))
+            except OSError as error:
+                self.fallback_reason = str(error)
+                warnings.warn(f"内存盘无法写入，使用普通临时目录：{error}", RuntimeWarning)
+        elif self.use_ram:
+            try:
+                if sys.platform == "win32":
+                    # Do not trigger installers/UAC from unattended media processing.
+                    if not Path("R:/").is_dir():
+                        raise RamDiskError("请先通过 setup_ramdisk 创建 Windows R: 内存盘")
+                    self._temporary = tempfile.TemporaryDirectory(prefix="seudaily-media-", dir="R:/")
+                    self.path = Path(self._temporary.name)
+                    _leases.add(str(self.path))
+                else:
+                    self.ramdisk = RamDisk(self.size)
+                    root = self.ramdisk.mount()
+                    self._temporary = tempfile.TemporaryDirectory(prefix="media-", dir=root)
+                    self.path = Path(self._temporary.name)
+            except (RamDiskError, ValueError, OSError) as error:
+                # If rollback failed, retain ownership so callers can retry cleanup.
+                if self.ramdisk and self.ramdisk.device:
+                    self.ramdisk.unmount()
+                self.ramdisk = None
+                self.fallback_reason = str(error)
+                warnings.warn(f"内存盘不可用，使用普通临时目录：{error}", RuntimeWarning)
+        if self.path is None:
+            self._temporary = tempfile.TemporaryDirectory(prefix="seudaily-media-")
+            self.path = Path(self._temporary.name)
+        atexit.register(self.close)
+        return self.path
+
+    def close(self):
+        if self._temporary:
+            self._temporary.cleanup()
+            _leases.discard(str(self.path))
+            self._temporary = None
+        if self.ramdisk:
+            self.ramdisk.unmount()
+            self.ramdisk = None
+        self.path = None
+        atexit.unregister(self.close)
+
+    def __enter__(self):
+        return self.open()
+
+    def __exit__(self, *_args):
+        self.close()
+
+
+_disks: dict[str, RamDisk] = {}
+_leases: set[str] = set()
 
 
 def setup_ramdisk(letter="R:", size="1G"):
-    """使用 Windows 原生 ShellExecuteW 触发 UAC 挂载内存盘"""
-    is_ready, msg = check_and_install_imdisk()
-    if not is_ready:
-        return False, msg
-
-    if os.path.exists(f"{letter}\\"):
-        return True, "已存在"
-
-    params = f'-a -s {size} -m {letter} -p "/fs:ntfs /q /y"'
-    ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "imdisk", params, None, 0)
-    
-    if ret > 32:
-        return True, "提权弹窗已发送"
-    else:
-        return False, f"API 调用失败，错误码: {ret}"
+    try:
+        capacity = size_bytes(size)
+        if sys.platform != "win32":
+            key = str(letter)
+            disk = _disks.get(key) or RamDisk(size, mount_point=None if letter == "R:" else letter)
+            path = disk.mount()
+            _disks[key] = disk
+            return True, str(path)
+        if not re.fullmatch(r"[A-Za-z]:", letter):
+            raise ValueError("Windows 内存盘位置必须为盘符，例如 R:")
+        ready, message = check_and_install_imdisk()
+        if not ready:
+            return False, message
+        if Path(f"{letter}/").exists():
+            return True, "已存在"
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "imdisk", f'-a -s {capacity} -m {letter} -p "/fs:ntfs /q /y"', None, 0)
+        return result > 32, "提权弹窗已发送" if result > 32 else f"挂载请求失败：{result}"
+    except (RamDiskError, ValueError, OSError) as error:
+        return False, str(error)
 
 
 def remove_ramdisk(letter="R:"):
-    """卸载内存盘"""
-    if not shutil.which("imdisk"):
-        return True, "未安装驱动，无需卸载"
-        
-    if not os.path.exists(f"{letter}\\"):
-        return True, "已卸载"
-        
-    params = f'-D -m {letter}'
-    ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "imdisk", params, None, 0)
-    
-    if ret > 32:
-        return True, "卸载请求已发送"
-    else:
-        return False, f"卸载失败，错误码: {ret}"
+    try:
+        if _leases:
+            raise RamDiskError("内存盘正在处理媒体任务，请等待任务完成后卸载")
+        if sys.platform != "win32":
+            disk = _disks.get(str(letter))
+            if disk:
+                disk.unmount()
+                del _disks[str(letter)]
+            return True, "已卸载"
+        if not re.fullmatch(r"[A-Za-z]:", letter):
+            raise ValueError("无效盘符")
+        if not shutil.which("imdisk") or not Path(f"{letter}/").exists():
+            return True, "无需卸载"
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "imdisk", f"-D -m {letter}", None, 0)
+        return result > 32, "卸载请求已发送" if result > 32 else f"卸载请求失败：{result}"
+    except (RamDiskError, ValueError, OSError) as error:
+        return False, str(error)
+
+
+def ramdisk_status() -> dict:
+    disk = _disks.get("R:")
+    mounted = bool(disk and disk.mounted) if sys.platform != "win32" else Path("R:/").is_dir()
+    path = str(disk.path) if disk and disk.mounted else "R:/" if mounted else None
+    usage = shutil.disk_usage(path) if path else None
+    return {"mounted": mounted, "platform": sys.platform, "backend": "hdiutil" if sys.platform == "darwin" else "tmpfs" if sys.platform == "linux" else "imdisk", "path": path, "capacityBytes": usage.total if usage else 0, "usedBytes": usage.used if usage else 0, "availableBytes": usage.free if usage else 0, "activeTasks": len(_leases)}
+
+
+def manage_ramdisk(action: str, size: str = "1G") -> dict:
+    if action == "status":
+        return ramdisk_status()
+    ok, message = setup_ramdisk(size=size) if action == "mount" else remove_ramdisk() if action == "unmount" else (False, "未知内存盘操作")
+    return {"status": "completed" if ok else "failed", "summary": message, "data": ramdisk_status()}

@@ -268,7 +268,7 @@ button { color: inherit; }
 .settings-toggle input { width:18px !important; height:18px; flex:0 0 18px; }
 .spin { animation: spin .9s linear infinite; }@keyframes spin { to { transform:rotate(360deg); } }
 
-.inspector { position: fixed; top: 10px; right: 10px; bottom: 10px; width: 340px; z-index: 40; display: grid; grid-template-rows: 59px minmax(0,1fr) auto; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 14px; background: #fff; box-shadow: 0 18px 60px rgba(0,0,0,.13); opacity: 0; pointer-events: none; transform: translateX(calc(100% + 25px)); transition: opacity .2s, transform .24s ease; }
+.inspector { position: fixed; top: 64px; right: 16px; bottom: auto; width: 330px; max-height: calc(100vh - 84px); z-index: 40; display: grid; grid-template-rows: 48px minmax(0,1fr) auto; overflow: hidden; border: 1px solid #e0e0e0; border-radius: 18px; background: #fff; box-shadow: 0 18px 60px rgba(0,0,0,.13); opacity: 0; pointer-events: none; transform: translateX(calc(100% + 25px)); transition: opacity .2s, transform .24s ease; }
 .inspector.open { opacity: 1; pointer-events: auto; transform: translateX(0); }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; padding: 0 11px 0 17px; border-bottom: 1px solid #eee; }
 .inspector-head .eyebrow { display: none; }.inspector-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
@@ -442,7 +442,7 @@ button { color: inherit; }
   .welcome { padding:20px 16px 12vh; }.welcome h2 { font-size:24px; }
   .message-list { width:calc(100% - 28px); padding-top:20px; }.user-bubble { max-width:88%; }
   .composer-wrap { padding:0 12px 10px; }.composer-wrap.centered { padding:0; }
-  .inspector { top:0; right:0; bottom:0; width:min(350px, 94vw); border-radius:0; }
+  .inspector { top:64px; right:12px; bottom:auto; width:min(330px, calc(100vw - 24px)); border-radius:18px; }
   .workspace-panel { height:100vh; display:grid; grid-template-rows:52px minmax(0, 1fr); }.workspace-mobile-bar { display:flex; align-items:center; gap:8px; padding:0 10px; border-bottom:1px solid #eee; font-size:14px; }.workspace-mobile-bar .menu-button { display:grid !important; }
   .workspace-page, .settings-page { width:calc(100% - 28px); padding:28px 0 60px; }.workspace-page-head { flex-direction:column; gap:14px; margin-bottom:22px; }.workspace-page-head h1 { font-size:22px; }
   .program-overview-head, .program-courses-head { align-items:flex-start; flex-direction:column; }.program-overview-head .page-action { align-self:stretch; }.program-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.program-metrics > div:nth-child(odd) { padding-left:0; border-left:0; }.program-metrics > div:nth-child(n+3) { border-top:1px solid #e8e8e8; }.program-requirement-list article { grid-template-columns:1fr; gap:6px; }.program-requirement-list b { text-align:left; }.program-courses-head label { width:100%; }.program-courses-head select { min-width:0; flex:1; }
@@ -451,3 +451,20 @@ button { color: inherit; }
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+/* Flat rows in the task and resource panel. */
+.inspector-scroll { padding: 18px 20px; max-height: calc(100vh - 176px); }
+.inspector-section + .inspector-section { margin-top: 24px; padding-top: 24px; border-top: 1px solid #eee; }
+.inspector-description, .inspector-footer { color: #888; font-size: 12px; line-height: 1.65; margin: 10px 0; }
+.inspector-footer { padding: 14px 20px; margin: 0; border-top: 1px solid #eee; }
+.disk-state { font-size: 12px; color: #888; font-weight: 400; }
+.disk-control-row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-top: 16px; }
+.disk-control-row select { margin-left: auto; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #333; }
+.disk-action { border: 0; background: transparent; color: #333; padding: 6px 0 6px 8px; cursor: pointer; }
+.disk-action:disabled { color: #aaa; cursor: default; }
+.disk-details { font-size: 12px; margin: 16px 0 0; }
+.disk-details > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
+.disk-details dt { color: #888; flex-shrink: 0; }
+.disk-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.disk-error { color: #a24835; font-size: 12px; line-height: 1.6; }
+.inspector .resource-item, .inspector .citation-list > a, .inspector .citation-item { border-radius: 0; box-shadow: none; background: transparent; border-width: 0 0 1px; }

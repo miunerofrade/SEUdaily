@@ -47,6 +47,7 @@ import remarkMath from "remark-math";
 import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentContent, AgentInput } from "./api";
 import { normalizeMathMarkdown } from "./markdown";
+import { RamDiskPanel } from "./ramdisk-panel";
 import { SidebarIcon } from "./sidebar-icons";
 import { addProcessTool, appendProcessText, finalizeProcessAnswer } from "./stream-state";
 import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
@@ -1372,12 +1373,7 @@ export default function App() {
       <aside className={`inspector ${rightOpen && view === "chat" ? "open" : ""}`}>
         <div className="inspector-head"><div><span className="eyebrow">WORKSPACE</span><h2>任务与资料</h2></div><button className="icon-button" onClick={() => setRightOpen(false)} aria-label="关闭任务面板" title="关闭任务面板"><PanelRightClose size={19} /></button></div>
         <div className="inspector-scroll">
-          <section className="inspector-section">
-            <div className="section-title"><span>执行记录</span><small>{allTools.length}</small></div>
-            {allTools.length ? <div className="task-list">{allTools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}</div> : (
-              <div className="empty-card"><Clock3 size={20} /><p>Agent 调用工具后，执行过程会出现在这里。</p></div>
-            )}
-          </section>
+          <RamDiskPanel active={rightOpen && view === "chat"} />
           <section className="inspector-section">
             <div className="section-title"><span>生成资料</span><small>{allArtifacts.length}</small></div>
             {allArtifacts.length ? <div className="resource-list">{allArtifacts.map((artifact) => (
@@ -1385,7 +1381,7 @@ export default function App() {
                 <span>{artifact.type === "audio" ? <FileAudio size={17} /> : artifact.type === "slides" ? <BookOpen size={17} /> : <FileText size={17} />}</span>
                 <div><strong>{fileName(artifact.path)}</strong><small>{artifact.type.toUpperCase()} {formatBytes(artifact.sizeBytes)}</small></div>
               </div>
-            ))}</div> : <div className="empty-card small"><FolderOpen size={19} /><p>字幕、课件和笔记会集中显示。</p></div>}
+            ))}</div> : <p className="inspector-description">字幕、课件和笔记会集中显示。</p>}
           </section>
           {!!allCitations.length && <section className="inspector-section">
             <div className="section-title"><span>引用来源</span><small>{allCitations.length}</small></div>
@@ -1396,7 +1392,7 @@ export default function App() {
             ))}</div>
           </section>}
         </div>
-        <div className="privacy-note"><Bot size={16} /><span>课程凭据不会发送到对话内容中</span></div>
+        <p className="inspector-footer">课程凭据不会发送到对话内容中</p>
       </aside>
       {previewImage && attachmentSource(previewImage) && <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }}><div className="image-preview-dialog" role="dialog" aria-modal="true" aria-label="图片预览"><button type="button" className="preview-close" aria-label="关闭预览" onClick={() => setPreviewImage(null)}><X size={19} /></button><img src={attachmentSource(previewImage)} alt={previewImage.name} /></div></div>}
       {deleteTarget && (

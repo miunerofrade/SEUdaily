@@ -51,7 +51,7 @@ src/
     ├── asr/                       # 本地/云端语音转写
     ├── ppt.py                     # 视频幻灯片提取
     ├── summary.py                 # 课程讲义生成
-    └── ramdisk.py                 # Windows Ramdisk 支持
+    └── ramdisk.py                 # Windows/macOS/Linux 内存盘
 ```
 
 Streamlit 页面层已经移除。账号、密码和密钥默认从环境变量读取，不进入 Agent 提示词。
@@ -261,3 +261,5 @@ Windows 上的终端和后台进程优先通过 WSL2 进入 Bubblewrap 原生沙
 教务处查询缓存位于 `.seudaily/jwc`。除 `cache_only` 外，每次查询都会先校验语义相关的栏目列表，但不会遍历所有详情页；命中的候选 ID 会进入本地队列，由独立后台进程以最多 4 路并发保存快照，不阻塞搜索返回。版本缓存只保留清洗后的正文、附件名称与链接、内容哈希，不保存完整 HTML，也不自动下载附件文件。嵌入式 PDF Viewer 的 `file` 参数会被还原为真实 PDF 附件地址。
 
 计软智官网使用同一套 WebPlus 查询与后台缓存机制，缓存隔离在 `.seudaily/cse`。适配层单独配置栏目、语义路由、详情标题与日期类名；当前覆盖本科通知、教学动态、学生工作、就业、科研、学术活动、人才招聘以及本科/研究生下载专区。
+
+内存盘可在聊天右侧的“任务与资料”面板启用，支持 512 MB、1 GB、2 GB 和 4 GB。macOS 使用系统自带的 `hdiutil` 创建 RAM 设备，Linux 使用 `tmpfs`（需要 root/CAP_SYS_ADMIN 或已授权的非交互 sudo），Windows 继续使用 ImDisk。媒体处理自动使用已启用的内存盘；未启用时使用独立的普通临时目录。内存盘使用期间拒绝卸载，macOS/Linux 正常退出服务时清理挂载，Windows 通过 UAC 请求挂载与卸载。内存盘不保存 Cookie、会话数据库或最终产物，不会在重启后自动挂载。可用 `SEUDAILY_RAMDISK_ENABLED=true` 和 `SEUDAILY_RAMDISK_SIZE=1G` 选择每个媒体任务自动创建内存盘，挂载失败时告警并回退普通临时目录。Linux tmpfs 可能使用 swap。进程被 SIGKILL 强制终止时无法执行退出清理，残留挂载需要系统工具卸载。
