@@ -1,5 +1,6 @@
 ---
 name: training-plan-audit
+namespaces: [training-plan]
 description: 核查东南大学 eHall 个人培养方案、毕业要求、缺课或缺学分、课程组和专项学分。用户询问能否毕业、哪些课没修、任选/限选/通选/通识/跨学科是否足够或有没有漏选时使用；普通课程内容问答不要使用。
 ---
 
@@ -19,7 +20,7 @@ description: 核查东南大学 eHall 个人培养方案、毕业要求、缺课
 - 课表出现只表示有修读记录，不能证明通过或已经获得学分，也不能把所有过去学期的方案课自动算作已完成。
 - 对课程性质的显式 eHall 字段可以直接陈述；`classificationSource=course_code` 时说明是按课程号识别，`classificationSource=unknown` 时说明仍需确认。
 
-培养方案备注含义不清、规则可能更新或用户要求最新政策时，再用 `search-seu-academic-affairs`；需要全文时使用 `get-seu-academic-affairs-notice`。个人方案与通用规定冲突时明确指出差异，不要用公开帖子覆盖个人方案。
+培养方案备注含义不清、规则可能更新或用户要求最新政策时，再用 `query-campus-notices`（source=jwc、mode=search）；需要全文时使用 `read-campus-notice`。工具未在当前目录时通过 `search-capabilities` 和 `invoke-capability` 调用。个人方案与通用规定冲突时明确指出差异，不要用公开帖子覆盖个人方案。
 
 ## 公开讨论中常见的问题
 

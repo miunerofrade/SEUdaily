@@ -110,7 +110,9 @@ export class AgentRuntime {
             const tools = await this.config.tools(run.context);
             const definitions = Object.values(tools).map(tool => ({ type: 'function', function: { name: tool.id, description: tool.description, parameters: toolJsonSchema(tool) } }));
             run.context.capabilityTickets ??= [];
+            run.context.skills ??= [];
             const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityTickets', run.context.capabilityTickets]]);
+            requestContext.set('seudailySkills', run.context.skills);
             const options: ToolExecutionOptions = { requestContext, abortSignal: signal };
             while (true) {
                 signal.throwIfAborted();

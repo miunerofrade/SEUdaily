@@ -8,6 +8,7 @@ import { readTaskResultTool } from './tools/task-result-tool.js';
 import { namespaceTools, browserNamespaceTools, searchCapabilitiesTool, invokeCapabilityTool, toolNamespaceSchema } from './tools/tool-broker.js';
 import { isFullAccessExtraEnabled } from './permission-state.js';
 import { envValue } from './runtime-paths.js';
+import { listSkillsTool, readSkillTool } from './skills.js';
 let closeWorkspace: (() => void) | undefined;
 export function closeApplicationWorkspace() { closeWorkspace?.(); }
 export const agentRuntime = new AgentRuntime({
@@ -21,6 +22,6 @@ export const agentRuntime = new AgentRuntime({
             closeWorkspace = module.closeWorkspace;
             workspace = await module.getWorkspaceTools();
         }
-        return { getCurrentDateTool, readTaskResultTool, searchCapabilitiesTool, invokeCapabilityTool, ...namespaceTools(namespaces), ...await browserNamespaceTools(namespaces), ...workspace };
+        return { getCurrentDateTool, readTaskResultTool, listSkillsTool, readSkillTool, searchCapabilitiesTool, invokeCapabilityTool, ...namespaceTools(namespaces), ...await browserNamespaceTools(namespaces), ...workspace };
     },
 });

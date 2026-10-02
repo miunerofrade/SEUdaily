@@ -32,6 +32,7 @@ export type TurnContext = {
     namespaces?: string[];
     documentRefs?: string[];
     authResumeId?: string;
+    skills?: string[];
     capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
 };
 export type StoredMessage = {
