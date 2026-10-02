@@ -12,13 +12,11 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.layout import Layout, HSplit, Window, FloatContainer, Float
+from prompt_toolkit.layout import Layout, HSplit, Window, FloatContainer, Float, ScrollOffsets
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.data_structures import Point
-from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.enums import EditingMode
@@ -27,6 +25,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
 from .terminal_client import AgentClient, ClientError, RESOURCE_ID, terminal_text
+from .terminal_view import TranscriptView
 from .terminal_commands import COMMANDS, SlashCompleter, parser_for, programs_text, schedule_text, split_command, table
 
 
@@ -180,6 +179,8 @@ class Terminal:
         try:
             async for event in self.client.stream(text, self.thread_id, self.resource_id, run_token=run_token, skills=skills if skills is not None else self.skills, namespaces=namespaces, auth_resume_id=auth_resume_id, document_refs=[document["contextRef"] for document in self.documents]):
                 kind, payload = event["type"], event.get("payload") or {}
+                if self.ui:
+                    self.ui.invalidate()
                 if json_output:
                     print(json.dumps(event, ensure_ascii=False), flush=True)
                 if kind == "tool-approval-request":
@@ -221,6 +222,8 @@ class Terminal:
             if self.active_run_token == run_token:
                 self.active_run_token = None
             self.status = "待审批" if self.pending else "就绪"
+            if self.ui:
+                self.ui.invalidate()
 
     async def approve(self, approved: bool) -> int:
         if not self.pending:
@@ -446,6 +449,8 @@ class Terminal:
             self.show(error, error=True)
         finally:
             self.status = "待确认" if self.confirmation else "待审批" if self.pending else "就绪"
+            if self.ui:
+                self.ui.invalidate()
 
     def transcript_fragments(self) -> list[tuple[str, str]]:
         """Render Markdown without passing model escape sequences to the terminal."""
@@ -546,43 +551,32 @@ class Terminal:
                 event.app.exit()
             else:
                 editor.buffer.delete()
-        def scroll(amount: int) -> None:
-            lines = self.transcript_fragments()
-            last = max(0, "".join(fragment[1] for fragment in lines).count("\n"))
-            current = last if self.scroll_line is None else self.scroll_line
-            self.scroll_line = min(last, max(0, current + amount))
-            if self.scroll_line == last:
-                self.scroll_line = None
+        def scrolled() -> None:
+            editor.buffer.cancel_completion()
             if self.ui:
                 self.ui.invalidate()
+        transcript_view = TranscriptView(
+            self.transcript_fragments, lambda: self.scroll_line,
+            lambda offset: setattr(self, "scroll_line", offset), scrolled,
+        )
         @bindings.add("pageup")
         def page_up(event):
-            scroll(-max(1, event.app.output.get_size().rows - 12))
+            transcript_view.scroll(-max(1, transcript_view.height - 1))
         @bindings.add("pagedown")
         def page_down(event):
-            scroll(max(1, event.app.output.get_size().rows - 12))
+            transcript_view.scroll(max(1, transcript_view.height - 1))
         @bindings.add("c-home")
         def head(event):
             self.scroll_line = 0
+            scrolled()
         @bindings.add("c-end")
         def tail(event):
             self.scroll_line = None
-        def mouse(event):
-            if event.event_type == MouseEventType.SCROLL_UP:
-                scroll(-3)
-            elif event.event_type == MouseEventType.SCROLL_DOWN:
-                scroll(3)
-            else:
-                return NotImplemented
-        def content():
-            return [(style, text, mouse) for style, text in self.transcript_fragments()]
-        def cursor():
-            lines = "".join(text for _, text in self.transcript_fragments()).split("\n")
-            y = len(lines) - 1 if self.scroll_line is None else min(self.scroll_line, len(lines) - 1)
-            return Point(x=len(lines[y]), y=y)
+            scrolled()
         conversation = Window(
-            FormattedTextControl(content, get_cursor_position=cursor, show_cursor=False),
-            wrap_lines=True, get_line_prefix=lambda line, wrap: "  ",
+            transcript_view, wrap_lines=False,
+            get_vertical_scroll=lambda window: transcript_view.top,
+            scroll_offsets=ScrollOffsets(top=0, bottom=0),
             right_margins=[ScrollbarMargin(display_arrows=False)],
             style="class:conversation", always_hide_cursor=True,
         )
@@ -615,7 +609,7 @@ class Terminal:
             ]), focused_element=editor), key_bindings=bindings,
             full_screen=True, mouse_support=True, style=style,
             editing_mode=EditingMode.VI if self.args.vi else EditingMode.EMACS,
-            refresh_interval=.2,
+            min_redraw_interval=1 / 60, max_render_postpone_time=1 / 60,
         )
         if self.args.prompt:
             submit_text(self.args.prompt)
