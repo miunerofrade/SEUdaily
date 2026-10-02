@@ -16,14 +16,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-asr = ["faster-whisper>=1.2.1"]
 ppt = [
     "img2pdf>=0.6.3",
     "numpy>=2.4.3",
     "opencv-python>=4.13.0.92",
 ]
 media = [
-    "faster-whisper>=1.2.1",
     "img2pdf>=0.6.3",
     "numpy>=2.4.3",
     "opencv-python>=4.13.0.92",

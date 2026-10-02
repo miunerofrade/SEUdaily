@@ -118,7 +118,7 @@ if __name__ == "__main__":
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
-        sys.stderr.write("未安装本地 ASR 可选依赖；请运行 uv sync --extra asr\n")
+        sys.stderr.write("本地 ASR 暂未支持；请使用官方字幕或配置云 ASR\n")
         os._exit(1)
 
     parser = argparse.ArgumentParser()

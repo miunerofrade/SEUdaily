@@ -31,7 +31,7 @@ def _project_root() -> Path:
 def _npm_executable() -> str:
     executable = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if not executable:
-        raise RuntimeError("找不到 npm；请先安装 Node.js 22.13 或更高版本。")
+        raise RuntimeError("找不到 npm；请先安装 Node.js 22.22+（22.x）或 24.12+。")
     return executable
 
 
@@ -59,9 +59,9 @@ def _spawn(command: list[str], root: Path, log: IO[bytes]) -> subprocess.Popen[b
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
     if os.name == "nt":
+        if process.poll() is not None:
+            return
         subprocess.run(
             ["taskkill", "/PID", str(process.pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
@@ -73,6 +73,24 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
+        # npm can exit before Mastra and its MCP/worker children finish draining.
+        # Wait for the whole session, so immediate restarts do not hit a live lock.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            process.poll()  # Reap the session leader if it has exited.
+            try:
+                os.killpg(process.pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _wait_until_ready(processes: list[subprocess.Popen[bytes]], timeout: float = 45) -> None:
@@ -120,6 +138,13 @@ def start() -> int:
             print("\n正在停止 SEUdaily…", flush=True)
             return 0
         finally:
+            # Signal both services before waiting for either one's shutdown.
+            if os.name != "nt":
+                for process in processes:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
             for process in processes:
                 _stop(process)
 

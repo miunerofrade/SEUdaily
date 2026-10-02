@@ -313,8 +313,8 @@ export const getScheduleTool = createTool({
       .describe("Return the complete dynamic semester list exposed by eHall"),
     prefetchAvailableSemesters: z
       .boolean()
-      .default(false)
-      .describe("Sequentially fetch and cache every semester returned by eHall in the authenticated session"),
+      .default(true)
+      .describe("Remote synchronization defaults to fetching and caching every available semester whose academic start year is at least the current Shanghai calendar year minus four through the authenticated API. Set false only when the user explicitly requests synchronization of one semester. Local-only reads never access the network."),
     date: z
       .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)])
       .optional()
@@ -325,8 +325,17 @@ export const getScheduleTool = createTool({
 
 const unifiedCourseTarget = z.object({
   source: z.enum(["schedule", "manual"]),
-  scheduleId: z.string().optional(), courseName: z.string().optional(), teacherName: z.string().optional(),
-  weeklyPeriods: z.array(z.number().int().min(1).max(13)).optional(), courseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), semester: z.string().optional(),
+  scheduleId: z.string().trim().min(1).optional(), courseName: z.string().trim().min(1).optional(), teacherName: z.string().trim().min(1).optional(),
+  weeklyPeriods: z.array(z.number().int().min(1).max(13)).min(1).max(13).optional(), courseDate: z.iso.date().optional(), semester: z.string().optional(),
+}).superRefine((value, context) => {
+  if (value.source === "schedule" && !value.scheduleId) {
+    context.addIssue({ code: "custom", path: ["scheduleId"], message: "schedule 目标必须提供 scheduleId" });
+  }
+  if (value.source === "manual") {
+    for (const field of ["courseName", "teacherName", "weeklyPeriods"] as const) {
+      if (!value[field]) context.addIssue({ code: "custom", path: [field], message: `manual 目标必须提供 ${field}` });
+    }
+  }
 });
 
 export const resolveCourseTool = createTool({
@@ -408,7 +417,7 @@ export const auditTrainingPlanTool = createTool({
     planId: z.string().optional().describe("当 eHall 返回多个个人方案时，可指定准确的方案 ID"),
     refresh: z.boolean().default(false).describe("核查前从 eHall 刷新个人方案；除非用户明确要求同步，否则保持 false"),
   }),
-  execute: async (context, options) => runPythonTool("analyze-training-plan", context, options?.abortSignal),
+  execute: async (context, options) => runAuthAwareTool("schedule", "training-plan", "analyze-training-plan", context, options),
 });
 
 const searchJwcTool = createTool({

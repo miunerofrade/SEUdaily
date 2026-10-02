@@ -183,13 +183,25 @@ type LibraryFile = { path: string; relativePath: string; name: string; size: num
 
 const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images")];
 
-function safeLibraryTarget(path: string) {
+function isWithinDirectory(root: string, target: string, allowRoot = false) {
+  const child = relative(root, target);
+  return (allowRoot || Boolean(child)) && child !== ".." && !child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(child);
+}
+
+async function safeLibraryTarget(path: string) {
   const target = resolve(path);
-  const allowed = libraryRoots.some((root) => {
-    const child = relative(root, target);
-    return Boolean(child) && !child.startsWith("..") && !isAbsolute(child);
-  });
-  return allowed ? target : null;
+  for (const root of libraryRoots) {
+    if (!isWithinDirectory(root, target)) continue;
+    const canonicalRoot = await realpath(root).catch(() => null);
+    const canonicalTarget = await realpath(target).catch(() => null);
+    // Keep the configured root itself inside the project, even if it is a symlink.
+    const canonicalProject = await realpath(projectRoot).catch(() => null);
+    if (!canonicalRoot || !canonicalTarget || !canonicalProject) return null;
+    if (!isWithinDirectory(canonicalProject, canonicalRoot)) return null;
+    if (!isWithinDirectory(canonicalRoot, canonicalTarget)) return null;
+    return canonicalTarget;
+  }
+  return null;
 }
 
 function previewContentType(path: string) {
@@ -214,7 +226,11 @@ function libraryIdentity(root: string, path: string) {
 
 async function walkFiles(root: string, directory = root, output: LibraryFile[] = [], seen = new Set<string>()) {
   if (output.length >= 1000) return output;
-  const resolvedDirectory = await realpath(directory).catch(() => directory);
+  const canonicalRoot = await realpath(root).catch(() => null);
+  const canonicalProject = await realpath(projectRoot).catch(() => null);
+  const resolvedDirectory = await realpath(directory).catch(() => null);
+  if (!canonicalRoot || !canonicalProject || !resolvedDirectory) return output;
+  if (!isWithinDirectory(canonicalProject, canonicalRoot) || !isWithinDirectory(canonicalRoot, resolvedDirectory, true)) return output;
   if (seen.has(resolvedDirectory)) return output;
   seen.add(resolvedDirectory);
   let entries;
@@ -226,6 +242,8 @@ async function walkFiles(root: string, directory = root, output: LibraryFile[] =
   for (const entry of entries) {
     if (output.length >= 1000 || entry.name.startsWith(".")) continue;
     const fullPath = resolve(directory, entry.name);
+    const canonicalFile = await realpath(fullPath).catch(() => null);
+    if (!canonicalFile || !isWithinDirectory(canonicalRoot, canonicalFile)) continue;
     const details = await stat(fullPath).catch(() => null);
     if (!details) continue;
     if (details.isDirectory()) {
@@ -270,18 +288,30 @@ function encodeEnvValue(value: string) {
   return /^[A-Za-z0-9_./:@-]*$/.test(value) ? value : JSON.stringify(value);
 }
 
-async function updateEnvFile(updates: Record<string, string>) {
+let envWriteQueue: Promise<void> = Promise.resolve();
+
+async function persistEnvFile(updates: Record<string, string>) {
   const target = resolve(projectRoot, ".env");
   let content = await readEnvFile();
   for (const [key, value] of Object.entries(updates)) {
     const line = `${key}=${encodeEnvValue(value)}`;
     const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, "m");
-    content = pattern.test(content) ? content.replace(pattern, line) : `${content.trimEnd()}${content.trim() ? "\n" : ""}${line}\n`;
-    process.env[key] = value;
+    content = pattern.test(content) ? content.replace(pattern, () => line) : `${content.trimEnd()}${content.trim() ? "\n" : ""}${line}\n`;
   }
-  const temporary = `${target}.tmp`;
-  await writeFile(temporary, content, "utf8");
-  await rename(temporary, target);
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporary, target);
+    for (const [key, value] of Object.entries(updates)) process.env[key] = value;
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+
+function updateEnvFile(updates: Record<string, string>) {
+  const operation = envWriteQueue.then(() => persistEnvFile(updates));
+  envWriteQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 function legacyEnvironmentName(name: string) {
@@ -325,7 +355,7 @@ export const appRoutes = [
       const refresh = c.req.query("refresh") === "true";
       const semester = c.req.query("semester")?.trim();
       const includeAvailableSemesters = c.req.query("includeSemesters") === "true";
-      const prefetchAvailableSemesters = c.req.query("prefetchSemesters") === "true";
+      const prefetchAvailableSemesters = c.req.query("prefetchSemesters") !== "false";
       const result = await runPythonTool<ToolResult>("get-schedule", {
         refresh,
         includeAvailableSemesters,
@@ -565,7 +595,7 @@ export const appRoutes = [
     handler: async (c: any) => {
       const requested = c.req.query("path");
       if (!requested) return c.json({ error: "缺少文件路径" }, 400);
-      const target = safeLibraryTarget(requested);
+      const target = await safeLibraryTarget(requested);
       if (!target) return c.json({ error: "只能预览资料库内的文件" }, 403);
       const details = await stat(target).catch(() => null);
       if (!details?.isFile()) return c.json({ error: "文件不存在" }, 404);
@@ -580,7 +610,7 @@ export const appRoutes = [
     handler: async (c: any) => {
       const body = await c.req.json() as { path?: unknown };
       if (typeof body.path !== "string") return c.json({ error: "缺少文件路径" }, 400);
-      const target = safeLibraryTarget(body.path);
+      const target = await safeLibraryTarget(body.path);
       if (!target) return c.json({ error: "只能删除资料库内的文件" }, 403);
       await unlink(target);
       return c.json({ deleted: true, path: target });

@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { MCPClient } from "@mastra/mcp";
 
-import { projectRoot } from "../runtime-paths.js";
+import { envValue, projectRoot } from "../runtime-paths.js";
 import { isUnapprovedAccessEnabled } from "../permission-state.js";
+import { playwrightBrowserConfig } from "./browser-config.js";
 
 const outputDir = resolve(projectRoot, ".seudaily", "browser");
 mkdirSync(outputDir, { recursive: true });
@@ -13,11 +14,13 @@ let clientPromise: Promise<MCPClient> | undefined;
 let toolsPromise: Promise<Record<string, any>> | undefined;
 
 async function loadBrowserTools() {
+  const configPath = resolve(outputDir, "playwright-config.json");
+  if (!clientPromise) writeFileSync(configPath, JSON.stringify(playwrightBrowserConfig(process.platform, envValue("SEUDAILY_BROWSER"))), "utf8");
   if (!clientPromise) clientPromise = Promise.resolve(new MCPClient({
     id: "seudaily-playwright", timeout: 60_000,
     servers: { playwright: {
       command: process.execPath,
-      args: [resolve(projectRoot, "node_modules", "@playwright", "mcp", "cli.js"), "--headless", "--isolated", "--browser", "msedge", "--block-service-workers", "--codegen", "none", "--image-responses", "omit", "--snapshot-mode", "none", "--idle-timeout", "900000", "--output-dir", outputDir],
+      args: [resolve(projectRoot, "node_modules", "@playwright", "mcp", "cli.js"), "--config", configPath, "--headless", "--isolated", "--block-service-workers", "--codegen", "none", "--image-responses", "omit", "--snapshot-mode", "full", "--idle-timeout", "900000", "--output-dir", outputDir],
       inheritDefaultEnv: true, forwardInstructions: false, timeout: 60_000,
       requireToolApproval: ({ toolName }) => !isUnapprovedAccessEnabled() && approvalRequiredTools.has(toolName),
     } },

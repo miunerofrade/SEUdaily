@@ -16,6 +16,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser_runtime import browser_runtime
+from .campus_network import network_category
 from .runtime_paths import env_value
 
 
@@ -37,8 +38,16 @@ SCHEDULE_DATA_URL = (
 )
 
 
+class _SchedulePageLoadTimeout(PlaywrightTimeoutError):
+    """The timetable has not initialized its current semester yet."""
+
+
 class ScheduleService:
     """Fetch and cache a normalized timetable without retaining raw private data."""
+
+    @staticmethod
+    def _earliest_sync_year() -> int:
+        return datetime.now(timezone(timedelta(hours=8))).year - 4
 
     def __init__(
         self,
@@ -294,9 +303,19 @@ class ScheduleService:
         include_available_semesters: bool = False,
     ) -> dict[str, Any]:
         label = page.locator("#dqxnxq2")
-        label.wait_for(state="attached", timeout=15000)
-        current_value = str(label.get_attribute("value") or "").strip()
-        current_label = label.inner_text().strip()
+        try:
+            page.wait_for_function(
+                """
+                () => /^\\d{4}-\\d{4}-\\d+$/.test(
+                  document.querySelector('#dqxnxq2')?.getAttribute('value') || ''
+                )
+                """,
+                timeout=30000,
+            )
+            current_value = str(label.get_attribute("value") or "").strip()
+            current_label = label.inner_text().strip()
+        except PlaywrightTimeoutError as exc:
+            raise _SchedulePageLoadTimeout("课表当前学期信息尚未加载完成") from exc
         requested = str(semester or "").strip()
         selection_is_current = not requested or cls._semester_matches(
             requested, value=current_value, label=current_label
@@ -951,13 +970,13 @@ class ScheduleService:
         for option in available_semesters:
             value = str(option.get("value") or "").strip()
             label = str(option.get("label") or value).strip()
-            if not SEMESTER_CODE_PATTERN.fullmatch(value) or value in seen:
+            if not SEMESTER_CODE_PATTERN.fullmatch(value) or int(value[:4]) < self._earliest_sync_year() or value in seen:
                 continue
             seen.add(value)
             try:
                 response = page.request.post(
                     SCHEDULE_DATA_URL,
-                    form={"*order": "+KSJC", "XNXQDM": value},
+                    form={"*order": "+KSJC", "XNXQDM": value, "pageSize": 10000, "pageNumber": 1},
                     timeout=30000,
                 )
                 if not response.ok:
@@ -970,6 +989,10 @@ class ScheduleService:
                     )
                     continue
                 payload = response.json()
+                dataset = payload.get("datas", {}).get("xskcb", {}) if isinstance(payload, dict) else {}
+                if not isinstance(dataset, dict) or not isinstance(dataset.get("rows"), list):
+                    failures.append({"value": value, "label": label, "message": "课表接口未返回有效排课数据，原缓存已保留。"})
+                    continue
                 courses = self._normalize_rows(self._rows_from_payload(payload))
                 for course in courses:
                     course["semester"] = value
@@ -1002,6 +1025,8 @@ class ScheduleService:
                     }
                 )
             except Exception as exc:
+                if network_category("get-schedule", {"targetUrl": self.target_url}, exc):
+                    raise
                 failures.append(
                     {
                         "value": value,
@@ -1018,6 +1043,53 @@ class ScheduleService:
             },
         }
 
+    def _fetch_api_schedule(
+        self, page, semester, *, include_available_semesters, prefetch_available_semesters
+    ) -> dict[str, Any] | None:
+        """Use the same authenticated endpoints as the portal, without UI switching."""
+        base = "https://ehall.seu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/"
+        metadata = {}
+        for name in ("dqxnxq", "xnxqcx"):
+            response = page.request.post(base + name + ".do", form={"*order": "+DM", "pageSize": 10000}, timeout=30000)
+            if response.status in {401, 403}:
+                return {"status": "auth_required", "message": "课表登录会话不存在或已失效，请重新授权。"}
+            if not response.ok:
+                return {"status": "failed", "message": f"课表学期接口请求失败：HTTP {response.status}"}
+            try:
+                payload = response.json()
+            except ValueError:
+                return None
+            rows = payload.get("datas", {}).get(name, {}).get("rows") if isinstance(payload, dict) else None
+            if not isinstance(rows, list) or not rows:
+                return None
+            metadata[name] = rows
+        current = str(metadata["dqxnxq"][0].get("DM") or "").strip()
+        current_label = str(metadata["dqxnxq"][0].get("MC") or current).strip()
+        if not SEMESTER_CODE_PATTERN.fullmatch(current):
+            return None
+        available = [{"value": str(row.get("DM") or "").strip(), "label": str(row.get("MC") or "").strip()}
+                     for row in metadata["xnxqcx"] if isinstance(row, dict) and SEMESTER_CODE_PATTERN.fullmatch(str(row.get("DM") or "").strip()) and int(str(row["DM"]).strip()[:4]) >= self._earliest_sync_year()]
+        selected = str(semester or current).strip()
+        info = {"requestedSemester": semester, "currentSemester": current, "currentSemesterLabel": current_label,
+                "selectedSemester": selected, "selectedSemesterLabel": next((item["label"] for item in available if item["value"] == selected), current_label),
+                "availableSemesters": available if include_available_semesters or prefetch_available_semesters else []}
+        if selected not in {item["value"] for item in available}:
+            return {"status": "semester_not_found", "found": False, **info, "message": "请求的学期不在课表系统可选列表中。"}
+        batch = self._prefetch_remote_semesters(
+            page, available_semesters=available if prefetch_available_semesters else [item for item in available if item["value"] == selected],
+            current_semester=current, current_semester_label=current_label,
+        )
+        cache_file = self.cache_file if selected == current else self._cache_file_for_semester(selected)
+        cached = self._load_cache_file(cache_file) or {"courses": [], "count": 0}
+        result = {**cached, **info, **batch, "found": True, "source": "api", "cacheFile": str(cache_file.resolve()),
+                  "status": "partial" if batch["prefetchFailures"] else "fresh" if cached["courses"] else "empty"}
+        if batch["prefetchFailures"]:
+            result["message"] = "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
+        if selected in batch["prefetchCounts"]:
+            self._write_json_atomic(cache_file, result)
+        self._save_cookies(page)
+        return result
+
     def _fetch_remote(
         self,
         semester: str | None = None,
@@ -1027,6 +1099,10 @@ class ScheduleService:
     ) -> dict[str, Any]:
         payloads: list[tuple[str, Any]] = []
         with self._page(visible=False) as page:
+            if self.target_url == DEFAULT_SCHEDULE_URL:
+                api_result = self._fetch_api_schedule(page, semester, include_available_semesters=include_available_semesters, prefetch_available_semesters=prefetch_available_semesters)
+                if api_result is not None:
+                    return api_result
             def collect(response) -> None:
                 if not response.url.endswith(
                     "/modules/xskcb/xskcb.do"
@@ -1068,11 +1144,17 @@ class ScheduleService:
                         or prefetch_available_semesters
                     ),
                 )
+            except _SchedulePageLoadTimeout:
+                return {
+                    "status": "page_load_failed",
+                    "requestedSemester": semester,
+                    "message": "课表页面加载未完成，请稍后重试。",
+                }
             except PlaywrightTimeoutError:
                 return {
                     "status": "semester_switch_failed",
                     "requestedSemester": semester,
-                    "message": "课表页面未能完成学期切换，请重新登录后再试。",
+                    "message": "课表页面未能完成学期切换，请稍后重试。",
                 }
             if not semester_info["found"]:
                 return {
@@ -1121,6 +1203,14 @@ class ScheduleService:
                     current_semester=semester_info["currentSemester"],
                     current_semester_label=semester_info["currentSemesterLabel"],
                 )
+                if selected_semester in prefetch_result["prefetchCounts"]:
+                    selected_cache = (
+                        self.cache_file
+                        if selected_semester == semester_info["currentSemester"]
+                        else self._cache_file_for_semester(selected_semester)
+                    )
+                    courses = json.loads(selected_cache.read_text(encoding="utf-8"))["courses"]
+                    source = "api"
             self._save_cookies(page)
 
         result = {
@@ -1135,6 +1225,9 @@ class ScheduleService:
         }
         if not courses:
             result["message"] = "页面已通过认证，但这个学期没有课表数据。"
+        if prefetch_result.get("prefetchFailures"):
+            result["status"] = "partial"
+            result["message"] = "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
         cache_file = (
             self.cache_file
             if selected_semester == semester_info["currentSemester"]
@@ -1150,7 +1243,7 @@ class ScheduleService:
         local_only: bool = False,
         semester: str | None = None,
         include_available_semesters: bool = False,
-        prefetch_available_semesters: bool = False,
+        prefetch_available_semesters: bool = True,
         target_date: str | None = None,
     ) -> dict[str, Any]:
         requested = str(semester or "").strip()
@@ -1180,7 +1273,6 @@ class ScheduleService:
             cached is not None
             and not refresh
             and not include_available_semesters
-            and not prefetch_available_semesters
         ):
             result = {
                 **cached,

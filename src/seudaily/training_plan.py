@@ -11,6 +11,7 @@ from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from .campus_network import network_category
 from .browser_runtime import browser_runtime
 from .schedule import DEFAULT_USER_AGENT
 
@@ -1064,8 +1065,9 @@ class TrainingPlanService:
                 except PlaywrightTimeoutError:
                     pass
                 page.wait_for_timeout(1500)
-            except PlaywrightTimeoutError:
-                pass
+            except PlaywrightTimeoutError as error:
+                if network_category("get-training-plan", {}, error):
+                    raise
 
             if self._is_auth_page(page.url) or PLAN_APP_PATH not in page.url:
                 return {

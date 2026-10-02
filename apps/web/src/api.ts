@@ -561,11 +561,11 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function fetchSchedule(refresh = false, semester = "", includeSemesters = false, prefetchSemesters = false) {
+export function fetchSchedule(refresh = false, semester = "", includeSemesters = false, prefetchSemesters = true) {
   const params = new URLSearchParams({ refresh: String(refresh) });
   if (semester.trim()) params.set("semester", semester.trim());
   if (includeSemesters) params.set("includeSemesters", "true");
-  if (prefetchSemesters) params.set("prefetchSemesters", "true");
+  params.set("prefetchSemesters", String(prefetchSemesters));
   return jsonRequest<ScheduleResponse>(`/app/schedule?${params}`);
 }
 

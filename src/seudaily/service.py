@@ -1182,15 +1182,8 @@ class CourseService:
             return CloudASRWorker(
                 {"asr_api_key": key, "asr_model_version": model}, self.export_dir
             )
-        selected_model = model_path or env_value("SEUDAILY_WHISPER_MODEL", "")
-        if not selected_model:
-            return UnavailableASRWorker(
-                "未配置本地 ASR 模型；官方字幕缺失时请设置 SEUDAILY_WHISPER_MODEL"
-            )
-        from .asr.local import LocalASRWorker
-
-        return LocalASRWorker(
-            selected_model, str(self.export_dir)
+        return UnavailableASRWorker(
+            "本地 ASR 暂未支持；官方字幕缺失时请配置云 ASR 并选择 cloud 引擎"
         )
 
 
@@ -1217,12 +1210,7 @@ class UnavailableASRWorker:
 def transcribe_local(
     *, media_path: str, model_path: str, output_dir: str, task_name: str
 ) -> dict[str, Any]:
-    worker = LocalASRWorker(model_path, output_dir)
-    worker.temp_video_path = str(Path(media_path).resolve())
-    worker.cleanup_temp_media = False
-    events = list(worker.transcribe_and_export(task_name))
-    final = events[-1] if events else {}
-    return {"events": events, "transcriptPath": final.get("txt_path")}
+    raise RuntimeError("本地 ASR 暂未支持；请使用官方字幕或云 ASR")
 
 
 def transcribe_cloud(
@@ -1233,6 +1221,8 @@ def transcribe_cloud(
     api_key: str | None = None,
     model: str = "paraformer-realtime-v2",
 ) -> dict[str, Any]:
+    from .asr.cloud import CloudASRWorker
+
     worker = CloudASRWorker(
         {
             "asr_api_key": api_key or env_value("SEUDAILY_ASR_API_KEY", ""),
@@ -1249,6 +1239,11 @@ def transcribe_cloud(
 def extract_slides(
     *, video_path: str, output_dir: str, task_name: str, interval_sec: int = 10
 ) -> dict[str, Any]:
+    try:
+        from .ppt import PPTExtractor
+    except ModuleNotFoundError as error:
+        raise RuntimeError("未安装 PPT 可选依赖；请运行 uv sync --frozen --extra ppt") from error
+
     extractor = PPTExtractor(video_path, output_dir, task_name, interval_sec=interval_sec)
     logs = list(extractor.extract_and_build_pdf())
     pdf_path = Path(output_dir) / f"{task_name}_PPT.pdf"

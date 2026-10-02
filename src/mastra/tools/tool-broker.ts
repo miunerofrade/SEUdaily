@@ -78,8 +78,9 @@ function capabilityScore(capability: Capability, query: string) {
 function jsonSchema(tool: AnyTool) {
   const schema = tool.inputSchema as any;
   try {
+    if (schema instanceof z.ZodType) return z.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
     if (schema?.toJSONSchema) return schema.toJSONSchema();
-    return z.toJSONSchema(schema);
+    return z.toJSONSchema(schema, { io: "input", unrepresentable: "any" });
   } catch {
     return { type: "object", additionalProperties: true };
   }

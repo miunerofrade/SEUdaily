@@ -4,9 +4,11 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 
 import { standardToolOutput, type ToolResult } from "./tool-result.js";
+import { normalizePublicUrl } from "./public-url.js";
+
+export { normalizePublicUrl } from "./public-url.js";
 
 const TAVILY_EXTRACT_ENDPOINT = "https://api.tavily.com/extract";
-const SENSITIVE_QUERY_KEY = /token|key|auth|signature|cookie|credential|password|secret/i;
 
 const extractResponseSchema = z.object({
   results: z.array(z.object({
@@ -34,56 +36,6 @@ export const webFetchInputSchema = z.object({
   format: z.enum(["markdown", "text"]).default("markdown"),
   timeoutSeconds: z.number().min(5).max(60).default(20),
 });
-
-function isPrivateIpv4(hostname: string): boolean {
-  const parts = hostname.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-  const [first, second] = parts;
-  return (
-    first === 0 ||
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    first >= 224
-  );
-}
-
-export function normalizePublicUrl(value: string): string {
-  const url = new URL(value);
-  const safeLabel = `${url.origin}${url.pathname}`;
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new Error(`只允许 HTTP(S) URL：${safeLabel}`);
-  }
-  if (url.username || url.password) {
-    throw new Error(`URL 不能包含登录凭据：${safeLabel}`);
-  }
-  const hostname = url.hostname.toLowerCase();
-  if (hostname === "seu.edu.cn" || hostname.endsWith(".seu.edu.cn")) {
-    throw new Error(`校园域名不允许发送到远程网页提取：${safeLabel}`);
-  }
-  if (
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") ||
-    isPrivateIpv4(hostname) ||
-    hostname === "::" ||
-    hostname === "::1" ||
-    hostname.startsWith("fc") ||
-    hostname.startsWith("fd") ||
-    hostname.startsWith("fe80:")
-  ) {
-    throw new Error(`拒绝本地或私网 URL：${safeLabel}`);
-  }
-  if ([...url.searchParams.keys()].some((key) => SENSITIVE_QUERY_KEY.test(key))) {
-    throw new Error(`URL 包含可能泄露凭据的查询参数：${safeLabel}`);
-  }
-  url.hash = "";
-  return url.toString();
-}
 
 function failedResult(taskId: string, summary: string, elapsedMs: number): ToolResult {
   return {

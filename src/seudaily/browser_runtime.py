@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 import atexit
+import sys
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+
+from .runtime_paths import env_value
+
+
+def selected_browser() -> str:
+    """Use the platform browser family, with an explicit environment override."""
+    configured = (env_value("SEUDAILY_BROWSER") or "auto").strip().lower() or "auto"
+    if configured == "safari":
+        configured = "webkit"
+    if configured == "auto":
+        return "msedge" if sys.platform == "win32" else "webkit" if sys.platform == "darwin" else "firefox"
+    if configured not in {"msedge", "webkit", "firefox", "chromium"}:
+        raise ValueError("SEUDAILY_BROWSER 必须为 auto、msedge、webkit、safari、firefox 或 chromium")
+    return configured
+
+
+def launch_browser(playwright: Playwright, *, visible: bool) -> Browser:
+    backend = selected_browser()
+    options: dict[str, Any] = {"headless": not visible}
+    if backend in {"msedge", "chromium"}:
+        options["args"] = ["--disable-blink-features=AutomationControlled", "--mute-audio"]
+        options["args"].extend(
+            ["--window-position=0,0", "--start-maximized"] if visible else ["--window-size=1920,1080"]
+        )
+        if backend == "msedge":
+            options["channel"] = "msedge"
+        return playwright.chromium.launch(**options)
+    return getattr(playwright, backend).launch(**options)
 
 
 class BrowserRuntime:
@@ -34,15 +63,7 @@ class BrowserRuntime:
     def _ensure_browser(self) -> Browser:
         playwright = self._ensure_playwright()
         if self._browser is None or not self._browser.is_connected():
-            self._browser = playwright.chromium.launch(
-                channel="msedge",
-                headless=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--mute-audio",
-                    "--window-size=1920,1080",
-                ],
-            )
+            self._browser = launch_browser(playwright, visible=False)
             self._contexts.clear()
         return self._browser
 
@@ -59,16 +80,7 @@ class BrowserRuntime:
             temporary_browser: Browser | None = None
             temporary_context: BrowserContext | None = None
             if visible:
-                temporary_browser = playwright.chromium.launch(
-                    channel="msedge",
-                    headless=False,
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--mute-audio",
-                        "--window-position=0,0",
-                        "--start-maximized",
-                    ],
-                )
+                temporary_browser = launch_browser(playwright, visible=True)
                 temporary_context = temporary_browser.new_context(**context_options)
                 context = temporary_context
             else:

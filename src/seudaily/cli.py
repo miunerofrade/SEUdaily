@@ -7,6 +7,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .campus_network import failure_result, network_category, sanitize_campus_result
 from . import __version__
 from .document_parser import parse_document
 from .service import (
@@ -134,7 +135,7 @@ def _resolve_course_target(
     raise ValueError("target.source 必须是 schedule 或 manual")
 
 
-def dispatch(request: dict[str, Any]) -> dict[str, Any]:
+def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
@@ -159,7 +160,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
                 "includeAvailableSemesters", False
             ),
             prefetch_available_semesters=payload.get(
-                "prefetchAvailableSemesters", False
+                "prefetchAvailableSemesters", True
             ),
             target_date=payload.get("date"),
         )
@@ -362,6 +363,19 @@ def dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "parse-document":
         return parse_document(path=payload["path"], filename=payload.get("filename"))
     raise ValueError(f"未知工具动作: {action}")
+
+
+def dispatch(request: dict[str, Any]) -> dict[str, Any]:
+    action = str(request.get("action") or "")
+    payload = request.get("payload") or {}
+    try:
+        result = _dispatch(request)
+    except Exception as error:
+        category = network_category(action, payload, error)
+        if category is None:
+            raise
+        return failure_result(category)
+    return sanitize_campus_result(action, payload, result)
 
 
 def main() -> None:

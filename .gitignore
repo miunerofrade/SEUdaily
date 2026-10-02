@@ -38,3 +38,12 @@ PROBLEMS.md
 cookies.json
 src/mastra/public/temp_workspace/
 tmp/
+
+# npm source template and local packages
+template/
+*.tgz
+.env.*
+!.env.example
+.pytest_cache/
+
+.DS_Store

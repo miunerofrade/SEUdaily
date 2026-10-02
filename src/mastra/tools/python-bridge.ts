@@ -101,6 +101,11 @@ class PythonWorkerClient {
   }
 
   call<T>(action: string, payload: Record<string, unknown>, abortSignal?: AbortSignal): Promise<T> {
+    if (abortSignal?.aborted) {
+      const error = new Error(`Python tool cancelled: ${action}`);
+      error.name = "AbortError";
+      return Promise.reject(error);
+    }
     const child = this.ensureWorker();
     const requestId = randomUUID();
     const taskId = `task-${randomUUID()}`;
