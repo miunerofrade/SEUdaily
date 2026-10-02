@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/mastra/**/*.ts"]
+  "include": ["src/mastra/**/*.ts", "src/agent/**/*.ts"]
 }
