@@ -6,18 +6,14 @@ import {
   ChevronRight,
   CircleAlert,
   CircleStop,
-  Clock3,
   Copy,
   FileAudio,
   FileText,
-  FolderOpen,
   Hand,
   Link2,
   ListChecks,
   Menu,
   Paperclip,
-  PanelRightClose,
-  PanelRightOpen,
   PanelLeft,
   Pencil,
   Plus,
@@ -1337,8 +1333,8 @@ export default function App() {
           <button className="icon-button menu-button" onClick={() => setNavOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
           {active.messages.length ? <h1>{active.title}</h1> : <span className="topbar-product">SEUdaily</span>}
           <div className="topbar-actions">
-            <button className="icon-button" onClick={() => setRightOpen((value) => !value)} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
-              {rightOpen ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
+            <button className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => setRightOpen((value) => !value)} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="5" cy="6" r="2.5" /><path d="M13 6h8" /><circle cx="5" cy="18" r="2.5" /><path d="M13 18h8" /></svg>
             </button>
           </div>
         </header>
@@ -1371,7 +1367,7 @@ export default function App() {
       </main>}
 
       <aside className={`inspector ${rightOpen && view === "chat" ? "open" : ""}`}>
-        <div className="inspector-head"><div><span className="eyebrow">WORKSPACE</span><h2>任务与资料</h2></div><button className="icon-button" onClick={() => setRightOpen(false)} aria-label="关闭任务面板" title="关闭任务面板"><PanelRightClose size={19} /></button></div>
+        <div className="inspector-head"><div><span className="eyebrow">WORKSPACE</span><h2>任务与资料</h2></div><button className="icon-button" onClick={() => setRightOpen(false)} aria-label="关闭任务面板" title="关闭任务面板"><X size={17} /></button></div>
         <div className="inspector-scroll">
           <RamDiskPanel active={rightOpen && view === "chat"} />
           <section className="inspector-section">
