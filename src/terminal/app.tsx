@@ -1,3 +1,4 @@
+import { followSelection } from "./viewport.js";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Box,
@@ -149,6 +150,7 @@ export function App({ session, copy = copySelection }: {
   const [dayStart, setDayStart] = useState(0);
   const [programSemester, setProgramSemester] = useState("all");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [suggestionTop, setSuggestionTop] = useState(0);
   const inputLayout = editorRows(input, caret, width - 4);
   const inputCapacity = Math.min(7, Math.max(1, inputLayout.rows.length));
   const inputHeight = page === "chat" ? inputCapacity + 2 : 0;
@@ -356,13 +358,12 @@ export function App({ session, copy = copySelection }: {
         input,
         session.catalog.map((s) => s.name),
       );
-  useEffect(() => setSuggestionIndex(0), [input]);
+  useEffect(() => { setSuggestionIndex(0); setSuggestionTop(0); }, [input]);
   const selectedSuggestion =
     suggestions[Math.min(suggestionIndex, Math.max(0, suggestions.length - 1))];
-  const suggestionTop = Math.max(
-    0,
-    Math.min(suggestionIndex - 4, suggestions.length - 5),
-  );
+  useEffect(() => {
+    setSuggestionTop(current => followSelection(current, suggestionIndex, 5, suggestions.length));
+  }, [suggestionIndex, suggestions.length]);
   const suggestionDescription = (value: string) => {
     const parts = value.trim().split(/\s+/),
       name = parts[0].slice(1);
@@ -429,8 +430,13 @@ export function App({ session, copy = copySelection }: {
     );
   };
   const cancel = () => void session.cancel();
-  const wheel = (amount: number, x?: number, y?: number) => {
+  const wheel = (amount: number, x?: number, y?: number, horizontal = false) => {
     if (selectionRef.current) clearSelection();
+    if (horizontal) {
+      if (isGrid && !modal && !detail && !decisions)
+        setDayStart(current => Math.max(0, Math.min(7 - gridGeometry(width).days, current + amount)));
+      return;
+    }
     if (modal === "resume") { resumePicker.current?.scroll(amount); return; }
     if (session.reasoningExpanded && inReasoning(x, y)) {
       setReasoningOffset((current) => Math.max(
@@ -552,10 +558,16 @@ export function App({ session, copy = copySelection }: {
       const events = [...pending.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/g)];
       for (const event of events) {
         const button = Number(event[1]);
-        if (button === 64 || button === 65)
-          wheelRef.current(
-            button === 64 ? -3 : 3, Number(event[2]) - 1, Number(event[3]) - 1,
-          );
+        if (button & 64) {
+          // SGR reports horizontal wheels as 66/67. Some terminals use Shift+64/65.
+          const direction = button & ~(4 | 8 | 16);
+          const horizontal = direction === 66 || direction === 67 || Boolean(button & 4);
+          if (event[4] === "M" && direction >= 64 && direction <= 67)
+            wheelRef.current(
+              (direction % 2 === 0 ? -1 : 1) * (horizontal ? 1 : 3),
+              Number(event[2]) - 1, Number(event[3]) - 1, horizontal,
+            );
+        }
         else {
           const point = { x: Math.max(0, Number(event[2]) - 1), y: Math.max(0, Number(event[3]) - 1) };
           if ((button & 3) !== 0) continue;
