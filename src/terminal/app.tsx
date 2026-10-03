@@ -165,9 +165,14 @@ export function App({ session, copy = copySelection }: {
     !session.pending &&
     !session.confirmation;
   const reasoningRef = useRef<DOMElement | null>(null);
+  const latestAnswer = [...messages].reverse().find(message => message.role === "SEUdaily");
+  const activeReasoning = [...(latestAnswer?.process ?? [])].reverse().find(part => part.type === "reasoning")?.text
+    ?? latestAnswer?.reasoning ?? "";
+  const reasoningLines = wrap(activeReasoning, Math.max(1, width - 20));
+  const reasoningCapacity = Math.min(8, Math.max(1, Math.floor(rows / 3)));
   const showReasoning = page === "chat" && !session.pending &&
-    !session.confirmation && (showThinking || messages.some(message => !!message.reasoning));
-  const reasoningHeight = showReasoning ? 1 : 0;
+    !session.confirmation && (showThinking || (session.reasoningExpanded && !!activeReasoning));
+  const reasoningHeight = showReasoning ? 1 + (session.reasoningExpanded ? Math.min(reasoningCapacity, reasoningLines.length) : 0) : 0;
   const toggleReasoning = () => {
     session.reasoningExpanded = !session.reasoningExpanded;
     session.changed();
@@ -1357,9 +1362,12 @@ export function App({ session, copy = copySelection }: {
               : <Text color={color.muted}>模型思考</Text>}
             <Text color={color.muted} wrap="truncate">
               {session.reasoningExpanded ? " ▾ " : " ▸ "}
-              {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : "点击展开 · Ctrl+T"}
+              {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : `${reasoningLines.at(-1) || "等待模型返回思考内容"} · Ctrl+T 展开`}
             </Text>
           </Box>
+          {session.reasoningExpanded && reasoningLines.slice(-reasoningCapacity).map((line, index) => (
+            <Text key={index} color={color.muted}>{line}</Text>
+          ))}
         </Box>
       )}
       {page === "chat" && (

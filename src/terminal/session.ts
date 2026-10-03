@@ -424,12 +424,19 @@ export class Session extends EventEmitter {
         if (event.type === "text-delta") {
           message.text += clean(p.text ?? "");
           append("text", clean(p.text ?? ""));
-          if (p.text) this.thinking = false;
+          if (p.text) {
+            this.thinking = false;
+            this.reasoningExpanded = false;
+          }
         } else if (event.type === "reasoning-start") {
           this.status = "正在思考";
           this.thinking = true;
           append("reasoning", "", true);
-        } else if (event.type === "reasoning-end") this.status = "正在回答";
+        } else if (event.type === "reasoning-end") {
+          this.status = "正在回答";
+          this.thinking = false;
+          this.reasoningExpanded = false;
+        }
         else if (event.type === "reasoning-delta") {
           message.reasoning += clean(p.text ?? "");
           append("reasoning", clean(p.text ?? ""));

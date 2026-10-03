@@ -15,15 +15,7 @@ export function processLines(message: TerminalMessage, width: number, expanded: 
     if (part.type === "text") return part.text ? messageLines({ role: "SEUdaily", text: part.text }, width) : [];
     if (part.type === "tool") return messageLines({ role: "SEUdaily", text: part.text }, width)
       .map(line => line.map(span => ({ ...span, muted: true })));
-    const body = messageLines({ role: "SEUdaily", text: part.text }, Math.max(1, width - 2));
-    const preview = part.text.trim().split("\n").filter(Boolean).at(-1) ?? "等待模型返回思考内容";
-    const label = message.streaming ? "模型思考" : "已完成思考";
-    if (!expanded) {
-      const lines = messageLines({ role: "SEUdaily", text: `▸ ${label} · ${preview}` }, width);
-      return [lines[0].map(span => ({ ...span, muted: true })), [{ text: " " }]];
-    }
-    return [[{ text: `▾ ${label}`, muted: true }], ...body.map(line =>
-      [{ text: "  ", muted: true }, ...line.map(span => ({ ...span, muted: true }))])];
+    return [[{ text: "▸ 思考", muted: true }], [{ text: " " }]];
   });
   cache.set(message, { key, lines });
   return lines;
