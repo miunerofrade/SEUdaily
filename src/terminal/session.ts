@@ -100,6 +100,7 @@ export interface TerminalMessage {
   role: string;
   text: string;
   reasoning?: string;
+  welcome?: boolean;
 }
 export class Session extends EventEmitter {
   client: Client;
@@ -215,8 +216,12 @@ export class Session extends EventEmitter {
       if (this.options.resume === "choose") await this.openResumePicker();
       else await this.resume(this.options.resume);
       this.skills = this.options.skill ?? [];
-    } else
-      this.show("输入消息或 / 查看命令。/schedule 与 /programs 打开交互表格。");
+    } else this.welcome();
+  }
+  private welcome() {
+    this.messages.push({ role: "系统", welcome: true,
+      text: "输入消息或 / 查看命令。\n/schedule 与 /programs 打开交互表格。" });
+    this.changed();
   }
   result(result: any) {
     if (
@@ -593,7 +598,7 @@ export class Session extends EventEmitter {
       this.messages = [];
       this.page = "chat";
       await this.save();
-      this.show("新会话已创建。");
+      this.welcome();
       return;
     }
     if (name === "sessions") {

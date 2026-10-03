@@ -15,6 +15,7 @@ import {
 import { Select, Spinner } from "@inkjs/ui";
 import { editorRows } from "./editor.js";
 import { messageLines } from "./markdown.js";
+import { welcomeLines } from "./welcome.js";
 import { Composer } from "./composer.js";
 import { telemetryLabel } from "./telemetry.js";
 import {
@@ -321,7 +322,8 @@ export function App({ session, copy = copySelection }: {
   );
   const choices = page === "programs" ? programView.entries : filteredCourses;
   const displayLines = useMemo(
-    () => messages.flatMap((message) => messageLines(message, width)),
+    () => messages.flatMap((message) => message.welcome
+      ? welcomeLines(message.text, width) : messageLines(message, width)),
     [messages, width],
   );
   const maxOffset = Math.max(0, displayLines.length - height);
@@ -1188,12 +1190,14 @@ export function App({ session, copy = copySelection }: {
           </Box>
         ) : page === "chat" ? (
           displayLines.slice(top, top + height).map((line, i) => (
-            <Text key={i} backgroundColor={line[0]?.user ? "#111820" : undefined}>
+            <Text key={i} backgroundColor={line[0]?.user ? "#9ebba9" : undefined}>
               {line.map((span, j) => (
                 <Text
                   key={j}
                   color={
-                    span.role === "你"
+                    span.user
+                      ? "#203a2b"
+                      : span.color ?? (span.role === "你"
                       ? color.accent
                       : span.role === "SEUdaily"
                         ? color.strong
@@ -1201,7 +1205,7 @@ export function App({ session, copy = copySelection }: {
                           ? "#e5c07b"
                           : span.muted
                             ? color.muted
-                            : color.text
+                            : color.text)
                   }
                   bold={span.bold}
                 >
