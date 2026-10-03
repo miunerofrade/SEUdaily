@@ -66,7 +66,7 @@ export function Timetable({
     for (let i = 0; i < days; i++) {
       const active = continuous[i] && selection?.day === dayStart + i &&
         at(period, dayStart + i).some(item => selectedItems.includes(item));
-      result.push(<Text key={i} backgroundColor={active ? "#394858" : undefined}>
+      result.push(<Text key={i} backgroundColor={active ? "#80cbc4" : undefined}>
         {(continuous[i] ? " " : "─").repeat(cellWidth + 2)}
       </Text>);
       result.push(
@@ -136,10 +136,10 @@ export function Timetable({
                         register((period - 1) * 7 + day, element, items)
                       }
                     >
-                      <Text backgroundColor={active ? "#394858" : undefined} bold={active} color={course ? "#80cbc4" : "#dce1ea"}>
+                      <Text backgroundColor={active ? "#80cbc4" : undefined} bold={active} color={active ? "#20242c" : course ? "#80cbc4" : "#dce1ea"}>
                         {" " + fit(texts[0] || "", cellWidth) + " "}
                       </Text>
-                      <Text backgroundColor={active ? "#394858" : undefined} color={active ? "#dce1ea" : "#8993a4"}>
+                      <Text backgroundColor={active ? "#80cbc4" : undefined} color={active ? "#20242c" : "#8993a4"}>
                         {" " + fit(texts[1] || "", cellWidth) + " "}
                       </Text>
                     </Box>
