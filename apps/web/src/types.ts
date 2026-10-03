@@ -74,6 +74,7 @@ export type ImageAttachment = {
   name: string;
   mediaType: string;
   dataUrl?: string;
+  ref?: string;
   path?: string;
 };
 
@@ -95,6 +96,7 @@ export type Conversation = {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  messagesLoaded?: boolean;
 };
 
 export type StreamEvent = {

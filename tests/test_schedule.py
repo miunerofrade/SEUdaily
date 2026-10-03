@@ -1,9 +1,106 @@
 import json
-from datetime import date
+from contextlib import nullcontext
+from datetime import date, datetime
 from pathlib import Path
+
+import pytest
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from seudaily.cli import _resolve_course_target
 from seudaily.schedule import DEFAULT_SCHEDULE_LAUNCH_URL, ScheduleService
+import seudaily.schedule as schedule_module
+
+
+@pytest.mark.parametrize("year,earliest", [(2026, 2022), (2027, 2023)])
+def test_sync_year_window_moves_with_shanghai_calendar_year(monkeypatch, year, earliest):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz.utcoffset(None).total_seconds() == 8 * 3600
+            return cls(year, 1, 1, tzinfo=tz)
+
+    monkeypatch.setattr(schedule_module, "datetime", Clock)
+    assert ScheduleService._earliest_sync_year() == earliest
+
+
+class _TimetableLoadingPage:
+    url = "https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do"
+
+    def __init__(self, *, initialized):
+        self.initialized = initialized
+        class Response:
+            ok = True
+            status = 200
+            def json(self):
+                return {}
+        class Request:
+            def post(self, *_args, **_kwargs):
+                return Response()
+        self.request = Request()
+
+    @property
+    def first(self):
+        return self
+
+    def locator(self, _selector):
+        return self
+
+    def on(self, *_args):
+        pass
+
+    def goto(self, *_args, **_kwargs):
+        pass
+
+    def wait_for(self, **_kwargs):
+        pass
+
+    def wait_for_timeout(self, _milliseconds):
+        pass
+
+    def title(self):
+        return "我的课表"
+
+    def wait_for_function(self, _script, **_kwargs):
+        if not self.initialized:
+            raise PlaywrightTimeoutError("current semester has not initialized")
+
+    def get_attribute(self, _name):
+        return "2026-2027-2"
+
+    def inner_text(self):
+        return "2026-2027学年秋季学期"
+
+    def click(self):
+        raise PlaywrightTimeoutError("semester switch control is unavailable")
+
+
+@pytest.mark.parametrize("semester", [None, "2025-2026-2"])
+def test_initial_semester_loading_timeout_is_not_reported_as_switch_failure(
+    tmp_path: Path, monkeypatch, semester
+):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    page = _TimetableLoadingPage(initialized=False)
+    monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(page))
+
+    result = service.get_schedule(refresh=True, semester=semester)
+
+    assert result["status"] == "page_load_failed"
+    assert result["message"] == "课表页面加载未完成，请稍后重试。"
+    assert not service.cache_file.exists()
+
+
+def test_actual_semester_switch_timeout_does_not_request_reauthentication(
+    tmp_path: Path, monkeypatch
+):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    page = _TimetableLoadingPage(initialized=True)
+    monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(page))
+
+    result = service.get_schedule(refresh=True, semester="2025-2026-2")
+
+    assert result["status"] == "semester_switch_failed"
+    assert result["message"] == "课表页面未能完成学期切换，请稍后重试。"
+    assert not service.cache_file.exists()
 
 
 def test_normalize_schedule_rows_exposes_capture_identity():
@@ -148,8 +245,9 @@ def test_prefetch_available_semesters_uses_authenticated_request_context(tmp_pat
         request = Request()
 
     options = [
+        {"value": "2021-2022-3", "label": "早于同步范围"},
         {"value": "2026-2027-2", "label": "2026-2027学年秋季学期"},
-        {"value": "2020-2021-4", "label": "2020-2021学年第4学期"},
+        {"value": "2022-2023-4", "label": "2022-2023学年第4学期"},
     ]
     result = service._prefetch_remote_semesters(
         Page(),
@@ -160,18 +258,113 @@ def test_prefetch_available_semesters_uses_authenticated_request_context(tmp_pat
 
     assert [form["XNXQDM"] for form, _ in Page.request.forms] == [
         "2026-2027-2",
-        "2020-2021-4",
+        "2022-2023-4",
     ]
     assert result["prefetchCounts"] == {
         "2026-2027-2": 1,
-        "2020-2021-4": 1,
+        "2022-2023-4": 1,
     }
     assert result["prefetchFailures"] == []
     assert json.loads(cache_file.read_text(encoding="utf-8"))["selectedSemester"] == "2026-2027-2"
     historical = json.loads(
-        (tmp_path / "schedule.2020-2021-4.json").read_text(encoding="utf-8")
+        (tmp_path / "schedule.2022-2023-4.json").read_text(encoding="utf-8")
     )
-    assert historical["courses"][0]["semester"] == "2020-2021-4"
+    assert historical["courses"][0]["semester"] == "2022-2023-4"
+
+
+def test_remote_sync_defaults_to_all_semesters_but_cached_reads_stay_offline(tmp_path, monkeypatch):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    calls = []
+
+    def fetch(**kwargs):
+        calls.append(kwargs)
+        result = {"version": 2, "status": "fresh", "courses": [], "count": 0}
+        service._write_json_atomic(service.cache_file, result)
+        return result
+
+    monkeypatch.setattr(service, "_fetch_remote", fetch)
+    service.get_schedule(refresh=True)
+    assert calls[0]["prefetch_available_semesters"] is True
+    service.get_schedule()
+    service.get_schedule(local_only=True)
+    assert len(calls) == 1
+    service.get_schedule(refresh=True, prefetch_available_semesters=False)
+    assert calls[-1]["prefetch_available_semesters"] is False
+
+
+def test_invalid_semester_api_response_preserves_existing_cache(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    old = {"version": 2, "courses": [{"courseName": "旧缓存"}]}
+    service._write_json_atomic(service.cache_file, old)
+
+    class Response:
+        ok = True
+        status = 200
+
+        def json(self):
+            return {"success": False, "message": "authentication expired"}
+
+    class Request:
+        def post(self, *_args, **_kwargs):
+            return Response()
+
+    class Page:
+        request = Request()
+
+    result = service._prefetch_remote_semesters(
+        Page(),
+        available_semesters=[{"value": "2026-2027-2", "label": "秋季"}],
+        current_semester="2026-2027-2",
+        current_semester_label="秋季",
+    )
+    assert result["prefetchedSemesters"] == []
+    assert len(result["prefetchFailures"]) == 1
+    assert json.loads(service.cache_file.read_text()) == old
+
+
+def test_default_full_sync_uses_portal_api_without_navigation_or_clicks(tmp_path, monkeypatch):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json", cookie_file=tmp_path / "cookies.json")
+    calls = []
+
+    class Response:
+        ok = True
+        status = 200
+
+        def __init__(self, name):
+            self.name = name
+
+        def json(self):
+            if self.name == "dqxnxq":
+                rows = [{"DM": "2026-2027-2", "MC": "秋季"}]
+            elif self.name == "xnxqcx":
+                rows = [{"DM": "2025-2026-2", "MC": "往年秋季"}, {"DM": "2026-2027-2", "MC": "秋季"}]
+            else:
+                rows = [{"KCM": "测试课程", "SKXQ": "1", "KSJC": "1", "JSJC": "2", "SKZC": "11"}]
+            return {"datas": {self.name: {"rows": rows}}}
+
+    class Request:
+        def post(self, url, *, form, timeout):
+            calls.append((url, form))
+            return Response(url.rsplit("/", 1)[-1].removesuffix(".do"))
+
+    class Context:
+        def cookies(self):
+            return []
+
+    class Page:
+        request = Request()
+        context = Context()
+
+        def goto(self, *_args, **_kwargs):
+            raise AssertionError("API synchronization must not navigate the portal")
+
+    monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(Page()))
+    result = service.get_schedule(refresh=True)
+    assert result["status"] == "fresh"
+    assert result["prefetchCounts"] == {"2025-2026-2": 1, "2026-2027-2": 1}
+    assert len(calls) == 4
+    assert result["selectedSemester"] == "2026-2027-2"
+    assert json.loads((tmp_path / "schedule.2025-2026-2.json").read_text())["count"] == 1
 
 
 def test_dom_schedule_records_are_normalized():

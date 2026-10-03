@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
+import math
 import re
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -13,7 +12,8 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .auth import execute_login
 from .browser_runtime import browser_runtime
-from .cancellation import current_cancel_event
+from .asr.cloud import MediaWorker
+from .cancellation import TaskCancelledError, current_cancel_event, raise_if_cancelled
 from .capture import execute_video_task, fetch_dates_only, sanitize_filename
 from .summary import AISummarizer
 from .runtime_paths import env_value
@@ -830,80 +830,29 @@ class CourseService:
         if not 1 <= max_concurrency <= 2:
             raise ValueError("maxConcurrency 必须在 1 到 2 之间")
 
-        subtitle_only = (
-            capture_options.get("need_subtitle", True)
-            and not capture_options.get("need_ppt", False)
-            and not capture_options.get("keep_media", False)
-        )
-        effective_concurrency = min(max_concurrency, 2 if subtitle_only else 1)
-        if env_value("SEUDAILY_SHARED_BROWSER") == "1":
-            effective_concurrency = 1
+        # All callers use the process-wide synchronous Playwright runtime.
+        results: list[dict[str, Any]] = []
+        for session in sessions:
+            raise_if_cancelled()
+            try:
+                result = self.capture_course_session(
+                    course_name=session["courseName"],
+                    teacher_name=session["teacherName"],
+                    weekly_periods=session["weeklyPeriods"],
+                    course_date=session.get("courseDate"),
+                    **capture_options,
+                )
+            except TaskCancelledError:
+                raise
+            except Exception as exc:
+                result = {"status": "failed", "error": str(exc), "errorType": type(exc).__name__}
+            results.append(result)
 
-        results: list[dict[str, Any] | None] = [None] * len(sessions)
-
-        def run_one(index: int, session: dict[str, Any]):
-            return index, self.capture_course_session(
-                course_name=session["courseName"],
-                teacher_name=session["teacherName"],
-                weekly_periods=session["weeklyPeriods"],
-                course_date=session.get("courseDate"),
-                **capture_options,
-            )
-
-        if effective_concurrency == 1:
-            for index, session in enumerate(sessions):
-                try:
-                    _, result = run_one(index, session)
-                except Exception as exc:
-                    result = {
-                        "status": "failed",
-                        "error": str(exc),
-                        "errorType": type(exc).__name__,
-                    }
-                results[index] = result
-        else:
-            with ThreadPoolExecutor(max_workers=effective_concurrency) as executor:
-                futures = [
-                    executor.submit(run_one, index, session)
-                    for index, session in enumerate(sessions)
-                ]
-                for future in as_completed(futures):
-                    try:
-                        index, result = future.result()
-                    except Exception as exc:
-                        index = futures.index(future)
-                        result = {
-                            "status": "failed",
-                            "error": str(exc),
-                            "errorType": type(exc).__name__,
-                        }
-                    results[index] = result
-
-        completed = sum(
-            result is not None and result.get("status", "").startswith("completed")
-            for result in results
-        )
-        warnings: list[str] = []
-        if effective_concurrency < max_concurrency:
-            warnings.append(
-                "常驻共享浏览器使用同步 Playwright，本批次已自动串行执行以保证线程安全。"
-            )
-        video_count = sum(
-            int((result or {}).get("capture", {}).get("videoAvailable", 0))
-            for result in results
-            if result
-        )
-        artifact_count = sum(
-            len((result or {}).get("artifacts", []))
-            for result in results
-            if result
-        )
-        failure_messages = [
-            failure
-            for result in results
-            if result
-            for failure in (result.get("capture", {}).get("failures", []) or [])
-        ]
+        completed = sum(result.get("status", "").startswith("completed") for result in results)
+        warnings = ["共享浏览器使用同步 Playwright，本批次已串行执行以保证线程安全。"] if max_concurrency > 1 else []
+        video_count = sum(int(result.get("capture", {}).get("videoAvailable", 0)) for result in results)
+        artifact_count = sum(len(result.get("artifacts", [])) for result in results)
+        failure_messages = [failure for result in results for failure in result.get("capture", {}).get("failures", [])]
         return {
             "status": "completed" if completed == len(results) else "partial",
             "message": (
@@ -913,7 +862,7 @@ class CourseService:
             "count": len(results),
             "completed": completed,
             "requestedConcurrency": max_concurrency,
-            "effectiveConcurrency": effective_concurrency,
+            "effectiveConcurrency": 1,
             "results": results,
             "warnings": warnings,
         }
@@ -1187,24 +1136,15 @@ class CourseService:
         )
 
 
-class UnavailableASRWorker:
+class UnavailableASRWorker(MediaWorker):
     """Defers missing-ASR errors until a subtitle fallback is actually needed."""
 
     def __init__(self, message: str) -> None:
+        super().__init__({}, "exports")
         self.message = message
-        self.export_base_dir = Path("exports")
-
-    def extract_media(self, *_args, **_kwargs):
-        raise RuntimeError(self.message)
 
     def transcribe_and_export(self, *_args, **_kwargs):
         raise RuntimeError(self.message)
-
-    def abort(self) -> None:
-        return None
-
-    def _cleanup(self) -> None:
-        return None
 
 
 def transcribe_local(
@@ -1239,6 +1179,8 @@ def transcribe_cloud(
 def extract_slides(
     *, video_path: str, output_dir: str, task_name: str, interval_sec: int = 10
 ) -> dict[str, Any]:
+    if not math.isfinite(interval_sec) or interval_sec <= 0:
+        raise ValueError("intervalSec 必须为有限正数")
     try:
         from .ppt import PPTExtractor
     except ModuleNotFoundError as error:

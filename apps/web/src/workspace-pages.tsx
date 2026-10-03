@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, FileImage, FileText, Folder, FolderOpen, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, FileImage, FileText, Folder, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";

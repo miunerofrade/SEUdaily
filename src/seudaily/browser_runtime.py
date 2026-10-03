@@ -3,7 +3,7 @@ from __future__ import annotations
 import atexit
 import sys
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, Iterator
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
@@ -76,63 +76,56 @@ class BrowserRuntime:
         context_options: dict[str, Any],
     ) -> Iterator[Page]:
         with self._lock:
-            playwright = self._ensure_playwright()
             temporary_browser: Browser | None = None
             temporary_context: BrowserContext | None = None
-            if visible:
-                temporary_browser = launch_browser(playwright, visible=True)
-                temporary_context = temporary_browser.new_context(**context_options)
-                context = temporary_context
-            else:
-                context = self._contexts.get(portal)
-                if context is None:
-                    context = self._ensure_browser().new_context(**context_options)
-                    self._contexts[portal] = context
-
-            existing_pages = set(context.pages)
-            page = context.new_page()
+            context: BrowserContext | None = None
+            existing_pages: set[Page] = set()
             try:
+                if visible:
+                    temporary_browser = launch_browser(self._ensure_playwright(), visible=True)
+                    temporary_context = temporary_browser.new_context(**context_options)
+                    context = temporary_context
+                else:
+                    browser = self._ensure_browser()
+                    context = self._contexts.get(portal)
+                    if context is None:
+                        context = browser.new_context(**context_options)
+                        self._contexts[portal] = context
+
+                existing_pages = set(context.pages)
+                page = context.new_page()
                 yield page
             finally:
-                for opened_page in list(context.pages):
-                    if opened_page not in existing_pages:
-                        try:
-                            opened_page.close()
-                        except Exception:
-                            pass
-                if temporary_context is not None:
-                    temporary_context.close()
-                if temporary_browser is not None:
-                    temporary_browser.close()
+                if context is not None:
+                    for opened_page in list(context.pages):
+                        if opened_page not in existing_pages:
+                            with suppress(Exception):
+                                opened_page.close()
+                for temporary in (temporary_context, temporary_browser):
+                    if temporary is not None:
+                        with suppress(Exception):
+                            temporary.close()
 
     def invalidate_context(self, portal: str) -> None:
         with self._lock:
             context = self._contexts.pop(portal, None)
             if context is not None:
-                try:
+                with suppress(Exception):
                     context.close()
-                except Exception:
-                    pass
 
     def close(self) -> None:
         with self._lock:
             for context in list(self._contexts.values()):
-                try:
+                with suppress(Exception):
                     context.close()
-                except Exception:
-                    pass
             self._contexts.clear()
             if self._browser is not None:
-                try:
+                with suppress(Exception):
                     self._browser.close()
-                except Exception:
-                    pass
                 self._browser = None
             if self._playwright is not None:
-                try:
+                with suppress(Exception):
                     self._playwright.stop()
-                except Exception:
-                    pass
                 self._playwright = None
             self._owner_thread = None
 

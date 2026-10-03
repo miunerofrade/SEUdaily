@@ -165,13 +165,52 @@ export class AgentStore {
         const end = Math.max(0, all.length - (input.page ?? 0) * size);
         return { messages: all.slice(start, end), total: all.length, page: input.page ?? 0, perPage: size, hasMore: start > 0 };
     }
-    async saveMessage(message: StoredMessage) {
-        await this.ready;
-        await this.client.batch([
-            { sql: 'INSERT INTO messages(id,threadId,resourceId,role,content,createdAt) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content', args: [message.id, message.threadId, message.resourceId, message.role, JSON.stringify(message.content), message.createdAt] },
-            { sql: 'UPDATE threads SET updatedAt=? WHERE id=?', args: [new Date().toISOString(), message.threadId] },
-        ], 'write');
+    private messageStatement(message: StoredMessage, update = false): InStatement {
+        return { sql: 'INSERT INTO messages(id,threadId,resourceId,role,content,createdAt) VALUES (?,?,?,?,?,?)' + (update ? ' ON CONFLICT(id) DO UPDATE SET content=excluded.content' : ''), args: [message.id, message.threadId, message.resourceId, message.role, JSON.stringify(message.content), message.createdAt] };
     }
+    private runStatement(run: RunState, update = false): InStatement {
+        return { sql: 'INSERT INTO runs VALUES (?,?,?,?,?)' + (update ? ' ON CONFLICT(id) DO UPDATE SET status=excluded.status,state=excluded.state' : ''), args: [run.id, run.context.threadId, run.context.resourceId, run.status, JSON.stringify(run)] };
+    }
+    async reserveTurn(run: RunState, inputs: StoredMessage[], answer: StoredMessage) {
+        this.assertRunMessage(run, answer);
+        if (inputs.some(message => message.threadId !== run.context.threadId || message.resourceId !== run.context.resourceId || message.content.parentId === message.id)) throw new Error('运行与消息归属不一致');
+        await this.ready;
+        const statements: InStatement[] = [this.runStatement(run), ...inputs.map(message => this.messageStatement(message)), this.messageStatement(answer)];
+        const thread = await this.getThreadById({ threadId: run.context.threadId, resourceId: run.context.resourceId });
+        if (!thread) throw new Error('会话不存在');
+        statements.push({ sql: 'UPDATE threads SET metadata=?,updatedAt=? WHERE id=? AND resourceId=?', args: [JSON.stringify({ ...thread.metadata, activeLeaf: answer.id }), new Date().toISOString(), thread.id, thread.resourceId] });
+        try { await this.client.batch(statements, 'write'); }
+        catch (error) {
+            if (String((error as { code?: string }).code).startsWith('SQLITE_CONSTRAINT')) throw new Error('运行令牌、消息 ID 或回复 ID 已使用，请重新发起请求');
+            throw error;
+        }
+    }
+    private assertRunMessage(run: RunState, message?: StoredMessage) {
+        if (run.id !== run.context.runToken || (message && (message.id !== (run.context.assistantMessageId ?? `${run.id}-assistant`) || message.role !== 'assistant' || message.threadId !== run.context.threadId || message.resourceId !== run.context.resourceId || message.content.parentId === message.id))) throw new Error('运行与消息归属不一致');
+    }
+    private async saveOwned(run?: RunState, message?: StoredMessage) {
+        if (run) this.assertRunMessage(run, message);
+        await this.ready;
+        const tx = await this.client.transaction('write');
+        try {
+            if (run) {
+                const existing = (await tx.execute({ sql: 'SELECT threadId,resourceId,state FROM runs WHERE id=?', args: [run.id] })).rows[0];
+                if (existing && (existing.threadId !== run.context.threadId || existing.resourceId !== run.context.resourceId || (JSON.parse(String(existing.state)).context.assistantMessageId ?? `${run.id}-assistant`) !== (run.context.assistantMessageId ?? `${run.id}-assistant`))) throw new Error('运行令牌不属于当前会话');
+            }
+            if (message) {
+                const existing = (await tx.execute({ sql: 'SELECT threadId,resourceId,role,content FROM messages WHERE id=?', args: [message.id] })).rows[0];
+                if (existing && (existing.threadId !== message.threadId || existing.resourceId !== message.resourceId || existing.role !== message.role || (run && JSON.parse(String(existing.content)).runToken !== run.id))) throw new Error('消息 ID 不属于当前运行或角色');
+                if (message.content.parentId === message.id) throw new Error('消息不能引用自身为父节点');
+            }
+            if (run) await tx.execute(this.runStatement(run, true));
+            if (message) {
+                await tx.execute(this.messageStatement(message, true));
+                await tx.execute({ sql: 'UPDATE threads SET updatedAt=? WHERE id=? AND resourceId=?', args: [new Date().toISOString(), message.threadId, message.resourceId] });
+            }
+            await tx.commit();
+        } catch (error) { await tx.rollback(); throw error; } finally { tx.close(); }
+    }
+    async saveMessage(message: StoredMessage) { await this.saveOwned(undefined, message); }
     async deleteThread(threadId: string, resourceId?: string) {
         const thread = await this.getThreadById({ threadId, resourceId });
         if (!thread)
@@ -186,18 +225,8 @@ export class AgentStore {
         );
         await this.client.batch(statements, 'write');
     }
-    async saveRun(run: RunState) {
-        await this.ready;
-        await this.client.execute({ sql: 'INSERT INTO runs VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,state=excluded.state', args: [run.id, run.context.threadId, run.context.resourceId, run.status, JSON.stringify(run)] });
-    }
-    async saveTurn(run: RunState, message: StoredMessage) {
-        await this.ready;
-        await this.client.batch([
-            { sql: 'INSERT INTO runs VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,state=excluded.state', args: [run.id, run.context.threadId, run.context.resourceId, run.status, JSON.stringify(run)] },
-            { sql: 'INSERT INTO messages(id,threadId,resourceId,role,content,createdAt) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET content=excluded.content', args: [message.id, message.threadId, message.resourceId, message.role, JSON.stringify(message.content), message.createdAt] },
-            { sql: 'UPDATE threads SET updatedAt=? WHERE id=?', args: [new Date().toISOString(), message.threadId] },
-        ], 'write');
-    }
+    async saveRun(run: RunState) { await this.saveOwned(run); }
+    async saveTurn(run: RunState, message: StoredMessage) { await this.saveOwned(run, message); }
     async getRun(id: string): Promise<RunState | undefined> {
         await this.ready;
         const result = await this.client.execute({ sql: 'SELECT state,status FROM runs WHERE id=?', args: [id] });

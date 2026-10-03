@@ -52,9 +52,7 @@ class FocusSemanticModel:
     """Expand a natural-language watch into searches and judge their results."""
 
     def __init__(self) -> None:
-        api_key = os.getenv("DEEPSEEK_API_KEY", "") or os.getenv(
-            env_value("SEUDAILY_LLM_API_KEY", "") or ""
-        )
+        api_key = os.getenv("DEEPSEEK_API_KEY", "") or env_value("SEUDAILY_LLM_API_KEY", "")
         if not api_key:
             raise ValueError("未配置大模型 API Key，无法执行语义 Focus")
         self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")

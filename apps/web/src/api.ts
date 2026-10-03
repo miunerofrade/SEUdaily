@@ -180,13 +180,6 @@ export function executeAgentActionRequest(id: string) {
   );
 }
 
-export function activateAgentActionRequest(id: string) {
-  return jsonRequest<{ status: string; actionRequest: AgentActionRequest }>(
-    `/app/action-requests/${encodeURIComponent(id)}/activate`,
-    { method: "POST" },
-  );
-}
-
 type StoredThread = {
   id: string;
   title?: string;
@@ -287,12 +280,13 @@ async function legacyImageHash(dataUrl: string) {
 async function resolveStoredImage(part: Record<string, unknown>) {
   const filename = typeof part.filename === "string" ? part.filename : "";
   const data = typeof part.data === "string" ? part.data : typeof part.image === "string" ? part.image : "";
-  const key = filename ? `ref:${filename}` : data.startsWith("data:image/") ? `sha256:${await legacyImageHash(data)}` : "";
+  const reference = /^(?:seudaily|cvstream)-image-ref:(.+)$/.exec(data)?.[1];
+  const key = reference ? `ref:${reference}` : filename ? `ref:${filename}` : data.startsWith("data:image/") ? `sha256:${await legacyImageHash(data)}` : "";
   if (!key) return null;
   if (storedImagePaths.has(key)) return storedImagePaths.get(key) ?? null;
   const [kind, value] = key.split(":", 2);
   const response = await fetch(`/app/images/resolve?${kind === "ref" ? "ref" : "sha256"}=${encodeURIComponent(value)}`);
-  if (!response.ok) { storedImagePaths.set(key, null); return null; }
+  if (!response.ok) { if (response.status !== 404) throw new Error(`加载图片失败（${response.status}）`); return null; }
   const resolved = await response.json() as { path: string };
   storedImagePaths.set(key, resolved.path);
   return resolved.path;
@@ -303,10 +297,12 @@ async function storedAttachments(messageId: string, parts: Array<Record<string, 
   const attachments = await Promise.all(parts.map(async (part, index) => {
     if (part.type !== "file" && part.type !== "image") return [];
     const path = await resolveStoredImage(part);
-    if (!path) return [];
+    const raw = typeof part.data === "string" ? part.data : typeof part.image === "string" ? part.image : "";
+    const ref = /^(?:seudaily|cvstream)-image-ref:/.test(raw) ? raw : undefined;
+    if (!path && !ref) return [];
     const mediaType = typeof part.mimeType === "string" ? part.mimeType : "image/*";
     imageIndex += 1;
-    return [{ id: `${messageId}-image-${index}`, name: `历史图片 ${imageIndex}`, mediaType, path } satisfies ImageAttachment];
+    return [{ id: `${messageId}-image-${index}`, name: `历史图片 ${imageIndex}`, mediaType, path: path ?? undefined, ref } satisfies ImageAttachment];
   }));
   return attachments.flat();
 }
@@ -335,9 +331,10 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   for (let page = 0; ; page++) {
     const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "1000", page: String(page) });
     const response = await fetch(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
-    if (!response.ok) return null;
+    if (!response.ok) throw new Error(`加载会话历史失败（${response.status}）`);
     const data = await response.json() as { messages?: StoredMessage[]; hasMore?: boolean };
-    records.unshift(...(data.messages ?? []));
+    if (!Array.isArray(data.messages)) throw new Error("无效会话历史响应");
+    records.unshift(...data.messages);
     if (!data.hasMore) break;
   }
   const restored = await Promise.all(records.map(async (item): Promise<ChatMessage | null> => {
@@ -378,20 +375,35 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
     createdAt: Date.parse(thread.createdAt),
     updatedAt: Date.parse(thread.updatedAt),
     messages,
+    messagesLoaded: true,
   };
 }
 
 export async function loadServerConversations(): Promise<Conversation[]> {
   const threadGroups = await Promise.all(HISTORY_RESOURCES.map(async (resourceId) => {
-    const query = new URLSearchParams({ resourceId, perPage: "100", orderBy: JSON.stringify({ field: "updatedAt", direction: "DESC" }) });
-    const response = await fetch(`/api/memory/threads?${query}`);
-    if (!response.ok) return [] as StoredThread[];
-    const data = await response.json() as { threads?: StoredThread[] };
-    return data.threads ?? [];
+    const threads: StoredThread[] = [];
+    for (let page = 0; ; page++) {
+      const query = new URLSearchParams({ resourceId, perPage: "100", page: String(page) });
+      const response = await fetch(`/api/memory/threads?${query}`);
+      if (!response.ok) throw new Error(`加载会话列表失败（${response.status}）`);
+      const data = await response.json() as { threads: StoredThread[] };
+      if (!Array.isArray(data.threads)) throw new Error("无效会话列表响应");
+      threads.push(...data.threads);
+      if (data.threads.length < 100) break;
+    }
+    return threads;
   }));
-  const conversations = await Promise.all(threadGroups.flat().map(fetchThreadMessages));
-  return conversations.filter((conversation): conversation is Conversation => conversation !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  return threadGroups.flat().map(thread => ({
+    id: thread.id, resourceId: thread.resourceId, title: thread.title?.trim() || "新对话",
+    createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt),
+    activeLeaf: thread.metadata?.activeLeaf, messages: [], messagesLoaded: false,
+  })).sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export function loadConversationMessages(conversation: Conversation) {
+  return fetchThreadMessages({ ...conversation, resourceId: conversation.resourceId ?? RESOURCE_ID,
+    createdAt: new Date(conversation.createdAt).toISOString(), updatedAt: new Date(conversation.updatedAt).toISOString(),
+    metadata: { activeLeaf: conversation.activeLeaf } });
 }
 
 export async function deleteServerConversation(threadId: string, resourceId?: string) {
@@ -555,32 +567,6 @@ export type TrainingPlanResponse = {
   };
   warnings?: string[];
 };
-export type TrainingPlanAccess = TrainingPlanSource & {
-  guidanceTitle: string;
-  guidanceUrl: string;
-};
-export type TrainingPlanArchive = {
-  id: string;
-  title: string;
-  url: string;
-  year?: string;
-  publishedAt?: string;
-  articleTitle: string;
-  articleUrl: string;
-  source: string;
-};
-export type TrainingPlanSearchResponse = {
-  status: string;
-  summary: string;
-  data?: {
-    query: string;
-    currentAccess: TrainingPlanAccess;
-    archives: TrainingPlanArchive[];
-    warnings?: string[];
-  };
-  warnings?: string[];
-};
-
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) throw new Error((await response.text()) || `请求失败（${response.status}）`);
@@ -610,36 +596,6 @@ export function saveTrainingPlanCourseStatus(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-}
-
-export async function searchTrainingPlans(query = ""): Promise<TrainingPlanSearchResponse> {
-  const params = new URLSearchParams();
-  if (query.trim()) params.set("q", query.trim());
-  const response = await jsonRequest<TrainingPlanResponse>(`/app/programs${params.size ? `?${params}` : ""}`);
-  const source = response.data?.source ?? { title: "个人方案查询", url: "", path: [], source: "东南大学网上办事服务大厅" };
-  return {
-    status: response.status,
-    summary: response.summary,
-    warnings: response.warnings,
-    data: {
-      query,
-      currentAccess: {
-        ...source,
-        guidanceTitle: source.title,
-        guidanceUrl: source.url,
-      },
-      archives: (response.data?.plans ?? []).map((plan) => ({
-        id: plan.id,
-        title: plan.title,
-        url: source.url,
-        year: plan.grade,
-        articleTitle: plan.title,
-        articleUrl: source.url,
-        source: source.source,
-      })),
-      warnings: response.warnings,
-    },
-  };
 }
 
 export function saveScheduleCustomizations(customizations: ScheduleCustomizations) {
@@ -778,34 +734,6 @@ export async function loadFocusConversations(): Promise<Conversation[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function sendFocusMessage(id: string, message: string) {
-  return jsonRequest<{ status: string; data?: { text?: string } }>(`/app/focus/${encodeURIComponent(id)}/message`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
-}
-
-export type PortalCourse = {
-  title: string;
-  teacher: string;
-  semester: string;
-  lessonCount?: string;
-};
-
-export type PortalCourseSearchResponse = {
-  status: string;
-  summary: string;
-  data?: { courses?: PortalCourse[]; availableSemesters?: string[]; selectedSemester?: string };
-  warnings?: string[];
-};
-
-export function searchPortalCourses(description: string, semester = "") {
-  const params = new URLSearchParams({ q: description });
-  if (semester.trim()) params.set("semester", semester.trim());
-  return jsonRequest<PortalCourseSearchResponse>(`/app/focus/courses/search?${params}`);
-}
-
 export function authorizeSchedule() {
   return jsonRequest<ScheduleResponse>("/app/schedule/authorize", { method: "POST" });
 }
@@ -864,21 +792,6 @@ export function saveSettings(values: Record<string, string>, agentInstructions: 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ values, agentInstructions }),
-  });
-}
-
-export function saveFullAccess(enabled: boolean) {
-  return jsonRequest<{ saved: string[]; agentInstructionsSaved: boolean; restartRequired: boolean }>("/app/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values: { SEUDAILY_FULL_ACCESS: String(enabled) } }),
-  });
-}
-
-export function saveFullAccessExtra(enabled: boolean) {
-  return jsonRequest<{ saved: string[]; restartRequired: boolean }>("/app/settings", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values: { SEUDAILY_FULL_ACCESS_EXTRA: String(enabled) } }),
   });
 }
 

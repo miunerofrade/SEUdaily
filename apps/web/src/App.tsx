@@ -1,3 +1,4 @@
+import { messageContent, editedDocumentContent, writeConversationCache } from "./conversation-cache";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
 import {
@@ -42,8 +43,8 @@ import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
-import type { AgentActionRequest, AgentAuthRequest, AgentContent, AgentInput } from "./api";
+import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
+import type { AgentActionRequest, AgentAuthRequest, AgentInput } from "./api";
 import { normalizeMathMarkdown } from "./markdown";
 import { RamDiskPanel } from "./ramdisk-panel";
 import { SidebarIcon } from "./sidebar-icons";
@@ -176,15 +177,6 @@ function titleFromPrompt(prompt: string) {
   return cleaned.length > 18 ? `${cleaned.slice(0, 18)}…` : cleaned;
 }
 
-function messageContent(message: ChatMessage): AgentContent {
-  const text = message.modelContent ?? message.content;
-  const images = (message.attachments ?? []).filter((item) => item.dataUrl);
-  if (!images.length) return text;
-  return [
-    ...(text ? [{ type: "text" as const, text }] : []),
-    ...images.map((item) => ({ type: "file" as const, data: item.dataUrl!, mediaType: item.mediaType, filename: item.path ? fileName(item.path) : item.name })),
-  ];
-}
 
 function packageDocumentContent(prompt: string, documents: DocumentAttachment[]) {
   const parsed = documents.filter((document) => document.markdown?.trim());
@@ -338,22 +330,6 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 function ApprovalButtons({ tool, onApproval }: { tool: ToolRun; onApproval?: (approved: boolean) => void }) {
   if (tool.state !== "approval-requested" || !tool.approvalId || !onApproval) return null;
   return <div className="tool-approval"><span>需要你的许可才能继续</span><div><button type="button" onClick={() => onApproval(false)}>拒绝</button><button type="button" className="primary" onClick={() => onApproval(true)}>批准</button></div></div>;
-}
-
-function ToolCard({ tool, compact = false, onApproval }: { tool: ToolRun; compact?: boolean; onApproval?: (approved: boolean) => void }) {
-  const result = tool.result;
-  const failed = result?.status === "failed" || tool.state === "failed";
-  return (
-    <div className={`tool-card ${compact ? "compact" : ""} ${failed ? "failed" : ""}`}>
-      <div className="tool-card-head">
-        <span className={`tool-icon ${tool.state === "running" ? "active" : ""}`}>{failed ? <TriangleAlert size={15} /> : tool.state === "approval-requested" ? <TriangleAlert size={15} /> : <ToolGlyph name={tool.name} size={15} />}</span>
-        <div>
-          <strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : failed ? result?.summary ?? `${toolLabel(tool.name)}失败` : toolDetail(tool) ? toolNarration(tool, tool.state === "running" ? "running" : "completed") : result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong>
-        </div>
-      </div>
-      <ApprovalButtons tool={tool} onApproval={onApproval} />
-    </div>
-  );
 }
 
 function ToolActivity({ tools, process = [], streaming, reasoningActive, onApproval }: { tools: ToolRun[]; process?: AgentProcessEntry[]; streaming?: boolean; reasoningActive?: boolean; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
@@ -681,6 +657,7 @@ export default function App() {
   const [permissionSaving, setPermissionSaving] = useState(false);
   const [permissionError, setPermissionError] = useState("");
   const [conversationError, setConversationError] = useState("");
+  const [historyReload, setHistoryReload] = useState(0);
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
@@ -715,7 +692,7 @@ export default function App() {
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
   const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
   const recentConversations = useMemo(() => [
-    ...conversations.filter((conversation) => conversation.messages.length).map((conversation) => ({ kind: "chat" as const, conversation })),
+    ...conversations.filter((conversation) => (conversation.messages.length || conversation.messagesLoaded === false)).map((conversation) => ({ kind: "chat" as const, conversation })),
     ...focusConversations.map((conversation) => ({ kind: "focus" as const, conversation })),
   ].sort((a, b) => b.conversation.updatedAt - a.conversation.updatedAt), [conversations, focusConversations]);
   const allTools = useMemo(() => active.messages.flatMap((message) => message.tools ?? []).reverse(), [active.messages]);
@@ -740,8 +717,11 @@ export default function App() {
     }).catch(() => undefined);
   }, []);
 
+  const historySyncRef = useRef(0);
   const syncServerHistory = useCallback(async () => {
+    const request = ++historySyncRef.current;
     const [remoteResult, focusResult] = await Promise.allSettled([loadServerConversations(), loadFocusConversations()]);
+    if (request !== historySyncRef.current) return;
     if (focusResult.status === "fulfilled") setFocusConversations(focusResult.value);
     if (remoteResult.status === "fulfilled") {
       const remote = remoteResult.value;
@@ -749,9 +729,9 @@ export default function App() {
         const remoteIds = new Set(remote.map((conversation) => conversation.id));
         // Once the server responds successfully it is authoritative for completed
         // conversations. Keep only drafts and in-flight/failed local turns that
-        // may not have reached Mastra yet; stale cached history must not reappear.
+        // may not have reached the server yet; stale cached history must not reappear.
         const localTransient = current.filter((conversation) => !remoteIds.has(conversation.id) && (
-          conversation.messages.length === 0
+          (conversation.messages.length === 0 && conversation.messagesLoaded !== false)
           || conversation.messages.some((message) => message.streaming || message.error)
         ));
         const hydrated = remote.map((conversation) => {
@@ -762,20 +742,31 @@ export default function App() {
           // replacing the local messages would also discard the local assistant ID,
           // causing all subsequent stream events to be ignored.
           if (local.messages.some((message) => message.streaming) || local.updatedAt > conversation.updatedAt) return local;
-          return { ...conversation, messages: conversation.messages.map((message, index) => {
-            const localMessage = local.messages[index];
-            return {
-              ...message,
-              documents: localMessage?.documents?.length ? localMessage.documents : message.documents,
-              attachments: message.attachments?.map((attachment, attachmentIndex) => ({ ...attachment, path: localMessage?.attachments?.[attachmentIndex]?.path ?? attachment.path })),
-            };
-          }) };
+          // Metadata refreshes must retain complete loaded trees and attachment IDs.
+          if (local.messagesLoaded !== false && local.updatedAt === conversation.updatedAt) {
+            return { ...local, title: conversation.title, activeLeaf: conversation.activeLeaf ?? local.activeLeaf };
+          }
+          return conversation;
         });
         const merged = [...hydrated, ...localTransient].sort((a, b) => b.updatedAt - a.updatedAt);
         return merged.length ? merged : [createConversation()];
       });
+    } else {
+      setConversationError(remoteResult.reason instanceof Error ? remoteResult.reason.message : "会话历史加载失败");
     }
   }, []);
+
+  useEffect(() => {
+    if (activeRaw.messagesLoaded !== false) return;
+    let cancelled = false;
+    setConversationError("");
+    void loadConversationMessages(activeRaw).then(loaded => {
+      if (cancelled) return;
+      setConversations(current => current.map(item => item.id === activeRaw.id
+        ? loaded ?? { ...item, messagesLoaded: true } : item));
+    }).catch(error => { if (!cancelled) setConversationError(error instanceof Error ? error.message : "会话历史加载失败"); });
+    return () => { cancelled = true; };
+  }, [activeRaw.id, activeRaw.messagesLoaded, activeRaw.updatedAt, historyReload]);
 
   useEffect(() => {
     if (!conversations.some((conversation) => conversation.id === activeId)) {
@@ -783,18 +774,22 @@ export default function App() {
     }
   }, [activeId, conversations]);
 
+  const cacheSnapshotRef = useRef(conversations);
+  cacheSnapshotRef.current = conversations;
   useEffect(() => {
-    const cacheSafe = conversations.map((conversation) => ({
-      ...conversation,
-      messages: conversation.messages.map((message) => ({
-        ...message,
-        modelContent: undefined,
-        attachments: message.attachments?.flatMap(({ dataUrl: _dataUrl, ...attachment }) => attachment.path ? [attachment] : []),
-        documents: message.documents?.map(({ markdown: _markdown, contextRef: _contextRef, ...document }) => document),
-      })),
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cacheSafe));
-  }, [conversations]);
+    let storage: Storage;
+    try { storage = window.localStorage; } catch { return; }
+    let lastSaved: Conversation[] | undefined;
+    const flush = () => {
+      const snapshot = cacheSnapshotRef.current;
+      if (lastSaved === snapshot) return;
+      lastSaved = snapshot;
+      writeConversationCache(storage, STORAGE_KEY, snapshot);
+    };
+    const timer = window.setInterval(flush, 1000);
+    window.addEventListener("pagehide", flush);
+    return () => { clearInterval(timer); window.removeEventListener("pagehide", flush); };
+  }, []);
 
   useEffect(() => {
     fetch("/api/agents", { signal: AbortSignal.timeout(4000) })
@@ -842,7 +837,7 @@ export default function App() {
     if (sending) abortRef.current?.abort();
     setView("chat");
     setRightOpen(false);
-    if (!active.messages.length) {
+    if (!active.messages.length && activeRaw.messagesLoaded !== false) {
       setDraft("");
       setNavOpen(false);
       return;
@@ -862,15 +857,11 @@ export default function App() {
     setDeleteError("");
     try {
       await deleteServerConversation(deleteTarget.id, deleteTarget.resourceId);
-      const remaining = conversations.filter((conversation) => conversation.id !== deleteTarget.id);
-      if (remaining.length) {
-        setConversations(remaining);
-        if (activeId === deleteTarget.id) setActiveId(remaining[0].id);
-      } else {
-        const blank = createConversation();
-        setConversations([blank]);
-        setActiveId(blank.id);
-      }
+      historySyncRef.current += 1;
+      setConversations(current => {
+        const remaining = current.filter(conversation => conversation.id !== deleteTarget.id);
+        return remaining.length ? remaining : [createConversation()];
+      });
       setDeleteTarget(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "删除会话失败，请稍后重试。");
@@ -1126,7 +1117,7 @@ export default function App() {
 
   async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string } = {}) {
     const text = prompt.trim();
-    if ((!text && !pendingImages.length && !pendingDocuments.length) || sending) return;
+    if ((!text && !pendingImages.length && !pendingDocuments.length) || sending || activeRaw.messagesLoaded === false) return;
     const effectivePrompt = !options.preserveComposer && selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
     const conversationId = active.id;
     const firstTurn = active.messages.length === 0;
@@ -1182,7 +1173,7 @@ export default function App() {
     if (sending) return;
     const original = withParents(activeRaw.messages).find(item => item.id === message.id);
     if (!original) return;
-    const now = Date.now(), editedUser: ChatMessage = { ...original, id: uid(), content, modelContent: packageDocumentContent(content, original.documents ?? []), createdAt: now };
+    const now = Date.now(), editedUser: ChatMessage = { ...original, id: uid(), content, modelContent: editedDocumentContent(content, original, packageDocumentContent(content, original.documents ?? [])), createdAt: now };
     const assistant: ChatMessage = { id: uid(), parentId: editedUser.id, role: 'assistant', content: '', createdAt: now, tools: [], streaming: true };
     setConversations(current => current.map(conversation => conversation.id === active.id ? {
       ...conversation, updatedAt: now, activeLeaf: assistant.id, messages: [...withParents(conversation.messages), editedUser, assistant],
@@ -1255,7 +1246,7 @@ export default function App() {
       const images = await Promise.all(accepted.map(async (file) => {
         const image = await readImage(file);
         const stored = await uploadTemporaryImage({ dataUrl: image.dataUrl!, name: image.name });
-        return { ...image, path: stored.path };
+        return { ...image, path: stored.path, ref: `seudaily-image-ref:${stored.ref}` };
       }));
       setPendingImages((current) => [...current, ...images].slice(0, 4));
     } catch (error) {
@@ -1334,7 +1325,7 @@ export default function App() {
         {sending ? (
           <button type="button" className="send-button stop" onClick={() => abortRef.current?.abort()} aria-label="停止回答"><CircleStop size={19} /></button>
         ) : (
-          <button type="submit" className="send-button" disabled={uploadingDocuments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
+          <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingDocuments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
         )}
       </div>
       {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
@@ -1408,6 +1399,8 @@ export default function App() {
         </header>
 
         <section className="chat-scroll">
+          {conversationError && !active.messages.length && activeRaw.messagesLoaded !== false && <div className="page-state error">{conversationError}</div>}
+          {activeRaw.messagesLoaded === false && <div className="page-state">{conversationError || "正在加载会话历史…"}{conversationError && <button type="button" onClick={() => setHistoryReload(current => current + 1)}>重试</button>}</div>}
           {!active.messages.length ? (
             <div className="welcome">
               <div className="welcome-core">

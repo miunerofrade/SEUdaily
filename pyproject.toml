@@ -48,3 +48,8 @@ packages = ["src/seudaily", "src/cvstream"]
 
 [dependency-groups]
 dev = ["pytest>=8.4.0"]
+
+[tool.pytest.ini_options]
+# Interactive PTY scripts are run explicitly; dotted names are not pytest modules.
+python_files = ["test_*.py"]
+addopts = "--ignore-glob=*.local.py"

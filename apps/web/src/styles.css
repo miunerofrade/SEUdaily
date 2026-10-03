@@ -224,7 +224,7 @@ button { color: inherit; }
 .tool-activity-toggle { min-height: 32px; max-width: 100%; display: flex; align-items: center; gap: 8px; padding: 3px 2px; border: 0; background: transparent; color: inherit; font-size: 15.5px; line-height: 1.78; cursor: pointer; }
 .tool-activity-toggle:hover { color: #222; }
 .tool-activity-toggle:focus-visible { outline: 0; border-radius: 6px; background: #f5f5f5; }
-.tool-activity svg, .tool-card svg { stroke-width: 1.65; }
+.tool-activity svg { stroke-width: 1.65; }
 .tool-activity-status { width: 22px; height: 22px; flex: 0 0 22px; display: grid; place-items: center; color: #777; }
 .tool-activity-status.running { color: #777; animation: soft-pulse 1.4s ease-in-out infinite; }
 .tool-activity-status.done { color: #666; }
@@ -249,23 +249,10 @@ button { color: inherit; }
 .tool-activity-item strong, .tool-activity-item small { display: block; }
 .tool-activity-item strong { color: #555; font-size: 15.5px; font-weight: 450; line-height: 1.65; }
 .tool-activity-item small { margin-top: 1px; color: #999; font-size: 13px; line-height: 1.5; }
-.tool-card { padding: 9px 2px; border: 0; border-bottom: 1px solid #ededed; border-radius: 0; background: transparent; }
-.tool-card:last-child { border-bottom: 0; }
-.tool-card.compact { width: 100%; padding: 7px 2px; background: transparent; }
-.tool-card-head { display: flex; align-items: center; gap: 8px; }
-.tool-card-head > div { min-width: 0; flex: 1; }.tool-card-head strong, .tool-card-head span { display: block; }
-.tool-card-head strong { font-size: 11px; font-weight: 550; }.tool-card-head span { margin-top: 1px; color: #999; font-size: 9px; }
-.tool-icon { width: 23px; height: 23px; flex: 0 0 23px; display: grid !important; place-items: center; margin: 0 !important; color: #555 !important; }
-.tool-icon.active { animation: soft-pulse 1.4s ease-in-out infinite; }
-.tool-card.failed .tool-icon { color: #a34638 !important; }
-.tool-card p { margin: 6px 0 0 31px; color: #777; font-size: 10px; line-height: 1.5; }
-.tool-card.compact p, .tool-card.compact .tool-card-head > svg { display: none; }
-.tool-warning { margin: 6px 0 0 31px; color: #9a772a; font-size: 9.5px; line-height: 1.45; }
 .tool-approval { margin: 8px 0 0 31px; padding: 8px 9px; border: 1px solid #e6d7a5; border-radius: 8px; background: #fffaf0; color: #80651c; font-size: 10px; line-height: 1.4; }
 .tool-approval > div { display:flex; gap:6px; margin-top:7px; }
 .tool-approval button { padding:4px 9px; border:1px solid #d6c79a; border-radius:6px; background:#fff; color:#66531c; cursor:pointer; font-size:10px; }
 .tool-approval button.primary { border-color:#80651c; background:#80651c; color:#fff; }
-.tool-card.compact .tool-approval { margin-left: 0; }
 .settings-toggle { flex-direction:row !important; align-items:center; justify-content:space-between; gap:16px; }
 .settings-toggle > span { flex:1; }
 .settings-toggle input { width:18px !important; height:18px; flex:0 0 18px; }
