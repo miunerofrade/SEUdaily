@@ -4,16 +4,11 @@ import json
 import os
 import re
 import tempfile
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-from .campus_network import network_category
-from .browser_runtime import browser_runtime
-from .schedule import DEFAULT_USER_AGENT
+from .campus_auth import CampusAuthError, CampusSession
 
 
 DEFAULT_PLAN_APP_ID = "4766859113956613"
@@ -51,44 +46,6 @@ class TrainingPlanService:
             "source": "东南大学网上办事服务大厅",
         }
 
-    @contextmanager
-    def _page(self):
-        with browser_runtime().page(
-            "training-plan-portal",
-            visible=False,
-            context_options={
-                "viewport": {"width": 1920, "height": 1080},
-                "user_agent": DEFAULT_USER_AGENT,
-                "locale": "zh-CN",
-                "timezone_id": "Asia/Shanghai",
-            },
-        ) as page:
-            if self.cookie_file.exists():
-                try:
-                    cookies = json.loads(self.cookie_file.read_text(encoding="utf-8"))
-                    page.context.add_cookies(cookies)
-                except (OSError, ValueError):
-                    pass
-            page.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
-            yield page
-
-    @staticmethod
-    def _is_auth_page(url: str) -> bool:
-        lowered = url.lower()
-        return any(
-            marker in lowered
-            for marker in (
-                "/controller/v1/public/verify",
-                "auth.seu.edu.cn/dist/",
-                "vpn.seu.edu.cn/portal/shortcut",
-                "authserver/login",
-                "/login",
-                "cas/login",
-            )
-        )
-
     @staticmethod
     def _write_json_atomic(path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,9 +60,6 @@ class TrainingPlanService:
             json.dump(payload, temp_file, ensure_ascii=False, indent=2)
             temp_name = temp_file.name
         os.replace(temp_name, path)
-
-    def _save_cookies(self, page) -> None:
-        self._write_json_atomic(self.cookie_file, page.context.cookies())
 
     @staticmethod
     def _normalize_course_name(value: Any) -> str:
@@ -1053,101 +1007,78 @@ class TrainingPlanService:
         return TrainingPlanService._rows(response.json(), dataset)
 
     def _fetch_remote(self) -> dict[str, Any]:
-        with self._page() as page:
+        with CampusSession(self.cookie_file) as session:
             try:
-                page.goto(
-                    self.launch_url,
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
-                try:
-                    page.wait_for_url(f"**{PLAN_APP_PATH}**", timeout=15000)
-                except PlaywrightTimeoutError:
-                    pass
-                page.wait_for_timeout(1500)
-            except PlaywrightTimeoutError as error:
-                if network_category("get-training-plan", {}, error):
-                    raise
+                session.ensure_authenticated(self.launch_url)
+                return self._fetch_authenticated(session)
+            except CampusAuthError as error:
+                return {**error.result(), "source": self._source(), "plans": []}
 
-            if self._is_auth_page(page.url) or PLAN_APP_PATH not in page.url:
-                return {
-                    "status": "auth_required",
-                    "message": "eHall 登录会话不存在或已失效，请重新授权。",
-                    "source": self._source(),
-                    "plans": [],
-                }
-            if page.title().strip() == "403":
-                return {
-                    "status": "launch_failed",
-                    "message": "eHall 个人方案查询应用启动失败，请重新授权后再试。",
-                    "source": self._source(),
-                    "plans": [],
-                }
-
-            plan_rows = self._post_rows(
+    def _fetch_authenticated(self, page) -> dict[str, Any]:
+        plan_rows = self._post_rows(
+            page,
+            "/xsfacx/modules/pyfacxepg/grpyfacx.do",
+            "grpyfacx",
+            {},
+        )
+        (
+            current_semester,
+            current_semester_label,
+            schedule_evidence,
+        ) = self._schedule_index()
+        plans: list[dict[str, Any]] = []
+        for summary in plan_rows:
+            plan_id = str(summary.get("PYFADM") or "").strip()
+            if not plan_id:
+                continue
+            form = {"PYFADM": plan_id}
+            details = self._post_rows(
                 page,
-                "/xsfacx/modules/pyfacxepg/grpyfacx.do",
-                "grpyfacx",
-                {},
+                "/jwpubapp/modules/pyfa/qxpyfacx.do",
+                "qxpyfacx",
+                form,
             )
-            (
-                current_semester,
-                current_semester_label,
-                schedule_evidence,
-            ) = self._schedule_index()
-            plans: list[dict[str, Any]] = []
-            for summary in plan_rows:
-                plan_id = str(summary.get("PYFADM") or "").strip()
-                if not plan_id:
-                    continue
-                form = {"PYFADM": plan_id}
-                details = self._post_rows(
-                    page,
-                    "/jwpubapp/modules/pyfa/qxpyfacx.do",
-                    "qxpyfacx",
-                    form,
+            groups = self._post_rows(
+                page,
+                "/jwpubapp/modules/pyfa/kzcx.do",
+                "kzcx",
+                form,
+            )
+            courses = self._post_rows(
+                page,
+                "/jwpubapp/modules/pyfa/kzkccx.do",
+                "kzkccx",
+                form,
+            )
+            plans.append(
+                self._normalize_plan(
+                    summary,
+                    details[0] if details else {},
+                    groups,
+                    courses,
+                    current_semester,
+                    current_semester_label,
+                    schedule_evidence=schedule_evidence,
                 )
-                groups = self._post_rows(
-                    page,
-                    "/jwpubapp/modules/pyfa/kzcx.do",
-                    "kzcx",
-                    form,
-                )
-                courses = self._post_rows(
-                    page,
-                    "/jwpubapp/modules/pyfa/kzkccx.do",
-                    "kzkccx",
-                    form,
-                )
-                plans.append(
-                    self._normalize_plan(
-                        summary,
-                        details[0] if details else {},
-                        groups,
-                        courses,
-                        current_semester,
-                        current_semester_label,
-                        schedule_evidence=schedule_evidence,
-                    )
-                )
+            )
 
-            for plan in plans:
-                self._apply_user_overrides(plan)
-                self._recompute_plan_credits(plan)
+        for plan in plans:
+            self._apply_user_overrides(plan)
+            self._recompute_plan_credits(plan)
 
-            self._save_cookies(page)
-            result = {
-                "status": "completed" if plans else "empty",
-                "message": "已从 eHall 同步个人培养方案。"
-                if plans
-                else "eHall 当前账号没有可用的个人培养方案。",
-                "source": self._source(),
-                "fetchedAt": datetime.now(timezone.utc).isoformat(),
-                "plans": plans,
-            }
-            if plans:
-                self._write_json_atomic(self.cache_file, {"version": 1, **result})
-            return result
+        page.save()
+        result = {
+            "status": "completed" if plans else "empty",
+            "message": "已从 eHall 同步个人培养方案。"
+            if plans
+            else "eHall 当前账号没有可用的个人培养方案。",
+            "source": self._source(),
+            "fetchedAt": datetime.now(timezone.utc).isoformat(),
+            "plans": plans,
+        }
+        if plans:
+            self._write_json_atomic(self.cache_file, {"version": 1, **result})
+        return result
 
     def get(self, *, refresh: bool = False) -> dict[str, Any]:
         cached = self._load_cache()

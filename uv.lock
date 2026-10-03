@@ -1198,7 +1198,9 @@ name = "seudaily-core"
 version = "1.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "dashscope" },
+    { name = "httpx" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "playwright" },
@@ -1227,7 +1229,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=46.0.6" },
     { name = "dashscope", specifier = ">=1.25.15" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "img2pdf", marker = "extra == 'media'", specifier = ">=0.6.3" },
     { name = "img2pdf", marker = "extra == 'ppt'", specifier = ">=0.6.3" },
     { name = "numpy", marker = "extra == 'media'", specifier = ">=2.4.3" },

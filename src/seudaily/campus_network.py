@@ -8,6 +8,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
+import httpx
+
 MESSAGE = "需要校园网环境"
 CODE = "campus_network_required"
 CAMPUS_ACTIONS = frozenset({
@@ -75,7 +77,7 @@ def network_category(action: str, payload: dict[str, Any], error: BaseException)
         text = str(current).lower()
         if any(marker in text for marker in _NETWORK_MARKERS):
             return "connection"
-        if isinstance(current, (TimeoutError, socket.timeout)):
+        if isinstance(current, (TimeoutError, socket.timeout, httpx.TimeoutException)):
             return "timeout"
         if ("timeout" in text or "timed out" in text) and ("page.goto" in text or "apirequestcontext" in text or "urlopen error" in text or "远端刷新失败" in text):
             # Playwright selector, login and expect_page timeouts must retain their meaning.

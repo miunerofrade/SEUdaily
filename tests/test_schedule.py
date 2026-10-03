@@ -78,7 +78,7 @@ class _TimetableLoadingPage:
 def test_initial_semester_loading_timeout_is_not_reported_as_switch_failure(
     tmp_path: Path, monkeypatch, semester
 ):
-    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    service = ScheduleService(target_url="https://ehall.seu.edu.cn/custom-timetable", cache_file=tmp_path / "schedule.json")
     page = _TimetableLoadingPage(initialized=False)
     monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(page))
 
@@ -92,7 +92,7 @@ def test_initial_semester_loading_timeout_is_not_reported_as_switch_failure(
 def test_actual_semester_switch_timeout_does_not_request_reauthentication(
     tmp_path: Path, monkeypatch
 ):
-    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    service = ScheduleService(target_url="https://ehall.seu.edu.cn/custom-timetable", cache_file=tmp_path / "schedule.json")
     page = _TimetableLoadingPage(initialized=True)
     monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(page))
 
@@ -355,10 +355,14 @@ def test_default_full_sync_uses_portal_api_without_navigation_or_clicks(tmp_path
         request = Request()
         context = Context()
 
+        def ensure_authenticated(self, _url):
+            pass
+
         def goto(self, *_args, **_kwargs):
             raise AssertionError("API synchronization must not navigate the portal")
 
-    monkeypatch.setattr(service, "_page", lambda **_kwargs: nullcontext(Page()))
+    monkeypatch.setattr(schedule_module, "CampusSession", lambda *_args, **_kwargs: nullcontext(Page()))
+    monkeypatch.setattr(service, "_page", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("HTTP sync must not start a browser")))
     result = service.get_schedule(refresh=True)
     assert result["status"] == "fresh"
     assert result["prefetchCounts"] == {"2025-2026-2": 1, "2026-2027-2": 1}

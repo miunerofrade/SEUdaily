@@ -274,7 +274,7 @@ const authorizeScheduleTool = createTool({
   ...pythonToolOutput,
   id: "authorize-schedule-portal",
   description:
-    "Open a visible SEU eHall timetable window, automatically fill credentials from SEUDAILY_USERNAME/SEUDAILY_PASSWORD, and submit ordinary login. The user only handles captcha or secondary VPN confirmation. Call when get-course-schedule returns auth_required.",
+    "Authorize SEU eHall using saved credentials over HTTP. Open a visible login window only when interactive verification is required. The user handles captcha or secondary confirmation. Call when get-course-schedule returns auth_required.",
   inputSchema: z.object({
     ...scheduleFields,
     timeoutSeconds: z.number().int().min(30).max(600).default(300),
