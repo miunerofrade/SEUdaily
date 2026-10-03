@@ -1,48 +1,63 @@
 import stringWidth from "string-width";
 import type { Span } from "./markdown.js";
 
-// Two vertical pixels share one terminal cell. Half blocks retain the eye
-// highlights, cheek blush and curled tail without making the welcome taller.
+// Static campus mascot based on the supplied reference: orange round head,
+// cream cheeks, large oval eyes and a blue polo. Two vertical pixels share a cell.
 const squirrel = [
-  "               o            o   ",
-  "              oobo       ooobo  ",
-  "              obbboo     oobbo  ",
-  "             obpppbb     obppbo ",
-  "             obpppbbh    obppbo ",
-  "             oobppphhoohoobppbo ",
-  "              oboohhhhhbbooopoo ",
-  "              ooobbbbbhbbbbooo  ",
-  "       oooooo oobbbbbbbbbbbboo  ",
-  "     ooaaaaaaoobbbbbbbbbbbbbboo ",
-  "    oahhhhhbbobbccecbbbbbccebbo ",
-  "   oahhhhhhhobbcwweecbbbcwweebbo",
-  "  oahhhhaaaaobbcwweeebbbcwweeebo",
-  " ooahhhaaaooobcceeewecbcceeewebo",
-  " oahhhaaoo  obcceeghecbcceeghebo",
-  " oahhaaao   obccceggceeecceggcbo",
-  "oabhhaao     opppceccceccccecco ",
-  "oabhhaao     opppcccccccccccppp ",
-  "oabbhaao      occcccooooocccppp ",
-  "oabbhhaao      occcccooocccco   ",
-  "oabbbhhaoo    obooobbbbobooo    ",
-  "oaahbbhhaaooobbbbbbboooooob     ",
-  " oabhhbbbbbbbbbbocccoooooooco   ",
-  " oaahhhbbbbbhbboccccctttttccco  ",
-  " ooaahhhhhhhhhooocccotttttocoo  ",
-  "  oaahhhhhhhhhobooootthtttnooo  ",
-  "   oaaabhhhhhaobbbcnttttttnbbo  ",
-  "    oaaaaahaaaaobbbcntttttbbo   ",
-  "     ooaaaaaaoooooobcttttoooo   ",
-  "       oooooohhhhhhhhbbthhhhhho ",
-  "            ohhhhhhhhooohhhhhho ",
-  "              ooooo      oooo   ",
+  "                oo             oo       ",
+  "               oiio   r       oiio      ",
+  "              ooiioo rr      oiiiio     ",
+  "              oiiiio rrrrr   oiiiio     ",
+  "              oiiiioorrrrrrr oiiiio     ",
+  "              oiiorrhhhhhhhhrrriiio     ",
+  "              oirhhhhhhhhtthhhhrrio     ",
+  "              orhhhhhhhhhtthhhhhrr      ",
+  "              rhhhhhhhhhhhhhhhhhhrr     ",
+  "             rrhhhtthhhhhhhhhccchrrr    ",
+  "       oooooorrrhhtthhhhhhhhcccccrrr    ",
+  "     oorrrrrrrrrccchhhhhhhhcccecccrrr   ",
+  "    oorhhhhorrrccccchhhhhhcccewgcccrr   ",
+  "   oorhhhhhorrcccecccrrrrrcceeggeccrr   ",
+  "  oorhhhhooorcccewgcccrrrrcceeeeecccc   ",
+  "  orhhhoo  orcceeggeccrrrrcceeeeecccc   ",
+  " orhhhoo   orcceeeeecccccccceeeeecccc   ",
+  " orhhho     occeeeeeccccccccceeecccccoo ",
+  " orhho      occeeeeecccccccccceccppccoo ",
+  "orhhho       occeeecccwwwcccccccppppcroo",
+  "orhhho        cppeccceeeeecccccccppccrro",
+  "orhhho        ppppcccceoeccccccccccccrro",
+  "orhhho         ppccccccooccoccccccccrrro",
+  "orrhhho         hccccooccoocccccccorrrro",
+  "orrrhhoo       ohddlccccccccccdldorrrro ",
+  "orrrrhhooo    oodddddddlldddddddddrrro  ",
+  " orrrrhhhoooohordbldddlldddddlllbdrroo  ",
+  " orrrrrhhorooordbbbldllllldlwwwlbbdoo   ",
+  " orrrrrroorrrrrdbbblllllllllwwwlbbdo    ",
+  "  orrrrroorrroodbbcccccccccccccccbd     ",
+  "  oorrrrroooorrrdbcccccccccccccccd      ",
+  "   oorrrrrrrrrrodccccccccccccccccs      ",
+  "    oorrrrrrrroo sccccccccccccccss      ",
+  "     oorrrrrroo   sssssccccccssss       ",
+  "       oooooo     ssccccsssssccccs      ",
+  "                   ssss      ssss       ",
 ];
 const palette: Record<string, string> = {
-  o: "#684539", a: "#b87749", b: "#df9c61", h: "#f5c283",
-  c: "#ffe4b4", w: "#fff5df", e: "#342d39", g: "#88685d",
-  p: "#edac9c", n: "#aa6d39", t: "#cf914c",
+  o: "#9e4939",
+  r: "#d9654c",
+  h: "#ee8661",
+  i: "#b95140",
+  c: "#f6edce",
+  s: "#dfd7bb",
+  e: "#162526",
+  w: "#f8fbef",
+  g: "#afcbd7",
+  p: "#eb9697",
+  d: "#164a88",
+  b: "#1569b5",
+  l: "#288bc8",
+  t: "#d6ac68",
 };
-const artWidth = 32;
+const artWidth = 40;
 const pixelRows = (): Span[][] => {
   const rows: Span[][] = [];
   for (let y = 0; y < squirrel.length; y += 2) {
@@ -71,8 +86,8 @@ const wrap = (text: string, width: number): string[] => text.split("\n").flatMap
 export function welcomeLines(prompt: string, width: number): Span[][] {
   const boxWidth = Math.min(width, 100), inner = boxWidth - 4;
   const art = pixelRows();
-  const sideBySide = boxWidth >= 64;
-  const leftWidth = Math.max(36, Math.floor(inner * 0.38));
+  const sideBySide = boxWidth >= 80;
+  const leftWidth = Math.max(44, Math.floor(inner * 0.44));
   const rightWidth = sideBySide ? inner - leftWidth : inner;
   const text: Span[][] = [[{ text: "SEUdaily", bold: true, color: "#a8bfff" }], [],
     ...wrap(prompt, rightWidth).map(line => [{ text: line }])];
