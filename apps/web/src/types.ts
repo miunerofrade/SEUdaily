@@ -51,6 +51,8 @@ export type AgentProcessEntry =
 
 export type ChatMessage = {
   id: string;
+  parentId?: string | null;
+  hidden?: boolean;
   role: "user" | "assistant";
   content: string;
   modelContent?: string;
@@ -63,6 +65,7 @@ export type ChatMessage = {
   reasoningDone?: boolean;
   streaming?: boolean;
   brokerRunToken?: string;
+  usage?: Record<string, number>;
   error?: string;
 };
 
@@ -71,6 +74,7 @@ export type ImageAttachment = {
   name: string;
   mediaType: string;
   dataUrl?: string;
+  ref?: string;
   path?: string;
 };
 
@@ -85,12 +89,14 @@ export type DocumentAttachment = {
 
 export type Conversation = {
   id: string;
+  activeLeaf?: string;
   resourceId?: string;
   focusId?: string;
   title: string;
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  messagesLoaded?: boolean;
 };
 
 export type StreamEvent = {

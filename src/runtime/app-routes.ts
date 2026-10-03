@@ -116,11 +116,22 @@ async function generateFirstTurnTitle(input: { threadId: string; resourceId: str
     includeTotal: false,
   });
   const userMessageCount = history.messages.filter((message) => message.role === "user").length;
-  if (userMessageCount !== 1) {
+  if (userMessageCount !== 1 && thread.title?.trim()) {
     return { title: thread.title?.trim() ?? "", generated: false, reason: "not-first-turn" };
+  }
+  // CLI histories may predate automatic naming. Recover their original topic,
+  // never overwrite a named multi-turn conversation with a later request.
+  if (!thread.title?.trim()) {
+    const first = await memoryStore.firstUserMessage(input.threadId, input.resourceId);
+    if (!first) return { title: "", generated: false, reason: "no-user-message" };
+    const content = first.content as any;
+    const firstText = typeof content === "string" ? content
+      : (Array.isArray(content) ? content : content?.parts ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text ?? "").join("\n");
+    input = { ...input, titleInput: compactTitleInput(firstText) || input.titleInput };
   }
   await memoryStore.patchThread({
     id: input.threadId,
+    preserveUpdatedAt: true,
     metadata: {
       ...thread.metadata,
       titleGenerationAttempted: true,
@@ -133,6 +144,7 @@ async function generateFirstTurnTitle(input: { threadId: string; resourceId: str
   } catch (error) {
     await memoryStore.patchThread({
       id: input.threadId,
+      preserveUpdatedAt: true,
       metadata: {
         ...thread.metadata,
         titleGenerationAttempted: true,
@@ -143,6 +155,7 @@ async function generateFirstTurnTitle(input: { threadId: string; resourceId: str
   }
   await memoryStore.patchThread({
     id: input.threadId,
+    preserveUpdatedAt: true,
     title,
     metadata: {
       ...thread.metadata,

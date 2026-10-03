@@ -50,6 +50,7 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
         reader.releaseLock();
     }
 }
+export const DEFAULT_REASONING_EFFORT = 'high';
 export class DeepSeekProvider implements ModelProvider {
     constructor(private config: {
         apiKey?: string;
@@ -63,7 +64,7 @@ export class DeepSeekProvider implements ModelProvider {
         const response = await fetch(`${(this.config.baseUrl ?? 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
             method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: this.config.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-flash', messages: redactValue(messages), stream,
-                ...(stream ? { max_tokens: 8192, stream_options: { include_usage: true }, ...(tools.length ? { tools } : {}) } : { max_tokens: 4096, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }),
+                ...(stream ? { reasoning_effort: DEFAULT_REASONING_EFFORT, max_tokens: 8192, stream_options: { include_usage: true }, ...(tools.length ? { tools } : {}) } : { max_tokens: 4096, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }),
             }),
             signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(360000)]) : AbortSignal.timeout(360000),
         });

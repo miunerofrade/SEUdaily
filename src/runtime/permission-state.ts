@@ -7,8 +7,11 @@ function readBoolean(value: string | undefined) {
 let fullAccessEnabled = readBoolean(envValue("SEUDAILY_FULL_ACCESS"));
 let fullAccessExtraEnabled = readBoolean(envValue("SEUDAILY_FULL_ACCESS_EXTRA"));
 
-export function isFullAccessEnabled() {
-  return fullAccessEnabled;
+type PermissionOptions = { requestContext?: { get(key: string): unknown } };
+const isFocus = (options?: PermissionOptions) => options?.requestContext?.get("seudailyFocus") === true;
+
+export function isFullAccessEnabled(options?: PermissionOptions) {
+  return isFocus(options) || fullAccessEnabled;
 }
 
 export function setFullAccessEnabled(enabled: boolean) {
@@ -17,7 +20,7 @@ export function setFullAccessEnabled(enabled: boolean) {
   delete process.env.CVSTREAM_FULL_ACCESS;
 }
 
-export function isFullAccessExtraEnabled() { return fullAccessExtraEnabled; }
+export function isFullAccessExtraEnabled(options?: PermissionOptions) { return !isFocus(options) && fullAccessExtraEnabled; }
 
 export function setFullAccessExtraEnabled(enabled: boolean) {
   fullAccessExtraEnabled = enabled;
@@ -25,4 +28,4 @@ export function setFullAccessExtraEnabled(enabled: boolean) {
   delete process.env.CVSTREAM_FULL_ACCESS_EXTRA;
 }
 
-export function isUnapprovedAccessEnabled() { return fullAccessEnabled || fullAccessExtraEnabled; }
+export function isUnapprovedAccessEnabled(options?: PermissionOptions) { return isFullAccessEnabled(options) || isFullAccessExtraEnabled(options); }

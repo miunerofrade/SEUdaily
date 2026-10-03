@@ -1,3 +1,4 @@
+import { packageDocumentContent } from '../shared/document-content.js';
 import { redactText, redactValue } from './redaction.js';
 import { randomUUID } from 'node:crypto';
 import { ModelError, type ModelProvider } from './provider.js';
@@ -20,6 +21,7 @@ export class AgentRuntime {
         provider: ModelProvider;
         tools: (context: TurnContext) => Promise<Record<string, ToolDefinition>>;
         instructions: (context: TurnContext) => Promise<string>;
+        resolveDocuments?: (refs: unknown) => Array<{ name: string; markdown: string }>;
         hydrate?: (messages: ModelMessage[]) => Promise<ModelMessage[]>;
         maxSteps?: number;
         memory?: {
@@ -52,17 +54,40 @@ export class AgentRuntime {
             if (await this.config.store.waitingRun(context.threadId))
                 throw new BusyError('当前会话有待审批的工具，请先批准或拒绝');
             const run: RunState = { id: context.runToken, context, status: 'running', step: 0, messages: [], parts: [], pendingCalls: [], cursor: 0, startedAt: new Date().toISOString(), inputMessageIds: [] };
-            if (await this.config.store.getRun(run.id))
-                throw new ApprovalError('运行令牌已使用，请重新发起请求');
+            if (context.userMessageId && input.length !== 1) throw new Error('指定消息 ID 时只接受一条用户消息');
+            const answerId = context.assistantMessageId ?? `${run.id}-assistant`;
+            const history = await this.config.store.contextMessages(context.threadId, context.resourceId);
+            let parent = context.parentMessageId === undefined ? history.messages.at(-1)?.id ?? null : context.parentMessageId;
+            const all = await this.config.store.allMessages(context.threadId, context.resourceId);
+            if (parent && !all.some(m => m.id === parent)) throw new Error('父消息不存在于当前会话');
+            if (context.regenerateFrom) {
+                const source = all.find(m => m.id === context.regenerateFrom && m.role === 'user');
+                if (!source || input.length) throw new Error('重新生成必须引用当前会话中的用户消息');
+                parent = source.id;
+                run.inputMessageIds!.push(source.id);
+            }
+            const documents = this.config.resolveDocuments?.(context.documentRefs) ?? [];
+            if (documents.length && input.length) {
+                input = [...input];
+                const last = input.at(-1)!;
+                input[input.length - 1] = { ...last, content: typeof last.content === 'string'
+                    ? packageDocumentContent(last.content, documents)
+                    : [...(last.content ?? []), { type: 'text', text: packageDocumentContent('', documents) }] };
+            }
+            const inputs: import('./types.js').StoredMessage[] = [];
             for (const message of input) {
                 if (message.role !== 'user')
                     throw new Error('新轮次只接受用户消息');
                 const parts = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : (message.content ?? []).map(part => part.type === 'image_url' ? { type: 'file', data: part.image_url.url, filename: part.filename, mimeType: part.mediaType } : part);
-                const messageId = randomUUID();
+                const messageId = context.userMessageId ?? randomUUID();
+                if (messageId === answerId) throw new Error('用户消息与回复必须使用不同 ID');
                 run.inputMessageIds!.push(messageId);
-                await this.config.store.saveMessage({ id: messageId, threadId: context.threadId, resourceId: context.resourceId, role: 'user', createdAt: new Date().toISOString(), content: { content: parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n'), parts, modelMessages: [message] } });
+                inputs.push({ id: messageId, threadId: context.threadId, resourceId: context.resourceId, role: 'user', createdAt: new Date().toISOString(), content: { parentId: parent, content: parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n'), parts, modelMessages: [message] } });
+                parent = messageId;
             }
-            await this.config.store.saveRun(run);
+            context.parentMessageId = parent;
+            // IDs and all new nodes are reserved together; conflicts roll back the entire turn.
+            await this.config.store.reserveTurn(run, inputs, this.answerMessage(run));
             return this.drive(run, combined);
         }
         catch (error) {
@@ -102,8 +127,14 @@ export class AgentRuntime {
             await this.persist(run);
         }
     }
+    private answerMessage(run: RunState): import('./types.js').StoredMessage {
+        const id = run.context.assistantMessageId ?? `${run.id}-assistant`;
+        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage } };
+    }
     private async persist(run: RunState) {
-        await this.config.store.saveTurn(run, { id: `${run.id}-assistant`, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken } });
+        const message = this.answerMessage(run);
+        await this.config.store.saveTurn(run, message);
+        await this.config.store.selectLeaf(run.context.threadId, run.context.resourceId, message.id);
     }
     private async *drive(run: RunState, signal: AbortSignal, decision?: {
         callId: string;
@@ -117,6 +148,7 @@ export class AgentRuntime {
             run.context.capabilityTickets ??= [];
             run.context.skills ??= [];
             const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityTickets', run.context.capabilityTickets]]);
+            requestContext.set('seudailyFocus', run.context.focus === true);
             requestContext.set('seudailySkills', run.context.skills);
             const options: ToolExecutionOptions = { requestContext, abortSignal: signal };
             while (true) {
@@ -188,7 +220,7 @@ export class AgentRuntime {
                 if (run.step >= (this.config.maxSteps ?? 30))
                     throw new Error('已达到本轮最多 30 步的限制，请缩小任务范围');
                 const prefix: ModelMessage[] = [{ role: 'system', content: await this.config.instructions(run.context) }];
-                const contextHistoryId = `${run.id}-assistant`;
+                const contextHistoryId = run.context.assistantMessageId ?? `${run.id}-assistant`;
                 let context = await this.memory.build(run.context.threadId, run.context.resourceId, prefix, definitions, run.messages, signal, false, contextHistoryId, run.inputMessageIds);
                 let completed = false;
                 let retried = false;

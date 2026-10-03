@@ -36,7 +36,7 @@ async function connect() {
         } while (cursor);
         return Object.fromEntries(definitions.filter(tool => allowed.has(tool.name)).map(tool => {
             const id = `playwright_${tool.name}`;
-            return [id, defineTool({ id, description: tool.description ?? tool.name, inputSchema: z.fromJSONSchema(tool.inputSchema as any), requireApproval: () => !isUnapprovedAccessEnabled() && writes.has(tool.name), execute: async (args, options) => {
+            return [id, defineTool({ id, description: tool.description ?? tool.name, inputSchema: z.fromJSONSchema(tool.inputSchema as any), requireApproval: (_input, options) => !isUnapprovedAccessEnabled(options) && writes.has(tool.name), execute: async (args, options) => {
                         options.abortSignal?.throwIfAborted();
                         const response = await connection.callTool({ name: tool.name, arguments: args as any }, undefined, { signal: options.abortSignal, timeout: 60000 });
                         const text = (response.content as any[]).filter(part => part.type === 'text').map(part => part.text).join('\n').slice(0, 64000);

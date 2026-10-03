@@ -496,3 +496,18 @@ def test_focus_rejects_generic_non_school_kind(tmp_path: Path) -> None:
         assert "notice" in str(exc) and "course" in str(exc)
     else:
         raise AssertionError("generic web Focus should be rejected")
+
+
+def test_focus_permissions_cannot_be_attached_to_an_ordinary_chat(tmp_path: Path) -> None:
+    service = FocusService(state_file=tmp_path / "focus.json")
+    saved = service.upsert({
+        "id": "focus-owned", "kind": "notice", "title": "关注", "description": "关注通知",
+        "threadId": "ordinary-chat", "resourceId": "seudaily-web-local",
+    })["item"]
+    assert saved["threadId"] == "focus-owned"
+    assert saved["resourceId"] == "seudaily-focus-local"
+    updated = service.upsert({**saved, "threadId": "another-chat", "resourceId": "other"})["item"]
+    assert updated["threadId"] == "focus-owned"
+    assert updated["resourceId"] == "seudaily-focus-local"
+    generated = service.upsert({"kind": "notice", "title": "无 ID", "description": "关注通知"})["item"]
+    assert generated["threadId"] == generated["id"]

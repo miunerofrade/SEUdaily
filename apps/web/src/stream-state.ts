@@ -1,4 +1,4 @@
-import type { AgentProcessEntry, ChatMessage } from "./types";
+import type { ChatMessage } from "./types";
 
 export function appendProcessText(
   message: ChatMessage,

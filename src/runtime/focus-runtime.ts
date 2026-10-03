@@ -42,7 +42,7 @@ function scheduledPrompt(focus: FocusAgentItem): string {
     cadence,
     "请延续本会话已经确认的关注目标，主动调用合适的现有工具检查是否出现值得汇报的新内容。",
     "避免重复汇报本会话已经报告过的结果；没有实质变化时明确简短说明。",
-    focus.description ? `初始关注描述：${focus.description}` : "",
+    focus.description ? `当前持续关注要求（优先于历史中的旧描述）：${focus.description}` : "",
   ].filter(Boolean).join("\n");
 }
 

@@ -52,9 +52,7 @@ class FocusSemanticModel:
     """Expand a natural-language watch into searches and judge their results."""
 
     def __init__(self) -> None:
-        api_key = os.getenv("DEEPSEEK_API_KEY", "") or os.getenv(
-            env_value("SEUDAILY_LLM_API_KEY", "") or ""
-        )
+        api_key = os.getenv("DEEPSEEK_API_KEY", "") or env_value("SEUDAILY_LLM_API_KEY", "")
         if not api_key:
             raise ValueError("未配置大模型 API Key，无法执行语义 Focus")
         self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
@@ -228,11 +226,12 @@ class FocusService:
             "kind": kind,
             "title": str(raw.get("title") or (existing or {}).get("title") or "").strip(),
             "enabled": bool(raw.get("enabled", (existing or {}).get("enabled", True))),
-            "threadId": str(raw.get("threadId") or (existing or {}).get("threadId") or ""),
-            "resourceId": str(raw.get("resourceId") or (existing or {}).get("resourceId") or ""),
+            "threadId": str((existing or {}).get("threadId") or raw.get("id") or ""),
+            "resourceId": "seudaily-focus-local",
             "createdAt": (existing or {}).get("createdAt", now),
             "updatedAt": now,
         }
+        item["threadId"] = item["threadId"] or item["id"]
         if not item["title"]:
             raise ValueError("Focus 名称不能为空")
         if kind == "notice":
