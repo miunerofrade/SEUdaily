@@ -779,6 +779,8 @@ export function App({ session, copy = copySelection }: {
       suggestions.length &&
       !key.ctrl &&
       (key.tab ||
+        (key.return && !key.meta && !key.shift &&
+          selectedSuggestion !== editor.current.text) ||
         (key.rightArrow &&
           editor.current.cursor === editor.current.text.length))
     ) {
