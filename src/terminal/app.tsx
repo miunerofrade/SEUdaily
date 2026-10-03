@@ -1190,13 +1190,13 @@ export function App({ session, copy = copySelection }: {
           </Box>
         ) : page === "chat" ? (
           displayLines.slice(top, top + height).map((line, i) => (
-            <Text key={i} backgroundColor={line[0]?.user ? "#9ebba9" : undefined}>
+            <Text key={i} backgroundColor={line[0]?.user ? "#394858" : undefined}>
               {line.map((span, j) => (
                 <Text
                   key={j}
                   color={
                     span.user
-                      ? "#203a2b"
+                      ? "#dde7f1"
                       : span.color ?? (span.role === "你"
                       ? color.accent
                       : span.role === "SEUdaily"
@@ -1207,6 +1207,7 @@ export function App({ session, copy = copySelection }: {
                             ? color.muted
                             : color.text)
                   }
+                  backgroundColor={span.backgroundColor}
                   bold={span.bold}
                 >
                   {span.text}

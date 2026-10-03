@@ -9,6 +9,7 @@ export interface Span {
   role?: string;
   user?: boolean;
   color?: string;
+  backgroundColor?: string;
 }
 const cache = new WeakMap<
   object,

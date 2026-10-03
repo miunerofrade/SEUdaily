@@ -1,26 +1,62 @@
 import stringWidth from "string-width";
 import type { Span } from "./markdown.js";
 
-// Each pair of terminal cells forms a square pixel: curled tail, ears, eye,
-// cream muzzle and paws holding an acorn. No timer or animation is needed.
+// Two vertical pixels share one terminal cell. Half blocks retain the eye
+// highlights, cheek blush and curled tail without making the welcome taller.
 const squirrel = [
-  "      a  a  ",
-  "      abba  ",
-  " aaaa aabba ",
-  "abbbbaaboba ",
-  "ab aabbccao ",
-  "ab  aaabbca ",
-  "abbbbaabbca ",
-  "  abbbabbba ",
-  "  abbbaccaa ",
-  "   abbaccda ",
-  "    abbdaa  ",
-  "    aaaaa   ",
+  "               o            o   ",
+  "              oobo       ooobo  ",
+  "              obbboo     oobbo  ",
+  "             obpppbb     obppbo ",
+  "             obpppbbh    obppbo ",
+  "             oobppphhoohoobppbo ",
+  "              oboohhhhhbbooopoo ",
+  "              ooobbbbbhbbbbooo  ",
+  "       oooooo oobbbbbbbbbbbboo  ",
+  "     ooaaaaaaoobbbbbbbbbbbbbboo ",
+  "    oahhhhhbbobbccecbbbbbccebbo ",
+  "   oahhhhhhhobbcwweecbbbcwweebbo",
+  "  oahhhhaaaaobbcwweeebbbcwweeebo",
+  " ooahhhaaaooobcceeewecbcceeewebo",
+  " oahhhaaoo  obcceeghecbcceeghebo",
+  " oahhaaao   obccceggceeecceggcbo",
+  "oabhhaao     opppceccceccccecco ",
+  "oabhhaao     opppcccccccccccppp ",
+  "oabbhaao      occcccooooocccppp ",
+  "oabbhhaao      occcccooocccco   ",
+  "oabbbhhaoo    obooobbbbobooo    ",
+  "oaahbbhhaaooobbbbbbboooooob     ",
+  " oabhhbbbbbbbbbbocccoooooooco   ",
+  " oaahhhbbbbbhbboccccctttttccco  ",
+  " ooaahhhhhhhhhooocccotttttocoo  ",
+  "  oaahhhhhhhhhobooootthtttnooo  ",
+  "   oaaabhhhhhaobbbcnttttttnbbo  ",
+  "    oaaaaahaaaaobbbcntttttbbo   ",
+  "     ooaaaaaaoooooobcttttoooo   ",
+  "       oooooohhhhhhhhbbthhhhhho ",
+  "            ohhhhhhhhooohhhhhho ",
+  "              ooooo      oooo   ",
 ];
 const palette: Record<string, string> = {
-  a: "#a66c42", b: "#dc9958", c: "#f4ddb3", d: "#bd7843", o: "#161c24",
+  o: "#684539", a: "#b87749", b: "#df9c61", h: "#f5c283",
+  c: "#ffe4b4", w: "#fff5df", e: "#342d39", g: "#88685d",
+  p: "#edac9c", n: "#aa6d39", t: "#cf914c",
 };
-const artWidth = 24;
+const artWidth = 32;
+const pixelRows = (): Span[][] => {
+  const rows: Span[][] = [];
+  for (let y = 0; y < squirrel.length; y += 2) {
+    rows.push(Array.from(squirrel[y]!).map((upper, x) => {
+      const lower = squirrel[y + 1]?.[x] ?? " ";
+      if (upper === " " && lower === " ") return { text: " " };
+      if (upper === " ") return { text: "▄", color: palette[lower] };
+      if (lower === " ") return { text: "▀", color: palette[upper] };
+      if (upper === lower) return { text: "█", color: palette[upper] };
+      return { text: "▀", color: palette[upper], backgroundColor: palette[lower] };
+    }));
+  }
+  return rows;
+};
 const pad = (row: Span[], width: number): Span[] => [
   ...row, { text: " ".repeat(Math.max(0, width - stringWidth(row.map(s => s.text).join("")))) },
 ];
@@ -34,10 +70,9 @@ const wrap = (text: string, width: number): string[] => text.split("\n").flatMap
 });
 export function welcomeLines(prompt: string, width: number): Span[][] {
   const boxWidth = Math.min(width, 100), inner = boxWidth - 4;
-  const art: Span[][] = squirrel.map(row => Array.from(row).map(pixel =>
-    pixel === " " ? { text: "  " } : { text: "██", color: palette[pixel] }));
+  const art = pixelRows();
   const sideBySide = boxWidth >= 64;
-  const leftWidth = Math.max(28, Math.floor(inner * 0.33));
+  const leftWidth = Math.max(36, Math.floor(inner * 0.38));
   const rightWidth = sideBySide ? inner - leftWidth : inner;
   const text: Span[][] = [[{ text: "SEUdaily", bold: true, color: "#a8bfff" }], [],
     ...wrap(prompt, rightWidth).map(line => [{ text: line }])];
