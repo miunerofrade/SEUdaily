@@ -88,15 +88,16 @@ export class AgentStore {
         const now = new Date().toISOString();
         await this.client.execute({ sql: 'INSERT OR IGNORE INTO threads VALUES (?,?,?,?,?,?)', args: [context.threadId, context.resourceId, '', '{}', now, now] });
     }
-    async patchThread({ id, title, metadata }: {
+    async patchThread({ id, title, metadata, preserveUpdatedAt = false }: {
         id: string;
         title?: string;
         metadata?: any;
+        preserveUpdatedAt?: boolean;
     }) {
         const old = await this.getThreadById({ threadId: id });
         if (!old)
             throw new Error('会话不存在');
-        await this.client.execute({ sql: 'UPDATE threads SET title=?,metadata=?,updatedAt=? WHERE id=?', args: [title ?? old.title ?? '', JSON.stringify(metadata ?? old.metadata), new Date().toISOString(), id] });
+        await this.client.execute({ sql: 'UPDATE threads SET title=?,metadata=?,updatedAt=CASE WHEN ? THEN updatedAt ELSE ? END WHERE id=?', args: [title ?? old.title ?? '', JSON.stringify(metadata ?? old.metadata), preserveUpdatedAt ? 1 : 0, new Date().toISOString(), id] });
     }
     async listThreads(resourceId: string, perPage = 100, page = 0) {
         await this.ready;
@@ -107,6 +108,12 @@ export class AgentStore {
         await this.ready;
         const rows = await this.client.execute({ sql: 'SELECT * FROM messages WHERE threadId=? AND resourceId=? ORDER BY sequence', args: [threadId, resourceId] });
         return rows.rows.map(row => ({ ...row, content: JSON.parse(String(row.content)), sequence: Number(row.sequence) })) as unknown as StoredMessage[];
+    }
+    async firstUserMessage(threadId: string, resourceId: string): Promise<StoredMessage | undefined> {
+        await this.ready;
+        const result = await this.client.execute({ sql: "SELECT * FROM messages WHERE threadId=? AND resourceId=? AND role='user' ORDER BY sequence LIMIT 1", args: [threadId, resourceId] });
+        const row = result.rows[0];
+        return row ? { ...row, content: JSON.parse(String(row.content)), sequence: Number(row.sequence) } as unknown as StoredMessage : undefined;
     }
     async listMessages(input: {
         threadId: string;

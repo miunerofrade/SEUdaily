@@ -25,14 +25,18 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
   const terminalReplies = useRef(new TerminalReplyFilter());
   const { setCursorPosition } = useCursor();
   const filtered = threads.filter((thread) => clean(thread.title ?? "未命名").toLowerCase().includes(query.toLowerCase()) || String(thread.id).includes(query));
-  const capacity = Math.max(1, height - 5);
+  const rowHeight = height >= 10 ? 2 : 1;
+  const capacity = Math.max(1, Math.floor((height - 5) / rowHeight));
   const current = Math.min(index, Math.max(0, filtered.length - 1));
   const top = Math.max(0, current - capacity + 1);
   const view = useRef({ query, filtered, current, capacity });
   view.current = { query, filtered, current, capacity };
-  const change = (amount: number) => setIndex(Math.max(0, Math.min(
-    view.current.filtered.length - 1, view.current.current + amount,
-  )));
+  const change = (amount: number, wrap = false) => {
+    const count = view.current.filtered.length;
+    if (!count) return;
+    const next = view.current.current + amount;
+    setIndex(wrap ? (next + count) % count : Math.max(0, Math.min(count - 1, next)));
+  };
   useImperativeHandle(ref, () => ({
     scroll: change,
     click: (x, y) => {
@@ -53,8 +57,8 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
   useInput((value, key) => {
     if (terminalReplies.current.consume(value)) return;
     if (key.eventType === "release" || key.ctrl || key.super || key.meta || value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value) || /^\[\?/.test(value)) return;
-    if (key.upArrow) change(-1);
-    else if (key.downArrow) change(1);
+    if (key.upArrow) change(-1, true);
+    else if (key.downArrow) change(1, true);
     else if (key.pageUp) change(-view.current.capacity);
     else if (key.pageDown) change(view.current.capacity);
     else if (key.return) { if (view.current.filtered[view.current.current]) onSelect(view.current.filtered[view.current.current].id); }
@@ -70,7 +74,7 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
     <Text>搜索：{fit(query || "", Math.max(1, width - 10))}</Text>
     <Text dimColor>{fit("  会话标题", titleWidth + 2)}{dateWidth ? "更新时间" : ""}</Text>
     {!filtered.length && <Text dimColor>{threads.length ? "没有匹配的会话。" : "暂无历史会话。"}</Text>}
-    {filtered.slice(top, top + capacity).map((thread, i) => <Box key={thread.id} ref={(element) => { elements.current[i] = element; }} height={1}>
+    {filtered.slice(top, top + capacity).map((thread, i) => <Box key={thread.id} ref={(element) => { elements.current[i] = element; }} height={1} marginBottom={rowHeight - 1}>
       <Text inverse={top + i === current}>{top + i === current ? "› " : "  "}{fit(clean(thread.title || "未命名").replace(/\n/g, " ") + (thread.id === currentId ? "（当前）" : ""), titleWidth)}{dateWidth ? "  " + sessionDate(thread.updatedAt) : ""}</Text>
     </Box>)}
     <Text dimColor>{filtered[current]?.id ?? ""}</Text>
