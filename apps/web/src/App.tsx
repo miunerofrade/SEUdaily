@@ -1,3 +1,4 @@
+import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
 import {
   ArrowUp,
   BookOpen,
@@ -644,6 +645,21 @@ export default function App() {
   const [selectedFocusId, setSelectedFocusId] = useState("");
   const [view, setView] = useState<AppView>("chat");
   const [draft, setDraft] = useState("");
+  const [agentInfo, setAgentInfo] = useState({ model: "—", effort: "—" });
+  useEffect(() => {
+    if (view !== "chat") return;
+    const controller = new AbortController();
+    void fetch("/app/agent-info", { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) return;
+        const info = await response.json();
+        if (!controller.signal.aborted) setAgentInfo({
+          model: typeof info.model === "string" ? info.model : "—",
+          effort: typeof info.effort === "string" ? info.effort : "—",
+        });
+      }).catch(() => undefined);
+    return () => controller.abort();
+  }, [view]);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
   const [skillError, setSkillError] = useState("");
@@ -692,6 +708,8 @@ export default function App() {
   }, [rightOpen, view]);
 
   const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
+  const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
   const recentConversations = useMemo(() => [
     ...conversations.filter((conversation) => conversation.messages.length).map((conversation) => ({ kind: "chat" as const, conversation })),
     ...focusConversations.map((conversation) => ({ kind: "focus" as const, conversation })),
@@ -860,6 +878,10 @@ export default function App() {
 
   function handleStreamEvent(conversationId: string, messageId: string, event: StreamEvent) {
     const payload = event.payload ?? {};
+    if (event.type === "finish") {
+      const usage = normalizedUsage(payload.usage);
+      if (Object.keys(usage).length) mutateMessage(conversationId, messageId, message => ({ ...message, usage }));
+    }
     if (event.type === "reasoning-start") {
       const text = typeof payload.text === "string" ? payload.text : "";
       mutateMessage(conversationId, messageId, (message) => ({
@@ -1295,6 +1317,7 @@ export default function App() {
           <button type="submit" className="send-button" disabled={uploadingDocuments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
         )}
       </div>
+      <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>
       {!!active.messages.length && <div className="composer-hint"><span>Enter 发送 · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
     </form>
   );

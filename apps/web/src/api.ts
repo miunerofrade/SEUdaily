@@ -1,3 +1,4 @@
+import { normalizedUsage } from "../../../src/shared/telemetry";
 import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
@@ -194,6 +195,7 @@ type StoredMessage = {
     content?: string;
     parts?: Array<Record<string, unknown>>;
     runToken?: string;
+    usage?: Record<string, number>;
   };
 };
 
@@ -341,6 +343,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       attachments,
       documents,
       brokerRunToken: item.content?.runToken,
+      usage: normalizedUsage(item.content?.usage),
       tools: item.role === "assistant" ? storedTools(parts) : undefined,
       process: item.role === "assistant" ? storedProcess(parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),
