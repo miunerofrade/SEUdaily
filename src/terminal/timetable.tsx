@@ -62,10 +62,14 @@ export function Timetable({
         ) +
         right
       );
-    let result = left + "─".repeat(timeWidth + 2) + (continuous[0] ? "┤" : "┼");
+    const result: React.ReactNode[] = [left + "─".repeat(timeWidth + 2) + (continuous[0] ? "┤" : "┼")];
     for (let i = 0; i < days; i++) {
-      result += (continuous[i] ? " " : "─").repeat(cellWidth + 2);
-      result +=
+      const active = continuous[i] && selection?.day === dayStart + i &&
+        at(period, dayStart + i).some(item => selectedItems.includes(item));
+      result.push(<Text key={i} backgroundColor={active ? "#394858" : undefined}>
+        {(continuous[i] ? " " : "─").repeat(cellWidth + 2)}
+      </Text>);
+      result.push(
         i === days - 1
           ? continuous[i]
             ? "│"
@@ -76,7 +80,7 @@ export function Timetable({
               : "├"
             : continuous[i + 1]
               ? "┤"
-              : "┼";
+              : "┼");
     }
     return result;
   };
@@ -104,7 +108,7 @@ export function Timetable({
                 <Text bold>{fit(String(period), timeWidth)}</Text>
                 <Text color="#8993a4">{periodTimes[period]}</Text>
               </Box>
-              <Text color="#64738a">{" │ \n │ "}</Text>
+              <Text color="#64738a">{" │\n │"}</Text>
               {Array.from({ length: days }, (_, i) => {
                 const day = dayStart + i,
                   items = at(period, day),
@@ -126,20 +130,20 @@ export function Timetable({
                 return (
                   <React.Fragment key={day}>
                     <Box
-                      width={cellWidth}
+                      width={cellWidth + 2}
                       flexDirection="column"
                       ref={(element) =>
                         register((period - 1) * 7 + day, element, items)
                       }
                     >
                       <Text backgroundColor={active ? "#394858" : undefined} bold={active} color={course ? "#80cbc4" : "#dce1ea"}>
-                        {fit(texts[0] || "", cellWidth)}
+                        {" " + fit(texts[0] || "", cellWidth) + " "}
                       </Text>
                       <Text backgroundColor={active ? "#394858" : undefined} color={active ? "#dce1ea" : "#8993a4"}>
-                        {fit(texts[1] || "", cellWidth)}
+                        {" " + fit(texts[1] || "", cellWidth) + " "}
                       </Text>
                     </Box>
-                    <Text color="#64738a">{" │ \n │ "}</Text>
+                    <Text color="#64738a">{"│\n│"}</Text>
                   </React.Fragment>
                 );
               })}
