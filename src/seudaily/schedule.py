@@ -16,6 +16,8 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser_runtime import browser_runtime
+from .campus_auth import CampusAuthError, CampusSession
+from .cancellation import TaskCancelledError
 from .campus_network import network_category
 from .runtime_paths import env_value
 
@@ -165,6 +167,17 @@ class ScheduleService:
         session_reset = False
         if reset_session:
             session_reset = self._clear_saved_session()
+        if self.target_url == DEFAULT_SCHEDULE_URL:
+            try:
+                with CampusSession(self.cookie_file, username=self.username,
+                                   password=self.password,
+                                   load_saved_cookies=not reset_session) as session:
+                    session.ensure_authenticated(self.entry_url)
+                return {"status": "authorized", "cookieFile": str(self.cookie_file.resolve()),
+                        "sessionReset": session_reset, "authenticationMethod": "http"}
+            except CampusAuthError:
+                # Keep the visible login entry for CAPTCHA and other interactive checks.
+                pass
         with self._page(
             visible=True, load_saved_cookies=not reset_session
         ) as page:
@@ -1025,6 +1038,8 @@ class ScheduleService:
                     }
                 )
             except Exception as exc:
+                if isinstance(exc, (CampusAuthError, TaskCancelledError)):
+                    raise
                 if network_category("get-schedule", {"targetUrl": self.target_url}, exc):
                     raise
                 failures.append(
@@ -1097,12 +1112,21 @@ class ScheduleService:
         include_available_semesters: bool = False,
         prefetch_available_semesters: bool = False,
     ) -> dict[str, Any]:
+        if self.target_url == DEFAULT_SCHEDULE_URL:
+            try:
+                with CampusSession(self.cookie_file, username=self.username,
+                                   password=self.password) as session:
+                    session.ensure_authenticated(self.entry_url)
+                    api_result = self._fetch_api_schedule(
+                        session, semester,
+                        include_available_semesters=include_available_semesters,
+                        prefetch_available_semesters=prefetch_available_semesters)
+                    if api_result is not None:
+                        return api_result
+            except CampusAuthError as error:
+                return error.result()
         payloads: list[tuple[str, Any]] = []
         with self._page(visible=False) as page:
-            if self.target_url == DEFAULT_SCHEDULE_URL:
-                api_result = self._fetch_api_schedule(page, semester, include_available_semesters=include_available_semesters, prefetch_available_semesters=prefetch_available_semesters)
-                if api_result is not None:
-                    return api_result
             def collect(response) -> None:
                 if not response.url.endswith(
                     "/modules/xskcb/xskcb.do"

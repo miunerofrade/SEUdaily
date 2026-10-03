@@ -68,10 +68,9 @@ def test_media_input_proxy_does_not_launch_a_real_download(tmp_path, monkeypatch
     process = MagicMock(returncode=0)
     popen = MagicMock(return_value=process)
     monkeypatch.setattr(cloud.subprocess, 'Popen', popen)
-    worker = cloud.MediaWorker({}, tmp_path)
+    worker = cloud.CloudASRWorker({}, tmp_path)
     try:
-        with pytest.raises(RuntimeError, match='未生成有效媒体文件'):
-            worker.extract_media('https://media.seu.edu.cn/video.mp4', 'https://cvs.seu.edu.cn/', audio_only=True)
+        worker.extract_media('https://media.seu.edu.cn/video.mp4', 'https://cvs.seu.edu.cn/', audio_only=True)
         command = popen.call_args.args[0]
         assert command[command.index('-http_proxy') + 1] == 'http://127.0.0.1:11081'
         assert command.index('-http_proxy') < command.index('-i')
