@@ -2,7 +2,7 @@ import stringWidth from "string-width";
 import type { Span } from "./markdown.js";
 
 // Static campus mascot based on the supplied reference: orange round head,
-// cream cheeks, large oval eyes and a blue polo. Two vertical pixels share a cell.
+// cream cheeks, large oval eyes and warm brown body fur. Two vertical pixels share a cell.
 const squirrel = [
   "                oo            oo        ",
   "               oiio    r     oiio       ",
@@ -28,18 +28,18 @@ const squirrel = [
   "orhhhhhhhhoooccppccccceoeecccccppcc     ",
   "orhhhhhhhhoooocccccccccooccccccccc      ",
   "orhhhhhhhhoooooocccccooccooccccc        ",
-  "orrhhhhhhhooooobbddccccccccccddbb       ",
-  "orrrhhhhhhoooobbdddddddlldddddddbb      ",
-  " orrrhhhhhhhhobbdbldddldlldddlbdbbo     ",
-  " orrrrhhhhhhhobdbblldlllllldwwbbdbo     ",
-  " oorrrrhhhhhhoodbbllllllllllwwbbdoo     ",
-  "  orrrrrrhhhhhrdbccccccccccccccbdr      ",
-  "   orrrrrrrrrrrrdccccccccccccccdrr      ",
-  "    orrrrrrrrrrrsccccccccccccccsr       ",
-  "     orrrrrrrrrossccccccccccccss        ",
-  "      oorrrrroo  sssssccccsssss         ",
-  "        ooooo    sccccssssccccs         ",
-  "                  ssss    ssss          ",
+  "orrhhhhhhhooooommffccccccccccffmm       ",
+  "orrrhhhhhhoooommffmmcccccccsmmffmm      ",
+  " orrrhhhhhhhhfmmfmmsccccccccsmmfmmf     ",
+  " orrrrhhhhhhhfmfmmsccccccccccsmmfmf     ",
+  " oorrrrhhhhhhfffmmsccccccccccsmmfff     ",
+  "  orrrrrrhhhhhufmmsccccccccccsmmfu      ",
+  "   orrrrrrrrrruufmssccccccccssmfuu      ",
+  "    orrrrrrrrrruffmssccccccssmffu       ",
+  "     orrrrrrrrro ffmssccccssmff         ",
+  "      oorrrrroo   ffffssssffff          ",
+  "        ooooo    fuuuuffffuuuuf         ",
+  "                  ffff    ffff          ",
 ];
 const palette: Record<string, string> = {
   o: "#9e4939",
@@ -52,9 +52,9 @@ const palette: Record<string, string> = {
   w: "#f8fbef",
   g: "#afcbd7",
   p: "#eb9697",
-  d: "#164a88",
-  b: "#1569b5",
-  l: "#288bc8",
+  f: "#94613f",
+  m: "#b98156",
+  u: "#d7a16e",
   t: "#d6ac68",
 };
 const artWidth = 40;
