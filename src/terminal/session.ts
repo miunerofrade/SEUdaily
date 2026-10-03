@@ -100,6 +100,8 @@ export interface TerminalMessage {
   role: string;
   text: string;
   reasoning?: string;
+  process?: Array<{ type: "reasoning" | "text" | "tool"; text: string; id?: string }>;
+  streaming?: boolean;
   welcome?: boolean;
 }
 export class Session extends EventEmitter {
@@ -281,6 +283,16 @@ export class Session extends EventEmitter {
           role: m.role === "user" ? "你" : "SEUdaily",
           text: clean(text ?? ""),
           reasoning: clean(reasoning),
+          process: m.role === "assistant" ? parts.flatMap((p: any) => {
+            if (p.type === "text" || p.type === "reasoning")
+              return [{ type: p.type, text: clean(p.text ?? p.reasoning ?? "") }];
+            if (p.type === "tool-invocation") {
+              const tool = p.toolInvocation;
+              return [{ type: "tool", id: tool?.toolCallId,
+                text: clean(tool?.result?.summary ?? `[${tool?.toolName ?? "工具"}] 完成`) }];
+            }
+            return [];
+          }) : undefined,
         });
         this.changed();
       }
@@ -378,7 +390,13 @@ export class Session extends EventEmitter {
     await this.save();
     if (typeof text === "string") this.show(text, "你");
     this.reasoningExpanded = false;
-    const message: TerminalMessage = { role: "SEUdaily", text: "", reasoning: "" };
+    const message: TerminalMessage = { role: "SEUdaily", text: "", reasoning: "", process: [], streaming: true };
+    // Match the Web process sequence: only adjacent deltas of the same kind merge.
+    const append = (type: "reasoning" | "text", text: string, startNew = false) => {
+      const last = message.process!.at(-1);
+      if (!startNew && last?.type === type) last.text += text;
+      else message.process!.push({ type, text });
+    };
     this.messages.push(message);
     this.status = "正在回答";
     this.thinking = true;
@@ -405,23 +423,30 @@ export class Session extends EventEmitter {
         const p = event.payload ?? {};
         if (event.type === "text-delta") {
           message.text += clean(p.text ?? "");
+          append("text", clean(p.text ?? ""));
           if (p.text) this.thinking = false;
         } else if (event.type === "reasoning-start") {
           this.status = "正在思考";
           this.thinking = true;
+          append("reasoning", "", true);
         } else if (event.type === "reasoning-end") this.status = "正在回答";
         else if (event.type === "reasoning-delta") {
           message.reasoning += clean(p.text ?? "");
+          append("reasoning", clean(p.text ?? ""));
           if (this.options.verbose) this.emit("diagnostic", clean(p.text));
         } else if (event.type === "tool-call") {
           this.status = "工具：" + p.toolName;
           this.thinking = false;
-          if (!this.options.quiet) this.show(`[${p.toolName}] 执行中`);
+          if (!this.options.quiet) message.process!.push({ type: "tool", id: p.toolCallId, text: `[${p.toolName}] 执行中` });
         } else if (event.type === "tool-result") {
           this.thinking = true;
           this.tool(p.result);
-          if (!this.options.quiet)
-            this.show(p.result?.summary ?? `[${p.toolName}] 完成`);
+          if (!this.options.quiet) {
+            const tool = [...message.process!].reverse().find(part => part.type === "tool" && part.id === p.toolCallId);
+            const text = clean(p.result?.summary ?? `[${p.toolName}] 完成`);
+            if (tool) tool.text = text;
+            else message.process!.push({ type: "tool", id: p.toolCallId, text });
+          }
         } else if (event.type === "tool-approval-request") {
           this.pending = { ...p, runToken: this.runToken };
           code = 3;
@@ -446,6 +471,8 @@ export class Session extends EventEmitter {
       }
       throw error;
     } finally {
+      message.streaming = false;
+      this.reasoningExpanded = false;
       if (this.controller === controller) this.controller = null;
       this.thinking = false;
       this.status = this.pending ? "待审批" : "就绪";

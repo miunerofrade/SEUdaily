@@ -15,7 +15,7 @@ import {
 } from "ink";
 import { Select, Spinner } from "@inkjs/ui";
 import { editorRows } from "./editor.js";
-import { messageLines } from "./markdown.js";
+import { processLines } from "./process.js";
 import { welcomeLines } from "./welcome.js";
 import { Composer } from "./composer.js";
 import { telemetryLabel } from "./telemetry.js";
@@ -164,33 +164,14 @@ export function App({ session, copy = copySelection }: {
     session.thinking &&
     !session.pending &&
     !session.confirmation;
-  const latestAnswer = [...messages].reverse().find(
-    (message) => message.role === "SEUdaily",
-  );
-  const reasoning = latestAnswer?.reasoning ?? "";
-  const reasoningLines = useMemo(
-    () => wrap(reasoning, width - 2), [reasoning, width],
-  );
-  const [reasoningOffset, setReasoningOffset] = useState<number | null>(null);
   const reasoningRef = useRef<DOMElement | null>(null);
   const showReasoning = page === "chat" && !session.pending &&
-    !session.confirmation && (showThinking || !!reasoning);
-  const reasoningCapacity = Math.min(
-    reasoningLines.length, Math.max(1, Math.min(8, Math.floor(rows / 3))),
-  );
-  const reasoningHeight = showReasoning
-    ? 1 + (session.reasoningExpanded && reasoning ? reasoningCapacity : 0)
-    : 0;
-  const reasoningMaxOffset = Math.max(0, reasoningLines.length - reasoningCapacity);
-  const reasoningTop = Math.min(reasoningMaxOffset, reasoningOffset ?? reasoningMaxOffset);
+    !session.confirmation && (showThinking || messages.some(message => !!message.reasoning));
+  const reasoningHeight = showReasoning ? 1 : 0;
   const toggleReasoning = () => {
-    setReasoningOffset(session.busy ? null : 0);
     session.reasoningExpanded = !session.reasoningExpanded;
     session.changed();
   };
-  useEffect(() => {
-    setReasoningOffset(session.busy ? null : 0);
-  }, [session.runToken, session.threadId, session.reasoningExpanded]);
   const inReasoning = (x?: number, y?: number) => {
     if (!reasoningRef.current || x === undefined || y === undefined) return false;
     const box = measureElement(reasoningRef.current);
@@ -334,8 +315,8 @@ export function App({ session, copy = copySelection }: {
   };
   const displayLines = useMemo(
     () => messages.flatMap((message) => message.welcome
-      ? welcomeLines(message.text, width) : messageLines(message, width)),
-    [messages, width],
+      ? welcomeLines(message.text, width) : processLines(message, width, session.reasoningExpanded)),
+    [messages, width, session.reasoningExpanded],
   );
   const maxOffset = Math.max(0, displayLines.length - height);
   const top = offset === null ? maxOffset : Math.min(maxOffset, offset);
@@ -447,12 +428,6 @@ export function App({ session, copy = copySelection }: {
       return;
     }
     if (modal === "resume") { resumePicker.current?.scroll(amount); return; }
-    if (session.reasoningExpanded && inReasoning(x, y)) {
-      setReasoningOffset((current) => Math.max(
-        0, Math.min(reasoningMaxOffset, (current ?? reasoningMaxOffset) + amount),
-      ));
-      return;
-    }
     if (decisions) {
       setDecisionOffset((current) =>
         Math.max(0, Math.min(decisionMaxOffset, current + amount)),
@@ -1382,18 +1357,9 @@ export function App({ session, copy = copySelection }: {
               : <Text color={color.muted}>模型思考</Text>}
             <Text color={color.muted} wrap="truncate">
               {session.reasoningExpanded ? " ▾ " : " ▸ "}
-              {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : fit(
-                reasoningLines.at(-1) || "等待模型返回思考内容",
-                Math.max(1, width - 30),
-              )}
-              {!session.reasoningExpanded && " · Ctrl+T 展开"}
+              {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : "点击展开 · Ctrl+T"}
             </Text>
           </Box>
-          {session.reasoningExpanded && reasoning && reasoningLines
-            .slice(reasoningTop, reasoningTop + reasoningCapacity)
-            .map((line, index) => (
-              <Text key={index} color={color.muted}>{"  " + line}</Text>
-            ))}
         </Box>
       )}
       {page === "chat" && (
