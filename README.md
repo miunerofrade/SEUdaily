@@ -195,13 +195,17 @@ uv run seudaily sessions
 
 激活 `.venv` 后可以直接输入 `seudaily`。`--cwd` 选择本仓库目录，`--no-start` 只连接已有后端，`--timeout` 设置 HTTP 读取超时，`--skill NAME` 显式选择 Skill，`--vi` 切换输入按键，`--no-color` 禁用颜色，`-q/--quiet` 隐藏工具过程。帮助和版本不会初始化后端、数据库、模型或 Worker。
 
+`/resume` 或 `uv run seudaily --resume` 先显示会话选择列表，支持中文标题 / ID 搜索、方向键、滚轮和点击恢复；Esc 返回当前会话。指定 ID / 序号可直接恢复，`latest` 显式恢复最近会话。
+
+输入框使用真实终端光标，位置按中文字符显示宽度计算。输入法提交文字与回车同批到达时，保留文字在草稿中；独立的下一次 Enter 才发送。
+
 没有服务时 CLI 只启动后端，将日志写入 `.seudaily/logs/cli-backend.log`，退出时清理自己启动的进程；连接现有服务时保持其运行。聊天采用 Ink 全屏 TUI：对话区独立滚动，底部固定输入框和模型用量信息，支持基础 Markdown 与带边框的聊天表格，中文单元格按终端宽度换行；等待模型时，输入框上方显示 Thinking 动画；DeepSeek 返回的思考文本默认显示一行，点击或 Ctrl+T（`/thinking`）展开 / 折叠，展开区域内滚轮单独查看完整思考，历史会话也可恢复。鼠标直接拖选文字，默认只高亮，macOS 在支持增强键盘协议的终端可用 Cmd+C，Windows / Linux 使用 Ctrl+C，macOS 也保留 Ctrl+C 兼容方式；Esc 清除选区；`/copy-on-select on` 可开启松开鼠标自动复制，`off` 关闭，偏好保存在 `.seudaily/cli-preferences.json`。选区保留时暂停流式画面刷新，清除后显示最新内容；普通点击和滚轮保持可用。复制使用 macOS 的 pbcopy、Linux 的 wl-copy/xclip/xsel、Windows 的 PowerShell，SSH 或无本地剪贴板工具时使用 OSC 52（终端需支持）；不会因为简单拖选就改写剪贴板。启动先关闭终端输入回显再初始化界面；macOS Terminal.app 不进行增强键盘协议探测，其他终端按需自动检测。PgUp/PgDn 或鼠标滚轮查看历史，Ctrl+End 返回最新回答；退出后恢复原终端画面。普通输入通过 Agent 处理，Enter 发送，Alt+Enter 换行，补全候选以命令和中文说明表格显示，上下键选择，Tab 或输入末尾的右方向键接受；没有候选时上下键查询输入历史，Ctrl+C 取消当前任务或清空输入，Ctrl+D 直接退出；持续按住 Ctrl+C 约一秒退出，短按仍用于复制选区、取消任务或清空输入。输入框从一行开始，随内容自动扩展；粘贴至少 6 行或 1,000 字符时显示 `[pasted text +N lines]`，方向键跨过整个块，Backspace/Delete 整体删除，发送时展开为原文。粘贴不会自动发送。居中的底栏显示当前模型、effort（聊天请求默认 high）、会话累计 token 与输入缓存命中率，未报告的用量显示 `—`；新会话清零，恢复会话按运行 ID 去重。启动器优先使用满足要求的当前 Node；当前版本不兼容时可使用 fnm 中已有的 22.x，不修改 Shell 默认版本。输入历史和最近会话标记保存在 `.seudaily/cli-history`、`.seudaily/cli-state.json`，Unix 上权限为 0600。
 
 主要斜杠命令：
 
 | 命令 | 作用 |
 | --- | --- |
-| `/help`、`/new`、`/sessions`、`/resume ID或序号`、`/history` | 帮助、会话与原始历史 |
+| `/help`、`/new`、`/sessions`、`/resume [ID或序号]`、`/history` | 帮助、会话与原始历史 |
 | `/schedule`、`/课表` | 默认只读取本地课表 |
 | `/schedule --date YYYY-MM-DD --semester YYYY-YYYY-N` | 按日期或学期查看课表 |
 | `/schedule --sync`、`/schedule --semesters` | 显式同步近四年的可选学期、列出缓存学期 |

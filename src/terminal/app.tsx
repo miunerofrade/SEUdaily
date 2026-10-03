@@ -10,6 +10,7 @@ import {
   useWindowSize,
   measureElement,
   type DOMElement,
+  type Key,
 } from "ink";
 import { Select, Spinner } from "@inkjs/ui";
 import { editorRows } from "./editor.js";
@@ -28,7 +29,9 @@ import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
 import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
-import { InterruptHold, TerminalReplyFilter } from "./keyboard.js";
+import { committedInput, InterruptHold, TerminalReplyFilter } from "./keyboard.js";
+import { InputCursor } from "./cursor.js";
+import { SessionPicker, type SessionPickerHandle } from "./session-picker.js";
 import { copySelection } from "./clipboard.js";
 
 const color = {
@@ -88,6 +91,7 @@ export function App({ session, copy = copySelection }: {
   const { exit } = useApp();
   const { stdin } = useStdin();
   const { stdout } = useStdout();
+  const resumePicker = useRef<SessionPickerHandle | null>(null);
   const { columns, rows } = useWindowSize();
   const width = Math.max(20, columns - 4);
   const rootRef = useRef<DOMElement | null>(null);
@@ -129,7 +133,8 @@ export function App({ session, copy = copySelection }: {
   const busy = session.busy;
   const [offset, setOffset] = useState<number | null>(null);
   const [field, setField] = useState(0);
-  const [modal, setModal] = useState<string | null>(null);
+  const [modal, setModal] = useState<string | null>(session.resumePickerRequested ? "resume" : null);
+  useEffect(() => { if (session.resumePickerRequested) setModal("resume"); }, [session.resumePickerRequested]);
   const [detail, setDetail] = useState<any>(null);
   const [term, setTerm] = useState(schedule.selectedSemester);
   const [courses, setCourses] = useState<any[]>(schedule.courses);
@@ -424,6 +429,7 @@ export function App({ session, copy = copySelection }: {
   const cancel = () => void session.cancel();
   const wheel = (amount: number, x?: number, y?: number) => {
     if (selectionRef.current) clearSelection();
+    if (modal === "resume") { resumePicker.current?.scroll(amount); return; }
     if (session.reasoningExpanded && inReasoning(x, y)) {
       setReasoningOffset((current) => Math.max(
         0, Math.min(reasoningMaxOffset, (current ?? reasoningMaxOffset) + amount),
@@ -467,6 +473,7 @@ export function App({ session, copy = copySelection }: {
   wheelRef.current = wheel;
   const clickRef = useRef((x: number, y: number) => {});
   clickRef.current = (x, y) => {
+    if (modal === "resume") { resumePicker.current?.click(x, y); return; }
     if (modal || detail || decisions) return;
     if (page === "chat") {
       if (inReasoning(x, y)) toggleReasoning();
@@ -626,7 +633,7 @@ export function App({ session, copy = copySelection }: {
       setCaret(editor.current.cursor);
     }
   });
-  useInput((value, key) => {
+  const handleInput = (value: string, key: Key) => {
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
     if (terminalReplies.current.consume(value)) return;
     if (key.eventType === "release") {
@@ -735,7 +742,7 @@ export function App({ session, copy = copySelection }: {
           return;
         }
         if (value && !key.ctrl && !key.meta) {
-          setFilter((old) => old + clean(value));
+          setFilter((old) => old + clean(committedInput(value)));
           setSelected(0);
           setTableTop(0);
           return;
@@ -904,8 +911,12 @@ export function App({ session, copy = copySelection }: {
       edit(text.slice(0, cursor) + text.slice(cursor + next), cursor);
       return;
     }
-    if (value && !key.ctrl && !key.meta) insert(value);
-  });
+    if (value && !key.ctrl && !key.meta) insert(committedInput(value));
+  };
+  // Keep state-dependent decisions current even when Ink retains the original callback.
+  const inputHandler = useRef(handleInput);
+  inputHandler.current = handleInput;
+  useInput((value, key) => inputHandler.current(value, key));
   const choose = async (value: string) => {
     const kind = modal;
     setModal(null);
@@ -1033,6 +1044,17 @@ export function App({ session, copy = copySelection }: {
     page === "schedule"
       ? ["课程", "星期", "节次", "地点", "教师"]
       : ["课程", "代码", "学分", "修读状态", "分类"];
+  const caretLine = inputLayout.rows[inputLayout.cursorRow] ?? [];
+  let caretColumn = 0;
+  for (const span of caretLine) { if (span.inverse) break; caretColumn += stringWidth(span.text); }
+  let nativeCursor: { x: number; y: number } | undefined;
+  if (page === "chat" && !modal && !detail && !decisions && !selectionRef.current?.moved) {
+    nativeCursor = { x: Math.min(columns - 2, 5 + caretColumn),
+      y: height + reasoningHeight + suggestionHeight + 1 + inputLayout.cursorRow - inputTop };
+  } else if (page !== "chat" && field === 2 && !modal && !detail && fields.current[2]) {
+    const box = measureElement(fields.current[2]);
+    nativeCursor = { x: box.x + 2 + Math.min(stringWidth(filter), Math.max(0, box.width - 5)), y: box.y + 2 };
+  }
   gridCells.current = [];
   tableRows.current = [];
   return (
@@ -1043,7 +1065,11 @@ export function App({ session, copy = copySelection }: {
         flexShrink={0}
         overflow="hidden"
       >
-        {decisions ? (
+        {modal === "resume" ? (
+          <SessionPicker ref={resumePicker} threads={session.threads} currentId={session.threadId}
+            width={width} height={height}
+            onSelect={(id) => { setModal(null); setOffset(null); void run(`/resume ${id}`); }} />
+        ) : decisions ? (
           <Box
             borderStyle="round"
             borderColor={color.accent}
@@ -1386,7 +1412,7 @@ export function App({ session, copy = copySelection }: {
                 <Text key={index}>
                   {index === 0 ? "› " : "  "}
                   {row.map((span, i) => (
-                    <Text key={i} inverse={span.inverse}>
+                    <Text key={i}>
                       {span.text}
                     </Text>
                   ))}
@@ -1404,6 +1430,7 @@ export function App({ session, copy = copySelection }: {
             : telemetryLabel(session.model, session.effort, session.usage, width < 105))}
         </Text>
       </Box>
+      {modal !== "resume" && <InputCursor position={nativeCursor} />}
       {selection?.moved && selectionRows(selection).map((row) => (
         <Box key={row.y} position="absolute" left={row.x} top={row.y} height={1}>
           <Text backgroundColor={color.accent} color="#20242c">{row.text}</Text>

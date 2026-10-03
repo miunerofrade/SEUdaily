@@ -1,6 +1,10 @@
 /** CSI capability replies are terminal metadata, not user input (Ink strips ESC before useInput). */
 export const isTerminalReply = (value: string) => /^(?:\x1b)?\[\?[\d;]*[uc]$/.test(value);
 
+/** Ink may deliver committed text and its final CR in one event. Keep it as a draft;
+ * only a separate Return key submits. Bracketed paste uses its own channel. */
+export const committedInput = (value: string) => value.replace(/\r+$/, "");
+
 /** Legacy terminals send key repeats but no key-up events; require sustained repeats, never a timer alone. */
 export class InterruptHold {
   private started = 0;

@@ -7,7 +7,11 @@ import { clean } from "./client.js";
 function parse(): Options {
   if (process.env.SEUDAILY_CLI_OPTIONS)
     return JSON.parse(process.env.SEUDAILY_CLI_OPTIONS);
+  const argv = process.argv.slice(2).flatMap((value, index, values) =>
+    (value === "--resume" || value === "-r") && (!values[index + 1] || values[index + 1].startsWith("-"))
+      ? [value, "choose"] : [value]);
   const { values: v, positionals: p } = parseArgs({
+    args: argv,
     allowPositionals: true,
     options: {
       help: { type: "boolean", short: "h" },
@@ -28,7 +32,7 @@ function parse(): Options {
   });
   if (v.help) {
     console.log(
-      "SEUdaily Ink CLI\nchat | exec [问题] | sessions | skills\n-c, --chat  -p, --prompt 问题  -r, --resume ID\n--skill NAME  --timeout SECONDS  --cwd PATH\n--json  -q, --quiet  -v, --verbose  --no-color  --vi\n-h, --help  -V, --version\n通过 uv run seudaily 自动管理后端；npm run cli 连接已有后端。",
+      "SEUdaily Ink CLI\nchat | exec [问题] | sessions | skills\n-c, --chat  -p, --prompt 问题  -r, --resume [ID]\n--skill NAME  --timeout SECONDS  --cwd PATH\n--json  -q, --quiet  -v, --verbose  --no-color  --vi\n-h, --help  -V, --version\n通过 uv run seudaily 自动管理后端；npm run cli 连接已有后端。",
     );
     process.exit(0);
   }

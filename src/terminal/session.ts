@@ -31,7 +31,7 @@ export const commands: Record<string, string> = {
   help: "命令帮助",
   new: "新会话",
   sessions: "历史会话",
-  resume: "恢复会话 [ID/序号]",
+  resume: "打开会话列表；可指定 [ID/序号/latest]",
   history: "查看完整原记录 [数量]",
   schedule: "课表 [--sync --semester ID --date YYYY-MM-DD --start-date 日期]",
   programs: "培养方案 [--sync --plan ID --filter 文字 --page N --limit N]",
@@ -118,6 +118,7 @@ export class Session extends EventEmitter {
   skills: string[];
   catalog: any[] = [];
   threads: any[] = [];
+  resumePickerRequested = 0;
   messages: TerminalMessage[] = [];
   copyOnSelect = false;
   reasoningExpanded = false;
@@ -208,7 +209,8 @@ export class Session extends EventEmitter {
       if (!this.catalog.some((s) => s.name === skill))
         throw new Error(`Skill 不存在：${skill}`);
     if (this.options.resume) {
-      await this.resume(this.options.resume);
+      if (this.options.resume === "choose") await this.openResumePicker();
+      else await this.resume(this.options.resume);
       this.skills = this.options.skill ?? [];
     } else
       this.show("输入消息或 / 查看命令。/schedule 与 /programs 打开交互表格。");
@@ -278,6 +280,12 @@ export class Session extends EventEmitter {
         if (p.type === "tool-invocation") this.tool(p.toolInvocation?.result);
     }
     if (result.hasMore) this.show("还有较早记录；/history 1000 查看更多。");
+  }
+  async openResumePicker() {
+    this.threads = await this.client.threads();
+    this.page = "chat";
+    this.resumePickerRequested++;
+    this.changed();
   }
   async resume(target: string) {
     const latest = target === "latest";
@@ -573,7 +581,9 @@ export class Session extends EventEmitter {
       return;
     }
     if (name === "resume") {
-      await this.resume(args[0] ?? "latest");
+      if (args.length > 1) throw new Error("/resume [ID/序号/latest]");
+      if (args.length) await this.resume(args[0]);
+      else await this.openResumePicker();
       return;
     }
     if (name === "history") {

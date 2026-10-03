@@ -222,7 +222,7 @@ def _common_options(parser: argparse.ArgumentParser, *, child: bool = False) -> 
     def default(value):
         return argparse.SUPPRESS if child else value
     parser.add_argument("--cwd", default=default(None), help="SEUdaily 项目目录")
-    parser.add_argument("-r", "--resume", nargs="?", const="latest", default=default(None), metavar="ID", help="恢复会话；省略 ID 使用最近会话")
+    parser.add_argument("-r", "--resume", nargs="?", const="choose", default=default(None), metavar="ID", help="恢复会话；省略 ID 显示会话选择列表")
     parser.add_argument("--no-start", action="store_true", default=default(False), help="只连接已有后端")
     parser.add_argument("--timeout", type=float, default=default(300), metavar="SECONDS", help="HTTP 读取超时，默认 300 秒")
     parser.add_argument("--no-color", action="store_true", default=default(False), help="禁用颜色")
