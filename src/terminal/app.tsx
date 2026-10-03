@@ -29,7 +29,7 @@ import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
 import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
-import { committedInput, InterruptHold, TerminalReplyFilter } from "./keyboard.js";
+import { committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } from "./keyboard.js";
 import { InputCursor } from "./cursor.js";
 import { SessionPicker, type SessionPickerHandle } from "./session-picker.js";
 import { copySelection } from "./clipboard.js";
@@ -542,6 +542,7 @@ export function App({ session, copy = copySelection }: {
   const copyRef = useRef(copyCurrent);
   copyRef.current = copyCurrent;
   useEffect(() => {
+    restoreTextInput(stdout);
     stdout.write("\x1b[?1002h\x1b[?1006h");
     let pending = "";
     const handler = (data: Buffer | string) => {

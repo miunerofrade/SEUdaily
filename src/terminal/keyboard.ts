@@ -52,6 +52,13 @@ export function terminalKeyboard(env: NodeJS.ProcessEnv = process.env): import("
   // Terminal.app does not implement kitty keyboard reporting. Avoid querying it at all.
   return env.TERM_PROGRAM === "Apple_Terminal" ? { mode: "disabled" } : {
     mode: "auto",
-    flags: ["disambiguateEscapeCodes", "reportAllKeysAsEscapeCodes", "reportEventTypes"],
+    // Printable input must remain terminal-composed UTF-8, not physical key codes.
+    flags: ["disambiguateEscapeCodes", "reportEventTypes"],
   };
+}
+
+/** Clear text-key reporting left in the alternate screen by a previous abnormal exit.
+ * Keep shortcut reporting intact. Unsupported terminals ignore this CSI command. */
+export function restoreTextInput(stdout: Pick<NodeJS.WriteStream, "write">) {
+  stdout.write("\x1b[=24;3u");
 }
