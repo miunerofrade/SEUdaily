@@ -78,7 +78,7 @@ def main() -> None:
                 raw_result = dispatch({"action": action, "payload": {**payload, "taskId": task_id}})
             if event.is_set():
                 raise TaskCancelledError("任务已取消")
-            if action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk", "reveal-ramdisk"}:
+            if action.startswith("vpn-") or action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk", "reveal-ramdisk"}:
                 # UI status polling is transient, not a historical Agent tool result.
                 result = {"status": raw_result.get("status", "completed"), "taskId": task_id, "summary": raw_result.get("summary", "内存盘状态"), "data": raw_result.get("data", raw_result), "artifacts": [], "citations": [], "warnings": [], "metrics": {}}
             else:

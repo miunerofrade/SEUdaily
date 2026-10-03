@@ -3,6 +3,8 @@ import os
 import subprocess
 import warnings
 from pathlib import Path
+from urllib.parse import urlsplit
+from seudaily.vpn import campus_proxy
 
 from seudaily.subprocess_utils import hidden_process_options
 from seudaily.ramdisk import TemporaryWorkspace
@@ -41,7 +43,13 @@ class CloudASRWorker:
         self.temp_audio_path = str(scratch / "audio.mp3")
         self.temp_video_path = str(scratch / "video.mp4")
         
-        ffmpeg_cmd = ['ffmpeg', '-headers', f'Referer: {referer_url}\r\n', '-i', video_url]
+        ffmpeg_cmd = ['ffmpeg']
+        proxy = campus_proxy()
+        host = (urlsplit(video_url).hostname or '').lower()
+        referer_host = (urlsplit(referer_url).hostname or '').lower()
+        if proxy and (host.endswith('.seu.edu.cn') or referer_host == 'cvs.seu.edu.cn'):
+            ffmpeg_cmd.extend(['-http_proxy', proxy])
+        ffmpeg_cmd.extend(['-headers', f'Referer: {referer_url}\r\n', '-i', video_url])
         
         if not audio_only:
             ffmpeg_cmd.extend(['-c', 'copy', '-y', self.temp_video_path])

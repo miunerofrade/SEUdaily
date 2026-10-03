@@ -1,3 +1,4 @@
+import { diskSize } from '../shared/disk-size.js';
 import { z } from "zod";
 import { registerApiRoute } from "../server/routes.js";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
@@ -23,6 +24,8 @@ const editableEnvironment = [
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_MODEL",
   "TAVILY_API_KEY",
+  "SEUDAILY_VPN_BINARY",
+  "SEUDAILY_VPN_DNS_SERVER",
   "SEUDAILY_USERNAME",
   "SEUDAILY_PASSWORD",
   "SEUDAILY_ASR_API_KEY",
@@ -333,6 +336,15 @@ function legacyEnvironmentName(name: string) {
 }
 
 export const appRoutes = [
+  registerApiRoute('/app/vpn', { method: 'GET', handler: async (c: any) => {
+    const result = await runPythonTool<ToolResult>('vpn-status', {});
+    return c.json(await fullResultData(result));
+  } }),
+  registerApiRoute('/app/vpn', { method: 'POST', handler: async (c: any) => {
+    const input = z.object({ action: z.enum(['connect', 'disconnect', 'verify']), code: z.string().max(16).optional(), port: z.number().int().min(1024).max(65535).optional() }).strict().parse(await c.req.json());
+    const result = await runPythonTool<ToolResult>(`vpn-${input.action}`, { code: input.code, port: input.port });
+    return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+  } }),
   registerApiRoute("/app/ramdisk/reveal", { method: "POST", handler: async (c: any) => {
     const result = await runPythonTool<ToolResult>("reveal-ramdisk", {});
     return c.json(resultResponse(result));
@@ -342,7 +354,7 @@ export const appRoutes = [
     return c.json(await fullResultData(result));
   } }),
   registerApiRoute("/app/ramdisk", { method: "POST", handler: async (c: any) => {
-    const input = z.object({ action: z.enum(["mount", "unmount"]), size: z.enum(["512M", "1G", "2G", "4G"]).default("1G") }).strict().parse(await c.req.json());
+    const input = z.object({ action: z.enum(["mount", "unmount"]), size: z.string().default("1G").transform(value => diskSize(value)) }).strict().parse(await c.req.json());
     const result = await runPythonTool<ToolResult>(input.action === "mount" ? "mount-ramdisk" : "unmount-ramdisk", { size: input.size });
     return c.json({ ...resultResponse(result), data: await fullResultData(result) });
   } }),

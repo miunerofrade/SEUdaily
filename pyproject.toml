@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "dashscope>=1.25.15",
     "openai>=2.30.0",
-    "playwright>=1.55.0",
+    "playwright==1.63.0",
     "tzdata>=2025.2",
     "openpyxl>=3.1.5",
     "pypdfium2>=5.13.0",

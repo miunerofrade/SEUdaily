@@ -1,3 +1,4 @@
+import { useVpn, VpnPanel } from './vpn-panel';
 import { useRamDisk } from './ramdisk';
 import { packageDocumentContent } from '../../../src/shared/document-content';
 import { useImeComposition } from "./ime";
@@ -658,6 +659,7 @@ export default function App() {
   const [historyReload, setHistoryReload] = useState(0);
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const vpn = useVpn(rightOpen && view === "chat");
   const ramdisk = useRamDisk(rightOpen && view === "chat");
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
@@ -1123,6 +1125,13 @@ export default function App() {
       await ramdisk.run(text.replace(/^\/ramdisk/i, '').trim());
       return;
     }
+    if (!options.preserveComposer && /^\/vpn(?:\s|$)/i.test(text)) {
+      const [action = 'status', port, ...extra] = text.replace(/^\/vpn/i, '').trim().split(/\s+/).filter(Boolean);
+      setRightOpen(true);
+      if (!['connect', 'disconnect', 'status'].includes(action) || extra.length || (port && action !== 'connect')) { setConversationError('/vpn connect [端口]；或 disconnect / status；额外验证码在面板填写'); return; }
+      if (vpn.busy) return;
+      setDraft(''); await vpn.run(action as 'connect' | 'disconnect' | 'status', undefined, port ? Number(port) : undefined); return;
+    }
     const effectivePrompt = !options.preserveComposer && selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
     const conversationId = active.id;
     const firstTurn = active.messages.length === 0;
@@ -1433,6 +1442,7 @@ export default function App() {
       <aside ref={inspectorRef} className={`inspector ${rightOpen && view === "chat" ? "open" : ""}`}>
         <div className="inspector-head"><div><span className="eyebrow">WORKSPACE</span><h2>任务与资料</h2></div><button className="icon-button" onClick={() => setRightOpen(false)} aria-label="关闭任务面板" title="关闭任务面板"><X size={17} /></button></div>
         <div className="inspector-scroll">
+          <VpnPanel controller={vpn} />
           <RamDiskPanel controller={ramdisk} />
           <section className="inspector-section">
             <div className="section-title"><span>生成资料</span><small>{allArtifacts.length}</small></div>

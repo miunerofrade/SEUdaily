@@ -19,7 +19,8 @@
     "dev:all": "concurrently -k -n agent,web -c blue,green \"npm:start\" \"npm:dev:web\"",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
-    "test:python": "uv run pytest"
+    "test:python": "uv run pytest",
+    "install:browser": "node scripts/install-browser.mjs"
   },
   "dependencies": {
     "@hono/node-server": "1.19.17",
@@ -38,7 +39,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "yaml": "2.9.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "playwright": "1.63.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -53,5 +55,9 @@
   "engines": {
     "node": "^22.22.0 || >=24.12.0",
     "npm": ">=10"
+  },
+  "overrides": {
+    "playwright": "$playwright",
+    "playwright-core": "$playwright"
   }
 }

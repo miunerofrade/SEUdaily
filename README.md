@@ -26,11 +26,10 @@ cp .env.example .env
 
 在 `.env` 中按需配置 `DEEPSEEK_API_KEY`、校园账号、语音转写与搜索服务密钥，完整字段见 [.env.example](.env.example)。
 
-浏览器默认：Windows 使用 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。macOS 安装两端浏览器运行时：
+浏览器默认：Windows 使用 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Node 与 Python 使用同一版本、共享一份浏览器缓存，运行统一安装入口：
 
 ```bash
-npx --no-install playwright install webkit
-uv run --frozen playwright install webkit
+npm run install:browser
 ```
 
 Linux 将 `webkit` 换成 `firefox`，并安装 Playwright 提示的系统依赖。视频幻灯片可选依赖通过 `uv sync --frozen --extra ppt` 安装。
@@ -60,3 +59,20 @@ uv run pytest
 `apps/web` 是界面，`src/agent` 是模型循环与持久化，`src/runtime`、`src/server` 提供工具与 HTTP 接口，`src/seudaily` 是 Python 业务核心。项目 Skill 位于 `.agent/skills`；项目 Agent 指令由设置页维护。
 
 `main` 保留 Web 入口；独立的 `cli` 分支还提供终端交互。
+
+
+## 校园 VPN
+
+Web 设置页或右侧资源面板可以连接校园 VPN；Web 支持 `/vpn connect`、`/vpn status`、`/vpn disconnect`。额外验证码在面板中填写。
+
+连接使用保存的校园账号密码打开东大 CAS 登录页，截获一次性认证回调后交给 zju-connect 的 aTrust 核心。遇到验证码或其他交互验证时，在登录窗口完成。首次使用下载官方固定版本 v1.3.1 并核验 SHA256，核心缓存在 `.seudaily/vpn/bin/`；也可以通过 `SEUDAILY_VPN_BINARY` 指定已安装的核心。
+
+代理仅监听本机回环地址，接入课程门户、课表、培养方案、校园网页与媒体输入，不修改系统路由或全局代理。VPN 会话与业务门户 Cookie 分开保存；核心负责刷新会话，核心退出后代理失效，需要重新连接。断开连接或退出应用会停止核心。可访问资源由学校给账号下发的权限决定。
+
+此接入按需下载 zju-connect 项目发布的未修改 AGPL-3.0 核心，不随本仓库或 npm 包附带其二进制。下载目录同时保存许可证全文和对应版本源码入口；设置页也提供这两个链接。SEUdaily 自有代码保持 MIT，第三方核心遵循自己的许可证；具体集成边界与发布条件见 [第三方 VPN 声明](THIRD_PARTY_NOTICES.md) 和 [许可证核查](docs/licensing-vpn.md)。上游 aTrust 内部仍跳过部分 TLS 证书校验；本项目连接前校验公开网关证书，但这不等同于修复核心内部校验。真实门户、媒体链接的验证结果见 [VPN 接入记录](docs/research/seu-vpn-zju-connect.md)。
+
+VPN 默认 HTTP 代理地址为 `http://127.0.0.1:11081`，支持 HTTPS CONNECT。面板显示当前地址，可以在断开后修改端口，再连接使其生效；端口保存在本地设置中。Web 也支持 `/vpn connect 12081`。宿主机程序可以显式使用这个代理，例如 `curl --noproxy '' -I -x http://127.0.0.1:11081 https://cvs.seu.edu.cn/`。该端口只监听本机，HTTP 代理不承载系统 `ping` 的 ICMP 流量。
+
+东大 VPN 默认使用校园 DNS `202.119.24.12` 经 L3 隧道解析，可通过 `SEUDAILY_VPN_DNS_SERVER` 调整。这是本次验证可用的学校第二 DNS；第一 DNS 无响应，而上游备用 DNS 查询走直连，曾导致校内域名仍然解析失败。核心子进程使用 Go 官方 TLS 兼容参数，避免较大的 ML-KEM 握手消息造成部分网关卡住。应用收到课程门户 HTTPS HEAD 响应后才显示已连接，不下载响应正文。
+
+Node/Python Playwright 固定为同一正式版本。运行 `npm run install:browser` 检查版本及构建一致性并安装所选引擎；Windows 默认使用已安装的 Edge。

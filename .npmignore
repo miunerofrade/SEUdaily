@@ -1,0 +1,55 @@
+# --- 系统与编辑器缓存 ---
+__pycache__/
+*.py[oc]
+.obsidian/
+.python-version
+.streamlit/
+
+# --- 虚拟环境 ---
+.venv/
+venv/
+env/
+node_modules/
+.mastra/
+.env
+
+# --- 核心隐私与配置 ---
+config.json
+# Settings-managed project instructions
+/AGENT.md
+browser_data/
+.seudaily/
+.cvstream/
+
+# --- 任务产物与临时文件 ---
+exports/
+error_screenshot_*.png
+测试音频.wav
+
+# --- 构建与分发 ---
+build/
+dist/
+*.egg-info/
+
+# --- 旧版/冗余脚本  ---
+fastwhisper.bat
+fmp42txt.py
+fmp42txt-novad.py
+catch.py
+PROBLEMS.md
+cookies.json
+tmp/
+
+# local packages and configuration
+*.tgz
+.env.*
+!.env.example
+.pytest_cache/
+
+.DS_Store
+
+# VPN cores are acquired at runtime, never shipped in the npm archive
+**/zju-connect
+**/zju-connect.exe
+# Local development harnesses
+**/*.local.*

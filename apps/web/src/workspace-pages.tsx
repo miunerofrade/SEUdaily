@@ -1,3 +1,4 @@
+import { VpnSettings } from './vpn-panel';
 import { useImeComposition } from "./ime";
 import { conversationPath, withParents, latestDescendant } from "../../../src/shared/conversation-tree";
 import { PromptVersions } from "./prompt-versions";

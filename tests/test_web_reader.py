@@ -89,7 +89,7 @@ def test_reads_normal_web_page_without_downloading_attachment(
     </body></html>
     """.encode()
     opener = _FakeOpener({url: (html, "text/html; charset=utf-8")})
-    monkeypatch.setattr(web_reader, "build_opener", lambda *handlers: opener)
+    monkeypatch.setattr(web_reader, "campus_opener", lambda *handlers: opener)
 
     result = web_reader.read_web_page(url, query="正文说了什么", include_attachments="auto")
 
@@ -121,7 +121,7 @@ def test_empty_webplus_page_automatically_parses_pdf_and_cleans_temp_file(
         url: (html, "text/html; charset=utf-8"),
         attachment_url: (_text_pdf_bytes("Attachment parser works"), "application/pdf"),
     })
-    monkeypatch.setattr(web_reader, "build_opener", lambda *handlers: opener)
+    monkeypatch.setattr(web_reader, "campus_opener", lambda *handlers: opener)
     parsed_paths: list[Path] = []
     real_parse = web_reader.parse_document
 
@@ -150,7 +150,7 @@ def test_attachment_mode_none_never_downloads(
     url = "https://example.edu/empty.html"
     html = b'<html><body><div class="article-content"><a href="/a.pdf">A.pdf</a></div></body></html>'
     opener = _FakeOpener({url: (html, "text/html")})
-    monkeypatch.setattr(web_reader, "build_opener", lambda *handlers: opener)
+    monkeypatch.setattr(web_reader, "campus_opener", lambda *handlers: opener)
 
     result = web_reader.read_web_page(url, query="附件内容", include_attachments="none")
 
@@ -195,7 +195,7 @@ def test_semantic_main_is_preferred_over_navigation(
     </body></html>
     """
     opener = _FakeOpener({url: (html, "text/html")})
-    monkeypatch.setattr(web_reader, "build_opener", lambda *handlers: opener)
+    monkeypatch.setattr(web_reader, "campus_opener", lambda *handlers: opener)
 
     result = web_reader.read_web_page(url, include_attachments="none")
 
@@ -214,7 +214,7 @@ def test_void_element_inside_template_does_not_hide_following_main_content(
     </body></html>
     """
     opener = _FakeOpener({url: (html, "text/html")})
-    monkeypatch.setattr(web_reader, "build_opener", lambda *handlers: opener)
+    monkeypatch.setattr(web_reader, "campus_opener", lambda *handlers: opener)
 
     result = web_reader.read_web_page(url, include_attachments="none")
 
