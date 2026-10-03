@@ -552,7 +552,7 @@ export function App({ session, copy = copySelection }: {
             : tableTop + index;
         if (selectedIndex === undefined) return;
         setSelected(selectedIndex);
-        setDetail(choices[selectedIndex]);
+        setField(3);
         return;
       }
     }
@@ -1311,13 +1311,15 @@ export function App({ session, copy = copySelection }: {
                       <Text
                         bold={row.kind === "title" || row.kind === "group"}
                         color={
-                          row.kind === "title"
+                          row.index === selected
+                            ? "#20242c"
+                            : row.kind === "title"
                             ? color.accent
                             : row.kind === "border" || row.kind === "muted"
                               ? color.muted
                               : color.text
                         }
-                        inverse={row.index === selected}
+                        backgroundColor={row.index === selected ? "#80cbc4" : undefined}
                       >
                         {row.text}
                       </Text>
@@ -1345,9 +1347,9 @@ export function App({ session, copy = copySelection }: {
                       flexShrink={0}
                     >
                       <Text
-                        inverse={tableTop + i === selected}
+                        backgroundColor={tableTop + i === selected ? "#80cbc4" : undefined}
                         color={
-                          tableTop + i === selected ? color.accent : color.text
+                          tableTop + i === selected ? "#20242c" : color.text
                         }
                       >
                         {tableTop + i === selected ? "› " : "  "}
