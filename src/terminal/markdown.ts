@@ -7,6 +7,7 @@ export interface Span {
   code?: boolean;
   muted?: boolean;
   role?: string;
+  user?: boolean;
 }
 const cache = new WeakMap<
   object,
@@ -85,6 +86,13 @@ export function messageLines(
         .replace(/^> /, "│ ");
     const spans = inlineSpans(line, heading);
     append(spans);
+  }
+  if (message.role === "你") {
+    for (const row of lines) {
+      for (const span of row) span.user = true;
+      const size = stringWidth(row.map((span) => span.text).join(""));
+      if (size < width) row.push({ text: " ".repeat(width - size), user: true });
+    }
   }
   lines.push([{ text: " " }]);
   cache.set(message, { text: message.text, width, lines });

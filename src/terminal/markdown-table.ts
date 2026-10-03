@@ -123,12 +123,14 @@ export function renderTable(
   const available = width - count * 3 - 1,
     widths = header.map(() => 2);
   let remaining = available - count * 2;
+  // Give columns an equal share until their content fits. A long paragraph
+  // must wrap instead of consuming the width needed by shorter labels.
   while (remaining > 0) {
     let index = -1;
     for (let i = 0; i < count; i++)
       if (
         widths[i] < natural[i] &&
-        (index < 0 || natural[i] - widths[i] > natural[index] - widths[index])
+        (index < 0 || widths[i] < widths[index])
       )
         index = i;
     if (index < 0) break;

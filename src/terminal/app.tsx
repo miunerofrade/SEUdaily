@@ -1188,7 +1188,7 @@ export function App({ session, copy = copySelection }: {
           </Box>
         ) : page === "chat" ? (
           displayLines.slice(top, top + height).map((line, i) => (
-            <Text key={i}>
+            <Text key={i} backgroundColor={line[0]?.user ? "#343b47" : undefined}>
               {line.map((span, j) => (
                 <Text
                   key={j}
