@@ -85,6 +85,23 @@ def _spawn(command: list[str], root: Path, log: IO[bytes]) -> subprocess.Popen[b
     return subprocess.Popen(command, **kwargs)  # type: ignore[arg-type]
 
 
+def _stop_owned_leader(process: subprocess.Popen[bytes]) -> None:
+    """Fallback when the OS denies access to the group; never signal unrelated PIDs."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1)
+    except ProcessLookupError:
+        process.poll()
+    except (PermissionError, subprocess.TimeoutExpired):
+        print(f"SEUdaily：无法停止本次启动的后端进程 {process.pid}，请检查是否仍在运行。", file=sys.stderr)
+
+
 def _stop(process: subprocess.Popen[bytes]) -> None:
     if os.name == "nt":
         if process.poll() is not None:
@@ -100,6 +117,9 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             return
+        except PermissionError:
+            _stop_owned_leader(process)
+            return
         # npm can exit before the Agent and its MCP/worker children finish draining.
         # Wait for the whole session, so immediate restarts do not hit a live lock.
         deadline = time.monotonic() + 5
@@ -109,11 +129,19 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
                 os.killpg(process.pid, 0)
             except ProcessLookupError:
                 return
+            except PermissionError:
+                # A disappearing group can become inaccessible after SIGTERM,
+                # notably on macOS. EPERM is not the same as a live owned child.
+                _stop_owned_leader(process)
+                return
             time.sleep(0.05)
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            _stop_owned_leader(process)
+            return
         try:
             process.wait(timeout=1)
         except subprocess.TimeoutExpired:
@@ -212,7 +240,7 @@ def start() -> int:
                 for process in processes:
                     try:
                         os.killpg(process.pid, signal.SIGTERM)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, PermissionError):
                         pass
             for process in processes:
                 _stop(process)
