@@ -38,6 +38,7 @@ export type TurnContext = {
     regenerateFrom?: string;
     skills?: string[];
     interface?: 'web' | 'cli';
+    focus?: boolean;
     capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
 };
 export type StoredMessage = {

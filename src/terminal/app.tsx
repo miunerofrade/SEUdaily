@@ -1,3 +1,4 @@
+import { NoticesManager } from './notices.js';
 import { followSelection } from "./viewport.js";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
@@ -84,7 +85,7 @@ const states: Record<string, string> = {
   upcoming: "待开课",
   unscheduled: "未排定",
 };
-type Page = "chat" | "schedule" | "programs" | "focus";
+type Page = "chat" | "schedule" | "programs" | "focus" | "notices";
 
 export function App({ session, copy = copySelection }: {
   session: Session;
@@ -498,7 +499,7 @@ export function App({ session, copy = copySelection }: {
   wheelRef.current = wheel;
   const clickRef = useRef((x: number, y: number) => {});
   clickRef.current = (x, y) => {
-    if (session.form || page === 'focus') return;
+    if (session.form || page === 'focus' || page === 'notices') return;
     if (modal === "resume") { resumePicker.current?.click(x, y); return; }
     if (modal || detail || decisions) return;
     if (page === "chat") {
@@ -690,7 +691,7 @@ export function App({ session, copy = copySelection }: {
     }
   });
   const handleInput = (value: string, key: Key) => {
-    if (session.form || page === 'focus') return;
+    if (session.form || page === 'focus' || page === 'notices') return;
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
     if (terminalReplies.current.consume(value)) return;
     if (key.eventType === "release") {
@@ -1129,6 +1130,7 @@ export function App({ session, copy = copySelection }: {
   // Ref callbacks clear unmounted cells; keep mounted hit targets across React rerenders.
   if (session.form) return <ManagementForm key={session.form.title} form={session.form} width={columns} height={rows}
     onClose={() => { session.form = null; setDetail(null); session.changed(); }} />;
+  if (page === 'notices') return <NoticesManager session={session} width={columns} height={rows} />;
   if (page === 'focus') return <FocusManager session={session} width={columns} height={rows} />;
   return (
     <Box ref={rootRef} width={columns} height={rows} flexDirection="column" paddingX={1}>

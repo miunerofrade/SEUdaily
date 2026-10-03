@@ -69,7 +69,7 @@ export async function getWorkspaceTools(): Promise<Record<string, ToolDefinition
     await mkdir(sandboxWorkspaceRoot, { recursive: true });
     sandbox ??= createCommandSandbox({ projectRoot, workingDirectory: sandboxWorkspaceRoot });
     const pathSchema = z.object({ path: z.string().default('.') });
-    const wrap = (name: string, description: string, inputSchema: z.ZodType, execute: any, write = false) => defineTool({ id: `mastra_workspace_${name}`, description, inputSchema, requireApproval: () => write && !isUnapprovedAccessEnabled(), execute: async (input, options) => { if (!isFullAccessExtraEnabled())
+    const wrap = (name: string, description: string, inputSchema: z.ZodType, execute: any, write = false) => defineTool({ id: `mastra_workspace_${name}`, description, inputSchema, requireApproval: (_input, options) => write && !isUnapprovedAccessEnabled(options), execute: async (input, options) => { if (!isFullAccessExtraEnabled(options))
             throw new Error('当前未开启工作区权限'); options.abortSignal?.throwIfAborted(); return execute(input, options); }, toModelOutput: output => ({ type: 'text', value: JSON.stringify(output).slice(0, 16000) }) });
     const tools: ToolDefinition[] = [
         wrap('read_file', '读取项目相对路径的文件；编辑前必须先读。', z.object({ path: z.string(), startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() }), async (input: any, options: ToolExecutionOptions) => { const target = await workspaceTarget(input.path); const info = await stat(target); if (info.size > 5 * 1024 * 1024)

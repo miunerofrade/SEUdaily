@@ -226,11 +226,12 @@ class FocusService:
             "kind": kind,
             "title": str(raw.get("title") or (existing or {}).get("title") or "").strip(),
             "enabled": bool(raw.get("enabled", (existing or {}).get("enabled", True))),
-            "threadId": str(raw.get("threadId") or (existing or {}).get("threadId") or ""),
-            "resourceId": str(raw.get("resourceId") or (existing or {}).get("resourceId") or ""),
+            "threadId": str((existing or {}).get("threadId") or raw.get("id") or ""),
+            "resourceId": "seudaily-focus-local",
             "createdAt": (existing or {}).get("createdAt", now),
             "updatedAt": now,
         }
+        item["threadId"] = item["threadId"] or item["id"]
         if not item["title"]:
             raise ValueError("Focus 名称不能为空")
         if kind == "notice":

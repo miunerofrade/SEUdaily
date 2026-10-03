@@ -140,9 +140,16 @@ export class Session extends EventEmitter {
   programs: any = { plans: [] };
   viewOptions: Record<string, any> = {};
   form: Form | null = null;
+  noticeItems: any[] = [];
   focusItems: any[] = [];
   focusTarget: any = null;
   openForm(form: Form) { this.form = form; this.changed(); }
+  async loadNotices(refresh = true, query = '') {
+    const result = this.result(await this.client.json(`/app/notices?refresh=${refresh}`));
+    this.noticeItems = (result.data?.results ?? []).filter((item: any) => !query || item.title?.includes(query));
+    this.page = 'notices'; this.changed();
+    if (this.options.command !== 'chat') this.show(this.noticeItems.map((item: any) => `${item.title}\n${item.url ?? ''}`).join('\n\n') || '暂无通知');
+  }
   async loadFocus() { this.focusItems = this.result(await this.client.json('/app/focus')).data?.items ?? []; this.page = 'focus'; this.changed(); }
   async openFocus(item: any) {
     if (this.busy) throw new Error('请先等待当前任务完成');
@@ -398,6 +405,8 @@ export class Session extends EventEmitter {
     const titleThreadId = this.threadId, titleResourceId = this.resource;
     if (this.pending && !approval)
       throw new Error("当前会话有待审批工具，请使用 /approve 或 /reject");
+    const turnSkills = this.skills;
+    if (!approval) this.skills = [];
     this.runToken = approval ? this.pending.runToken : randomUUID();
     if (approval) this.pending = null;
     const controller = new AbortController();
@@ -432,7 +441,7 @@ export class Session extends EventEmitter {
             seudailyRunToken: this.runToken,
             seudailyThreadId: this.threadId,
             seudailyInterface: "cli",
-            seudailySkills: this.skills,
+            seudailySkills: turnSkills,
             seudailyToolNamespaces: [],
             seudailyDocumentRefs: this.documents.map((d) => d.contextRef),
             ...extra,
@@ -618,8 +627,8 @@ export class Session extends EventEmitter {
     if (name === 'ramdisk') {
       const action = args.join(' ').toLowerCase();
       const result = await this.client.json(action === 'reveal' ? '/app/ramdisk/reveal' : '/app/ramdisk',
-        !action || action === 'status' ? 'GET' : 'POST', !action || action === 'status' ? undefined : action === 'reveal' ? {} : {action: action === 'unmount' ? 'unmount' : 'mount', ...(action === 'unmount' ? {} : {size:diskSize(args.join(' '))})});
-      this.result(result); this.show(result.summary || JSON.stringify(result.data)); return;
+        !action || action === 'status' ? 'GET' : 'POST', !action || action === 'status' ? undefined : action === 'reveal' ? {} : {action: action === 'unmount' ? 'unmount' : 'mount', ...(action === 'unmount' ? {} : {size:diskSize(args.join(' ').replace(/^mount\s+/i, ''))})});
+      this.result(result); this.show(result.summary || JSON.stringify(result.data ?? result, null, 2)); return;
     }
     if (name === "copy-on-select") {
       if (args.length > 1 || (args.length && !["on", "off"].includes(args[0])))
@@ -716,7 +725,7 @@ export class Session extends EventEmitter {
         args.join(" ") ||
         (name === "audit" ? "请核查培养方案的毕业要求和学分缺口。" : "");
       if (!skill) {
-        this.show("当前 Skill：" + (this.skills.join(", ") || "自动"));
+        this.show("下轮 Skill：" + (this.skills.join(", ") || "自动"));
         return;
       }
       if (skill === "off") {
@@ -729,7 +738,7 @@ export class Session extends EventEmitter {
       if (query) await this.turn(query, { seudailySkills: [skill] });
       else {
         this.skills = [skill];
-        this.show("已选择 Skill：" + skill);
+        this.show("已选择下轮 Skill（使用一次）：" + skill);
       }
       return;
     }
@@ -805,32 +814,14 @@ export class Session extends EventEmitter {
       }
       return;
     }
-    if (name === "notices" || name === "focus") {
-      if (name === 'focus') {
-        if (!args.length) { await this.loadFocus(); return; }
-        if (args[0] === 'add') { this.openForm(focusForm(this)); return; }
-        if (args[0] === 'run') { this.result(await this.client.json('/app/focus/run','POST')); await this.loadFocus(); return; }
-      }
-      if (name === "focus" && !args.length) {
-        const result = this.result(await this.client.json("/app/focus"));
-        this.show(
-          (result.data?.items ?? [])
-            .map(
-              (i: any) =>
-                `${i.title} · ${i.kind} · ${i.enabled ? "启用" : "停用"}\n${i.id}`,
-            )
-            .join("\n") || "暂无关注任务",
-        );
-      } else
-        await this.turn(
-          (name === "notices" ? "查询校园通知：" : "关注任务：") +
-            (args.join(" ") || "最近通知"),
-          {
-            seudailyToolNamespaces: [
-              name === "notices" ? "notices" : "local-actions",
-            ],
-          },
-        );
+    if (name === 'notices') {
+      await this.loadNotices(true, args.join(' ')); return;
+    }
+    if (name === 'focus') {
+      if (!args.length) { await this.loadFocus(); return; }
+      if (args[0] === 'add') { this.openForm(focusForm(this)); return; }
+      if (args[0] === 'run') { this.result(await this.client.json('/app/focus/run','POST')); await this.loadFocus(); return; }
+      await this.turn('关注任务：' + args.join(' '), { seudailyToolNamespaces: ['local-actions'] });
       return;
     }
     if (name === "approve" || name === "reject") {
@@ -865,7 +856,8 @@ export class Session extends EventEmitter {
     if (name === "apply") {
       const id = args[0] ?? [...this.actions.keys()].at(-1);
       if (!id || !this.actions.has(id)) throw new Error("没有此操作请求");
-      this.confirm("apply", id, this.actions.get(id).text);
+      const request = this.actions.get(id);
+      this.confirm("apply", id, request.text + (["create-focus", "create_focus"].includes(request.kind) ? "\n创建即授权此关注完全访问，不含 extra。" : ""));
       return;
     }
     if (name === "mode") {

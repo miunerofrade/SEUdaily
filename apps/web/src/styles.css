@@ -449,7 +449,7 @@ button { color: inherit; }
 .inspector-footer { padding: 8px 20px 17px; margin: 0; color: #aaa; font-size: 11px; }
 .disk-state { font-size: 12px; color: #888; font-weight: 400; }
 .disk-control-row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-top: 16px; }
-.disk-control-row select { margin-left: auto; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #333; }
+.disk-control-row input { min-width: 0; width: 115px; margin-left: auto; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #333; }
 .disk-action { border: 0; background: transparent; color: #333; padding: 6px 0 6px 8px; cursor: pointer; }
 .disk-action:disabled { color: #aaa; cursor: default; }
 .disk-details { font-size: 12px; margin: 16px 0 0; }
@@ -474,6 +474,8 @@ button { color: inherit; }
 .disk-reveal:hover { background: #f3f3f3; color: #222; }
 .disk-reveal:disabled { opacity: .4; cursor: default; }
 
-.message-versions { display:flex; align-items:center; justify-content:center; gap:8px; margin:3px 0 14px; font-size:12px; color:#888; }
+.message-versions { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin:3px 0 0; font-size:12px; color:#888; }
 .message-versions button { border:0; background:transparent; color:inherit; font-size:20px; padding:2px 6px; cursor:pointer; }
 .message-versions button:disabled { opacity:.3; cursor:default; }
+
+.focus-permission-notice { padding:12px; border-radius:8px; background:#fff8e6; color:#67501c; font-size:13px; line-height:1.6; }

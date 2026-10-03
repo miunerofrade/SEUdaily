@@ -688,31 +688,19 @@ export function recordFocusRun(id: string, runId: string, status: "completed" | 
   });
 }
 
+export async function fetchFocusConversation(item: FocusItem): Promise<Conversation | null> {
+  if (!item.threadId || !item.resourceId) return null;
+  for (let page = 0; ; page++) {
+    const query = new URLSearchParams({ resourceId: item.resourceId, perPage: "100", page: String(page) });
+    const data = await jsonRequest<{ threads: StoredThread[] }>(`/api/memory/threads?${query}`);
+    const thread = data.threads.find(thread => thread.id === item.threadId);
+    if (thread) return fetchThreadMessages(thread);
+    if (data.threads.length < 100) return null;
+  }
+}
+
 export async function fetchFocusMessages(item: FocusItem): Promise<ChatMessage[]> {
-  if (!item.threadId || !item.resourceId) return [];
-  const query = new URLSearchParams({ resourceId: item.resourceId, perPage: "100" });
-  const response = await fetch(`/api/memory/threads/${encodeURIComponent(item.threadId)}/messages?${query}`);
-  if (!response.ok) return [];
-  const data = await response.json() as { messages?: StoredMessage[] };
-  const messages = await Promise.all((data.messages ?? []).map(async (stored): Promise<ChatMessage | null> => {
-    if (stored.role !== "user" && stored.role !== "assistant") return null;
-    const storedContent = stored.content?.content ?? "";
-    const parts = stored.content?.parts ?? [];
-    const content = stored.role === "assistant" ? storedAssistantContent(parts, storedContent) : storedContent;
-    const attachments = stored.role === "user" ? await storedAttachments(stored.id, stored.content?.parts) : undefined;
-    if (!content && stored.role === "user" && !attachments?.length) return null;
-    return {
-      id: stored.id,
-      role: stored.role,
-      content,
-      createdAt: Date.parse(stored.createdAt),
-      attachments,
-      tools: stored.role === "assistant" ? storedTools(parts) : undefined,
-      process: stored.role === "assistant" ? storedProcess(parts) : undefined,
-      reasoningDone: stored.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),
-    };
-  }));
-  return messages.filter((message): message is ChatMessage => message !== null);
+  return (await fetchFocusConversation(item))?.messages ?? [];
 }
 
 export async function loadFocusConversations(): Promise<Conversation[]> {

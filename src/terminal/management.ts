@@ -4,13 +4,8 @@ export type Field = { key: string; label: string; value: string; secret?: boolea
 export type Form = { title: string; fields: Field[]; saveLabel?: string; save: (values: Record<string,string>) => Promise<void> };
 const field=(key:string,label:string,value:unknown=''):Field=>({key,label,value:String(value ?? '')});
 const integer=(value:string,min:number,max:number)=>{const n=Number(value);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`请输入 ${min}–${max} 的整数`);return n;};
-export function diskSize(input:string) {
- const match=input.trim().match(/^(\d+(?:\.\d+)?)\s*(m|mb|mib|g|gb|gib)?$/i);
- if(!match)throw new Error('容量格式：512 MB、1 GB；不写单位默认为 MB');
- const mb=Number(match[1])*(match[2]?.toLowerCase().startsWith('g')?1024:1);
- if(!Number.isInteger(mb)||mb<64||mb>65536)throw new Error('容量应为 64 MB–64 GB，精确到 MB');
- return `${mb}M`;
-}
+export { diskSize } from '../shared/disk-size.js';
+import { diskSize } from '../shared/disk-size.js';
 export async function settingsForm(s:Session):Promise<Form> {
  const data=await s.client.json('/app/settings');
  return {title:'设置 · 空白密钥保持原值',fields:[...data.fields.map((f:any)=>({...field(f.name,f.name+(f.configured?' · 已配置':''),f.value),secret:f.secret})),{...field('agentInstructions','AGENT.md',data.agentInstructions),multiline:true}],save:async values=>{
@@ -49,5 +44,5 @@ export function programStatusForm(s:Session,planId:string,course:any):Form {
  return {title:`修读状态 · ${course.name}`,fields:[{...field('semester','学期',current.value),choices:semesters.map((o:any)=>({value:o.value,label:o.label}))},{...field('status','状态',course.manualStatus ? course.status : 'auto'),choices:[{value:'auto',label:'自动判断'},{value:'completed',label:'已完成'},{value:'studying',label:'学习中'},{value:'not_taken',label:'未修读'}]}],save:async v=>{s.result(await s.client.json('/app/programs/course-status','PATCH',{planId,courseId:course.id || course.code || course.name,semester:v.semester,status:v.status}));await s.loadPrograms();}};
 }
 export function focusForm(s:Session,item?:any):Form {
- return {title:item?'编辑关注':'添加关注',fields:[field('title','名称',item?.title),{...field('kind','类型',item?.kind || 'notice'),choices:[{value:'notice',label:'通知'},{value:'course',label:'课程'}]},field('description','任务说明',item?.description),{...field('enabled','启用',String(item?.enabled ?? true)),choices:[{value:'true',label:'启用'},{value:'false',label:'暂停'}]}],save:async v=>{if(!v.title.trim()||!v.description.trim())throw new Error('请填写名称及任务说明');s.result(await s.client.json('/app/focus','POST',{...item,...v,enabled:v.enabled==='true'}));await s.loadFocus();}};
+ return {title:item?'编辑关注':'添加关注 · 创建即授权完全访问，不含 extra',fields:[field('title','名称',item?.title),{...field('kind','类型',item?.kind || 'notice'),choices:[{value:'notice',label:'通知'},{value:'course',label:'课程'}]},field('description','任务说明',item?.description),{...field('enabled','启用',String(item?.enabled ?? true)),choices:[{value:'true',label:'启用'},{value:'false',label:'暂停'}]}],save:async v=>{if(!v.title.trim()||!v.description.trim())throw new Error('请填写名称及任务说明');s.result(await s.client.json('/app/focus','POST',{...item,...v,enabled:v.enabled==='true'}));await s.loadFocus();}};
 }

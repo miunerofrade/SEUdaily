@@ -144,7 +144,7 @@ export const invokeCapabilityTool = createTool({
   inputSchema: z.object({ ticket: z.string().startsWith("cap-"), arguments: z.record(z.string(), z.unknown()).default({}) }).strict(),
   requireApproval: async ({ ticket }: { ticket: string }, options) => {
     const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
-    return Boolean(entry?.capability.approvalRequired && !isUnapprovedAccessEnabled());
+    return Boolean(entry?.capability.approvalRequired && !isUnapprovedAccessEnabled(options));
   },
   execute: async ({ ticket, arguments: input }, options) => {
     const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);

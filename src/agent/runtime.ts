@@ -1,3 +1,4 @@
+import { packageDocumentContent } from '../shared/document-content.js';
 import { redactText, redactValue } from './redaction.js';
 import { randomUUID } from 'node:crypto';
 import { ModelError, type ModelProvider } from './provider.js';
@@ -20,6 +21,7 @@ export class AgentRuntime {
         provider: ModelProvider;
         tools: (context: TurnContext) => Promise<Record<string, ToolDefinition>>;
         instructions: (context: TurnContext) => Promise<string>;
+        resolveDocuments?: (refs: unknown) => Array<{ name: string; markdown: string }>;
         hydrate?: (messages: ModelMessage[]) => Promise<ModelMessage[]>;
         maxSteps?: number;
         memory?: {
@@ -63,6 +65,14 @@ export class AgentRuntime {
                 if (!source || input.length) throw new Error('重新生成必须引用当前会话中的用户消息');
                 parent = source.id;
                 run.inputMessageIds!.push(source.id);
+            }
+            const documents = this.config.resolveDocuments?.(context.documentRefs) ?? [];
+            if (documents.length && input.length) {
+                input = [...input];
+                const last = input.at(-1)!;
+                input[input.length - 1] = { ...last, content: typeof last.content === 'string'
+                    ? packageDocumentContent(last.content, documents)
+                    : [...(last.content ?? []), { type: 'text', text: packageDocumentContent('', documents) }] };
             }
             const inputs: import('./types.js').StoredMessage[] = [];
             for (const message of input) {
@@ -138,6 +148,7 @@ export class AgentRuntime {
             run.context.capabilityTickets ??= [];
             run.context.skills ??= [];
             const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityTickets', run.context.capabilityTickets]]);
+            requestContext.set('seudailyFocus', run.context.focus === true);
             requestContext.set('seudailySkills', run.context.skills);
             const options: ToolExecutionOptions = { requestContext, abortSignal: signal };
             while (true) {

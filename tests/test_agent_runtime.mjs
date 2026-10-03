@@ -91,3 +91,14 @@ test('store updates cannot change message role, resource or thread ownership', a
  const run=await f.store.getRun((await f.store.allMessages('test','resource')).at(-1).content.runToken);
  await assert.rejects(f.store.saveRun({...run,context:{...run.context,threadId:'another'}}));
 });
+
+test('resolved attachment text is persisted as user content, never system instructions',async t=>{
+ const f=setup(t,[{role:'assistant',content:'ok'},{role:'assistant',content:'next'}],{}, {resolveDocuments: refs=>refs?.length?[{name:'report.pdf',markdown:'attachment body'}]:[]});
+ const context={...ctx(),documentRefs:['ref']};
+ await events(f.runtime.runTurn([{role:'user',content:[{type:'text',text:'question'},{type:'image_url',image_url:{url:'https://example.org/image.png'}}]}],context));
+ const request=f.provider.requests[0];assert.equal(request[0].content,'system');
+ const parts=request.find(m=>m.role==='user').content;assert.ok(parts.some(p=>p.type==='image_url'));assert.ok(parts.some(p=>p.text?.includes('attachment body')));
+ await events(f.runtime.runTurn(user('followup'),ctx()));
+ assert.ok(JSON.stringify(f.provider.requests[1].filter(m=>m.role==='user')).includes('attachment body'));
+ assert.ok(!JSON.stringify(f.provider.requests[1].filter(m=>m.role==='system')).includes('attachment body'));
+});
