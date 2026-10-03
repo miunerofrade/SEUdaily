@@ -100,7 +100,7 @@ export interface TerminalMessage {
   role: string;
   text: string;
   reasoning?: string;
-  process?: Array<{ type: "reasoning" | "text" | "tool"; text: string; id?: string }>;
+  process?: Array<{ type: "reasoning" | "text" | "tool"; text: string; id?: string; expanded?: boolean }>;
   streaming?: boolean;
   welcome?: boolean;
 }
@@ -479,6 +479,7 @@ export class Session extends EventEmitter {
       throw error;
     } finally {
       message.streaming = false;
+      for (const part of message.process ?? []) part.expanded = false;
       this.reasoningExpanded = false;
       if (this.controller === controller) this.controller = null;
       this.thinking = false;

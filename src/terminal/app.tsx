@@ -166,23 +166,37 @@ export function App({ session, copy = copySelection }: {
     !session.confirmation;
   const reasoningRef = useRef<DOMElement | null>(null);
   const transcriptRef = useRef<DOMElement | null>(null);
-  const [selectedReasoning, setSelectedReasoning] = useState<string | null>(null);
+  const lastReasoningTarget = useRef<{ text: string; expanded?: boolean } | null>(null);
   const [reasoningOffset, setReasoningOffset] = useState<number | null>(null);
-  useEffect(() => { setSelectedReasoning(null); setReasoningOffset(null); }, [session.runToken, session.threadId]);
+  useEffect(() => { lastReasoningTarget.current = null; setReasoningOffset(null); }, [session.runToken, session.threadId]);
   const latestAnswer = [...messages].reverse().find(message => message.role === "SEUdaily");
-  const activeReasoning = selectedReasoning ?? ([...(latestAnswer?.process ?? [])].reverse().find(part => part.type === "reasoning")?.text
+  const activeReasoning = ([...(latestAnswer?.process ?? [])].reverse().find(part => part.type === "reasoning")?.text
     ?? latestAnswer?.reasoning ?? "");
   const reasoningLines = wrap(activeReasoning, Math.max(1, width - 20));
   const reasoningCapacity = Math.min(8, Math.max(1, Math.floor(rows / 3)));
   const reasoningMaxOffset = Math.max(0, reasoningLines.length - reasoningCapacity);
   const reasoningTop = Math.min(reasoningMaxOffset, reasoningOffset ?? reasoningMaxOffset);
   const showReasoning = page === "chat" && !session.pending &&
-    !session.confirmation && (showThinking || (session.reasoningExpanded && !!activeReasoning));
+    !session.confirmation && session.busy && (showThinking || !!activeReasoning);
   const reasoningHeight = showReasoning ? 1 + (session.reasoningExpanded ? Math.min(reasoningCapacity, reasoningLines.length) : 0) : 0;
-  const toggleReasoning = () => {
-    setReasoningOffset(session.busy ? null : 0);
-    session.reasoningExpanded = !session.reasoningExpanded;
+  const toggleInlineReasoning = (part: { text: string; expanded?: boolean }, index: number) => {
+    part.expanded = !part.expanded;
+    lastReasoningTarget.current = part;
+    // Preserve the visible header when the block changes height instead of following the bottom.
+    setOffset(Math.min(top, index));
     session.changed();
+  };
+  const toggleReasoning = () => {
+    if (session.busy) {
+      setReasoningOffset(null);
+      session.reasoningExpanded = !session.reasoningExpanded;
+      session.changed();
+      return;
+    }
+    const visible = displayLines.slice(top, top + height).map(line => line[0]?.reasoningPart).filter(Boolean);
+    const target = lastReasoningTarget.current ?? visible.at(-1) ??
+      [...displayLines].reverse().find(line => line[0]?.reasoningPart)?.[0].reasoningPart;
+    if (target) toggleInlineReasoning(target, displayLines.findIndex(line => line[0]?.reasoningPart === target));
   };
   const inReasoning = (x?: number, y?: number) => {
     if (!reasoningRef.current || x === undefined || y === undefined) return false;
@@ -490,11 +504,8 @@ export function App({ session, copy = copySelection }: {
         const line = displayLines[top + y - box.y];
         const marker = line?.[0];
         if (y >= box.y && y < box.y + box.height && x >= box.x &&
-          x < box.x + stringWidth(marker?.text ?? "") && marker?.reasoningText !== undefined) {
-          setSelectedReasoning(marker.reasoningText);
-          setReasoningOffset(0);
-          session.reasoningExpanded = true;
-          session.changed();
+          x < box.x + stringWidth(marker?.text ?? "") && marker?.reasoningPart !== undefined) {
+          toggleInlineReasoning(marker.reasoningPart, top + y - box.y);
         }
       }
       return;
