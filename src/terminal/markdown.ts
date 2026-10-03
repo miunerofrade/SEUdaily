@@ -47,7 +47,8 @@ export function messageLines(
       }
     lines.push(row.length ? row : [{ text: " " }]);
   };
-  append([{ text: message.role, role: message.role, bold: true }]);
+  if (message.role !== "你" && message.role !== "SEUdaily")
+    append([{ text: message.role, role: message.role, bold: true }]);
   const source = clean(message.text).split("\n");
   for (let index = 0; index < source.length; index++) {
     const original = source[index],
