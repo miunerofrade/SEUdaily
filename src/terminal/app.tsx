@@ -23,10 +23,12 @@ import {
   periodTimes,
 } from "./course-layout.js";
 import { Timetable, gridGeometry } from "./timetable.js";
-import { Session, commands } from "./session.js";
+import { Session, commands, type TerminalMessage } from "./session.js";
 import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
+import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
+import { copySelection } from "./clipboard.js";
 
 const color = {
   accent: "#80cbc4",
@@ -75,7 +77,10 @@ const states: Record<string, string> = {
 };
 type Page = "chat" | "schedule" | "programs";
 
-export function App({ session }: { session: Session }) {
+export function App({ session, copy = copySelection }: {
+  session: Session;
+  copy?: (text: string) => Promise<void | string>;
+}) {
   const [, refresh] = useState(0);
   const schedule = session.schedule,
     programs = session.programs;
@@ -84,6 +89,28 @@ export function App({ session }: { session: Session }) {
   const { stdout } = useStdout();
   const { columns, rows } = useWindowSize();
   const width = Math.max(20, columns - 4);
+  const rootRef = useRef<DOMElement | null>(null);
+  const selectionRef = useRef<Selection | null>(null);
+  const selectionMessages = useRef<TerminalMessage[]>([]);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [copyNotice, setCopyNotice] = useState("");
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSelection = () => {
+    selectionRef.current = null;
+    setSelection(null);
+    refresh((n) => n + 1);
+  };
+  const copyCurrent = () => {
+    const current = selectionRef.current;
+    if (!current?.moved) return;
+    void copy(selectedText(current)).then((notice) => {
+      setCopyNotice(notice || "已复制");
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopyNotice(""), 1500);
+    }).catch(() => setCopyNotice("复制失败，请重新拖选"));
+  };
+  useEffect(() => { clearSelection(); }, [columns, rows]);
+  useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
   const [page, setPage] = useState<Page>("chat");
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
@@ -95,7 +122,7 @@ export function App({ session }: { session: Session }) {
     setInput(editor.current.text);
     setCaret(editor.current.cursor);
   };
-  const messages = session.messages;
+  const messages = selectionRef.current?.moved ? selectionMessages.current : session.messages;
   const busy = session.busy;
   const [offset, setOffset] = useState<number | null>(null);
   const [field, setField] = useState(0);
@@ -173,10 +200,8 @@ export function App({ session }: { session: Session }) {
     options: session.viewOptions,
   });
   useEffect(() => {
-    let selecting = session.selectionMode;
     const changed = () => {
-      if (session.selectionMode && selecting) return;
-      selecting = session.selectionMode;
+      if (selectionRef.current?.moved) return;
       refresh((n) => n + 1);
       setPage(session.page as Page);
       if (
@@ -395,6 +420,7 @@ export function App({ session }: { session: Session }) {
   };
   const cancel = () => void session.cancel();
   const wheel = (amount: number, x?: number, y?: number) => {
+    if (selectionRef.current) clearSelection();
     if (session.reasoningExpanded && inReasoning(x, y)) {
       setReasoningOffset((current) => Math.max(
         0, Math.min(reasoningMaxOffset, (current ?? reasoningMaxOffset) + amount),
@@ -503,9 +529,10 @@ export function App({ session }: { session: Session }) {
       }
     }
   };
+  const copyRef = useRef(copyCurrent);
+  copyRef.current = copyCurrent;
   useEffect(() => {
-    if (session.selectionMode) return;
-    stdout.write("\x1b[?1000h\x1b[?1006h");
+    stdout.write("\x1b[?1002h\x1b[?1006h");
     let pending = "";
     const handler = (data: Buffer | string) => {
       pending += String(data);
@@ -516,8 +543,33 @@ export function App({ session }: { session: Session }) {
           wheelRef.current(
             button === 64 ? -3 : 3, Number(event[2]) - 1, Number(event[3]) - 1,
           );
-        else if (button === 0 && event[4] === "M")
-          clickRef.current(Number(event[2]) - 1, Number(event[3]) - 1);
+        else {
+          const point = { x: Math.max(0, Number(event[2]) - 1), y: Math.max(0, Number(event[3]) - 1) };
+          if ((button & 3) !== 0) continue;
+          if ((button & 32) && event[4] === "M") {
+            const current = selectionRef.current;
+            if (!current) continue;
+            const moved = current.moved || point.x !== current.start.x || point.y !== current.start.y;
+            selectionRef.current = { ...current, end: point, moved };
+            if (moved) setSelection(selectionRef.current);
+          } else if (event[4] === "M") {
+            selectionRef.current = null;
+            setSelection(null);
+            selectionMessages.current = session.messages.map((message) => ({ ...message }));
+            if (rootRef.current) selectionRef.current = { start: point, end: point, moved: false,
+              screen: screenText(rootRef.current, stdout.columns ?? 80, stdout.rows ?? 24) };
+          } else {
+            const current = selectionRef.current;
+            if (current?.moved) {
+              selectionRef.current = { ...current, end: point };
+              setSelection(selectionRef.current);
+              if (session.copyOnSelect) copyRef.current();
+            } else {
+              selectionRef.current = null;
+              clickRef.current(point.x, point.y);
+            }
+          }
+        }
       }
       const marker = pending.lastIndexOf("\x1b[<");
       pending =
@@ -529,9 +581,9 @@ export function App({ session }: { session: Session }) {
     stdin.on("data", handler);
     return () => {
       stdin.off("data", handler);
-      stdout.write("\x1b[?1000l\x1b[?1006l");
+      stdout.write("\x1b[?1002l\x1b[?1000l\x1b[?1006l");
     };
-  }, [session.selectionMode, stdin, stdout]);
+  }, [stdin, stdout]);
   useEffect(() => () => { void session.cancel(); }, [session]);
   const newSelection = (index: number) => {
     index = Math.max(0, Math.min(choices.length - 1, index));
@@ -573,10 +625,13 @@ export function App({ session }: { session: Session }) {
   });
   useInput((value, key) => {
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
-    if (key.ctrl && value === "s") {
-      session.selectionMode = !session.selectionMode;
-      session.changed();
+    if ((key.ctrl || (process.platform === "darwin" && key.super)) && value.toLowerCase() === "c" && selectionRef.current?.moved) {
+      copyCurrent();
       return;
+    }
+    if (selectionRef.current?.moved) {
+      clearSelection();
+      if (key.escape) return;
     }
     if (key.ctrl && value === "t" && page === "chat" && !modal && !detail && !decisions) {
       toggleReasoning();
@@ -977,7 +1032,7 @@ export function App({ session }: { session: Session }) {
   gridCells.current = [];
   tableRows.current = [];
   return (
-    <Box width={columns} height={rows} flexDirection="column" paddingX={1}>
+    <Box ref={rootRef} width={columns} height={rows} flexDirection="column" paddingX={1}>
       <Box
         flexDirection="column"
         height={height}
@@ -1246,15 +1301,16 @@ export function App({ session }: { session: Session }) {
           overflow="hidden"
         >
           <Box height={1}>
-            {showThinking && !session.selectionMode
+            {showThinking && !selectionRef.current?.moved
               ? <Spinner label="Thinking…" type="dots" />
               : <Text color={color.muted}>模型思考</Text>}
             <Text color={color.muted} wrap="truncate">
               {session.reasoningExpanded ? " ▾ " : " ▸ "}
               {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : fit(
-                reasoningLines.at(-1) || "等待模型返回思考内容 · 点击展开",
-                Math.max(1, width - 16),
+                reasoningLines.at(-1) || "等待模型返回思考内容",
+                Math.max(1, width - 30),
               )}
+              {!session.reasoningExpanded && " · Ctrl+T 展开"}
             </Text>
           </Box>
           {session.reasoningExpanded && reasoning && reasoningLines
@@ -1335,16 +1391,20 @@ export function App({ session }: { session: Session }) {
           </Box>
         </>
       )}
-      <Box height={1} flexShrink={0}>
+      <Box height={1} flexShrink={0} justifyContent="center">
         <Text color={color.muted} wrap="truncate">
-          {session.selectionMode ? "文字选择 · 拖选后使用系统复制快捷键 · Ctrl+S 返回交互 · PgUp/PgDn 滚动" : telemetryLabel(
-            session.model,
-            session.effort,
-            session.usage,
-            width < 105,
-          )}
+          {copyNotice || (selection?.moved
+            ? (process.platform === "darwin"
+                ? "已选中 · ⌘C / Ctrl+C 复制 · Esc 取消"
+                : "已选中 · Ctrl+C 复制 · Esc 取消")
+            : telemetryLabel(session.model, session.effort, session.usage, width < 105))}
         </Text>
       </Box>
+      {selection?.moved && selectionRows(selection).map((row) => (
+        <Box key={row.y} position="absolute" left={row.x} top={row.y} height={1}>
+          <Text backgroundColor={color.accent} color="#20242c">{row.text}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }

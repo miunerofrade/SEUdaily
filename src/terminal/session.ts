@@ -48,7 +48,7 @@ export const commands: Record<string, string> = {
   attach: '添加文档 "路径"',
   detach: "清空文档",
   thinking: "展开 / 折叠模型思考（Ctrl+T）",
-  select: "切换文字选择模式（Ctrl+S），拖选后用系统复制快捷键",
+  "copy-on-select": "拖选后自动复制 [on/off]，默认关闭",
   cancel: "取消当前任务",
   quit: "退出",
 };
@@ -119,8 +119,8 @@ export class Session extends EventEmitter {
   catalog: any[] = [];
   threads: any[] = [];
   messages: TerminalMessage[] = [];
+  copyOnSelect = false;
   reasoningExpanded = false;
-  selectionMode = false;
   status = "就绪";
   busy = false;
   thinking = false;
@@ -178,6 +178,10 @@ export class Session extends EventEmitter {
     );
   }
   async initialize() {
+    try {
+      const preference = JSON.parse(await readFile(resolve(this.root, ".seudaily/cli-preferences.json"), "utf8"));
+      this.copyOnSelect = preference.copyOnSelect === true;
+    } catch {}
     await mkdir(resolve(this.root, ".seudaily"), { recursive: true });
     try {
       const history = await readFile(
@@ -510,9 +514,19 @@ export class Session extends EventEmitter {
       this.page = "chat";
       this.changed();
     }
-    if (name === "thinking" || name === "select") {
-      if (name === "thinking") this.reasoningExpanded = !this.reasoningExpanded;
-      else this.selectionMode = !this.selectionMode;
+    if (name === "copy-on-select") {
+      if (args.length > 1 || (args.length && !["on", "off"].includes(args[0])))
+        throw new Error("/copy-on-select [on/off]");
+      if (args.length) {
+        this.copyOnSelect = args[0] === "on";
+        await mkdir(resolve(this.root, ".seudaily"), { recursive: true });
+        await writeFile(resolve(this.root, ".seudaily/cli-preferences.json"), JSON.stringify({ copyOnSelect: this.copyOnSelect }), { mode: 0o600 });
+      }
+      this.show("拖选后自动复制：" + (this.copyOnSelect ? "开启" : "关闭（选中后 Ctrl+C 复制）"));
+      return;
+    }
+    if (name === "thinking") {
+      this.reasoningExpanded = !this.reasoningExpanded;
       this.changed();
       return;
     }
@@ -807,7 +821,7 @@ export class Session extends EventEmitter {
       await this.cancel();
       return 0;
     }
-    if (text === "/thinking" || text === "/select") {
+    if (text === "/thinking" || /^\/copy-on-select(?:\s|$)/.test(text)) {
       await this.command(text);
       return 0;
     }

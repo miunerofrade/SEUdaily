@@ -85,6 +85,7 @@ async function main() {
       alternateScreen: true,
       exitOnCtrlC: false,
       maxFps: 60,
+      kittyKeyboard: { mode: "auto", flags: ["disambiguateEscapeCodes", "reportAllKeysAsEscapeCodes"] },
     });
     if (options.prompt)
       void session

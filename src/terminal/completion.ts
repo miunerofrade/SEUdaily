@@ -28,6 +28,7 @@ export function commandSuggestions(input: string, skills: string[]): string[] {
     )[match[1].slice(1)] ?? match[1].slice(1);
   const options: Record<string, string[]> = {
     skill: [...skills, "off"],
+    "copy-on-select": ["on", "off"],
     mode: ["normal", "full", "extra"],
     login: ["schedule"],
     resume: ["latest"],
