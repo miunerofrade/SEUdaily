@@ -125,9 +125,42 @@ export function App({ session }: { session: Session }) {
     session.thinking &&
     !session.pending &&
     !session.confirmation;
+  const latestAnswer = [...messages].reverse().find(
+    (message) => message.role === "SEUdaily",
+  );
+  const reasoning = latestAnswer?.reasoning ?? "";
+  const reasoningLines = useMemo(
+    () => wrap(reasoning, width - 2), [reasoning, width],
+  );
+  const [reasoningOffset, setReasoningOffset] = useState<number | null>(null);
+  const reasoningRef = useRef<DOMElement | null>(null);
+  const showReasoning = page === "chat" && !session.pending &&
+    !session.confirmation && (showThinking || !!reasoning);
+  const reasoningCapacity = Math.min(
+    reasoningLines.length, Math.max(1, Math.min(8, Math.floor(rows / 3))),
+  );
+  const reasoningHeight = showReasoning
+    ? 1 + (session.reasoningExpanded && reasoning ? reasoningCapacity : 0)
+    : 0;
+  const reasoningMaxOffset = Math.max(0, reasoningLines.length - reasoningCapacity);
+  const reasoningTop = Math.min(reasoningMaxOffset, reasoningOffset ?? reasoningMaxOffset);
+  const toggleReasoning = () => {
+    setReasoningOffset(session.busy ? null : 0);
+    session.reasoningExpanded = !session.reasoningExpanded;
+    session.changed();
+  };
+  useEffect(() => {
+    setReasoningOffset(session.busy ? null : 0);
+  }, [session.runToken, session.threadId, session.reasoningExpanded]);
+  const inReasoning = (x?: number, y?: number) => {
+    if (!reasoningRef.current || x === undefined || y === undefined) return false;
+    const box = measureElement(reasoningRef.current);
+    return x >= box.x && x < box.x + box.width &&
+      y >= box.y && y < box.y + box.height;
+  };
   const height = Math.max(
     3,
-    rows - inputHeight - suggestionHeight - 2 - (showThinking ? 1 : 0),
+    rows - inputHeight - suggestionHeight - 2 - reasoningHeight,
   );
   const inputTop = Math.max(0, inputLayout.cursorRow - inputCapacity + 1);
   const fields = useRef<(DOMElement | null)[]>([]),
@@ -140,7 +173,10 @@ export function App({ session }: { session: Session }) {
     options: session.viewOptions,
   });
   useEffect(() => {
+    let selecting = session.selectionMode;
     const changed = () => {
+      if (session.selectionMode && selecting) return;
+      selecting = session.selectionMode;
       refresh((n) => n + 1);
       setPage(session.page as Page);
       if (
@@ -358,7 +394,13 @@ export function App({ session }: { session: Session }) {
     );
   };
   const cancel = () => void session.cancel();
-  const wheel = (amount: number) => {
+  const wheel = (amount: number, x?: number, y?: number) => {
+    if (session.reasoningExpanded && inReasoning(x, y)) {
+      setReasoningOffset((current) => Math.max(
+        0, Math.min(reasoningMaxOffset, (current ?? reasoningMaxOffset) + amount),
+      ));
+      return;
+    }
     if (decisions) {
       setDecisionOffset((current) =>
         Math.max(0, Math.min(decisionMaxOffset, current + amount)),
@@ -396,7 +438,11 @@ export function App({ session }: { session: Session }) {
   wheelRef.current = wheel;
   const clickRef = useRef((x: number, y: number) => {});
   clickRef.current = (x, y) => {
-    if (modal || detail || decisions || page === "chat") return;
+    if (modal || detail || decisions) return;
+    if (page === "chat") {
+      if (inReasoning(x, y)) toggleReasoning();
+      return;
+    }
     for (let index = 0; index < fields.current.length; index++) {
       const element = fields.current[index];
       if (!element) continue;
@@ -458,6 +504,7 @@ export function App({ session }: { session: Session }) {
     }
   };
   useEffect(() => {
+    if (session.selectionMode) return;
     stdout.write("\x1b[?1000h\x1b[?1006h");
     let pending = "";
     const handler = (data: Buffer | string) => {
@@ -466,7 +513,9 @@ export function App({ session }: { session: Session }) {
       for (const event of events) {
         const button = Number(event[1]);
         if (button === 64 || button === 65)
-          wheelRef.current(button === 64 ? -3 : 3);
+          wheelRef.current(
+            button === 64 ? -3 : 3, Number(event[2]) - 1, Number(event[3]) - 1,
+          );
         else if (button === 0 && event[4] === "M")
           clickRef.current(Number(event[2]) - 1, Number(event[3]) - 1);
       }
@@ -481,9 +530,9 @@ export function App({ session }: { session: Session }) {
     return () => {
       stdin.off("data", handler);
       stdout.write("\x1b[?1000l\x1b[?1006l");
-      cancel();
     };
-  }, []);
+  }, [session.selectionMode, stdin, stdout]);
+  useEffect(() => () => { void session.cancel(); }, [session]);
   const newSelection = (index: number) => {
     index = Math.max(0, Math.min(choices.length - 1, index));
     setSelected(index);
@@ -524,6 +573,15 @@ export function App({ session }: { session: Session }) {
   });
   useInput((value, key) => {
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
+    if (key.ctrl && value === "s") {
+      session.selectionMode = !session.selectionMode;
+      session.changed();
+      return;
+    }
+    if (key.ctrl && value === "t" && page === "chat" && !modal && !detail && !decisions) {
+      toggleReasoning();
+      return;
+    }
     if (key.ctrl && value === "d") {
       if (editor.current.text && !decisions) {
         const { text, cursor } = editor.current;
@@ -1179,9 +1237,31 @@ export function App({ session }: { session: Session }) {
           </>
         )}
       </Box>
-      {showThinking && (
-        <Box height={1} flexShrink={0}>
-          <Spinner label="Thinking…" type="dots" />
+      {showReasoning && (
+        <Box
+          ref={reasoningRef}
+          height={reasoningHeight}
+          flexShrink={0}
+          flexDirection="column"
+          overflow="hidden"
+        >
+          <Box height={1}>
+            {showThinking && !session.selectionMode
+              ? <Spinner label="Thinking…" type="dots" />
+              : <Text color={color.muted}>模型思考</Text>}
+            <Text color={color.muted} wrap="truncate">
+              {session.reasoningExpanded ? " ▾ " : " ▸ "}
+              {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : fit(
+                reasoningLines.at(-1) || "等待模型返回思考内容 · 点击展开",
+                Math.max(1, width - 16),
+              )}
+            </Text>
+          </Box>
+          {session.reasoningExpanded && reasoning && reasoningLines
+            .slice(reasoningTop, reasoningTop + reasoningCapacity)
+            .map((line, index) => (
+              <Text key={index} color={color.muted}>{"  " + line}</Text>
+            ))}
         </Box>
       )}
       {page === "chat" && (
@@ -1257,7 +1337,7 @@ export function App({ session }: { session: Session }) {
       )}
       <Box height={1} flexShrink={0}>
         <Text color={color.muted} wrap="truncate">
-          {telemetryLabel(
+          {session.selectionMode ? "文字选择 · 拖选后使用系统复制快捷键 · Ctrl+S 返回交互 · PgUp/PgDn 滚动" : telemetryLabel(
             session.model,
             session.effort,
             session.usage,

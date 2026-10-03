@@ -47,6 +47,8 @@ export const commands: Record<string, string> = {
   mode: "权限 [normal/full/extra]",
   attach: '添加文档 "路径"',
   detach: "清空文档",
+  thinking: "展开 / 折叠模型思考（Ctrl+T）",
+  select: "切换文字选择模式（Ctrl+S），拖选后用系统复制快捷键",
   cancel: "取消当前任务",
   quit: "退出",
 };
@@ -94,6 +96,11 @@ export function flags(
   }
   return result;
 }
+export interface TerminalMessage {
+  role: string;
+  text: string;
+  reasoning?: string;
+}
 export class Session extends EventEmitter {
   client: Client;
   threadId = randomUUID() as string;
@@ -111,7 +118,9 @@ export class Session extends EventEmitter {
   skills: string[];
   catalog: any[] = [];
   threads: any[] = [];
-  messages: { role: string; text: string }[] = [];
+  messages: TerminalMessage[] = [];
+  reasoningExpanded = false;
+  selectionMode = false;
   status = "就绪";
   busy = false;
   thinking = false;
@@ -249,7 +258,18 @@ export class Session extends EventEmitter {
           .filter((p: any) => p.type === "text")
           .map((p: any) => p.text)
           .join("\n");
-      if (text) this.show(text, m.role === "user" ? "你" : "SEUdaily");
+      const reasoning = m.role === "assistant"
+        ? parts.filter((p: any) => p.type === "reasoning")
+            .map((p: any) => p.text ?? p.reasoning ?? "").join("\n")
+        : "";
+      if (text || reasoning) {
+        this.messages.push({
+          role: m.role === "user" ? "你" : "SEUdaily",
+          text: clean(text ?? ""),
+          reasoning: clean(reasoning),
+        });
+        this.changed();
+      }
       for (const p of parts)
         if (p.type === "tool-invocation") this.tool(p.toolInvocation?.result);
     }
@@ -278,6 +298,7 @@ export class Session extends EventEmitter {
     this.auth.clear();
     this.actions.clear();
     this.pending = (await this.client.json(this.path("run"))).pending;
+    this.reasoningExpanded = false;
     this.messages = [];
     this.usageByRun.clear();
     this.usage = {};
@@ -316,7 +337,8 @@ export class Session extends EventEmitter {
     this.controller = controller;
     await this.save();
     if (typeof text === "string") this.show(text, "你");
-    const message = { role: "SEUdaily", text: "" };
+    this.reasoningExpanded = false;
+    const message: TerminalMessage = { role: "SEUdaily", text: "", reasoning: "" };
     this.messages.push(message);
     this.status = "正在回答";
     this.thinking = true;
@@ -348,9 +370,10 @@ export class Session extends EventEmitter {
           this.status = "正在思考";
           this.thinking = true;
         } else if (event.type === "reasoning-end") this.status = "正在回答";
-        else if (event.type === "reasoning-delta" && this.options.verbose)
-          this.emit("diagnostic", clean(p.text));
-        else if (event.type === "tool-call") {
+        else if (event.type === "reasoning-delta") {
+          message.reasoning += clean(p.text ?? "");
+          if (this.options.verbose) this.emit("diagnostic", clean(p.text));
+        } else if (event.type === "tool-call") {
           this.status = "工具：" + p.toolName;
           this.thinking = false;
           if (!this.options.quiet) this.show(`[${p.toolName}] 执行中`);
@@ -487,6 +510,12 @@ export class Session extends EventEmitter {
       this.page = "chat";
       this.changed();
     }
+    if (name === "thinking" || name === "select") {
+      if (name === "thinking") this.reasoningExpanded = !this.reasoningExpanded;
+      else this.selectionMode = !this.selectionMode;
+      this.changed();
+      return;
+    }
     if (name === "chat") {
       this.page = "chat";
       this.changed();
@@ -513,6 +542,7 @@ export class Session extends EventEmitter {
       this.actions.clear();
       this.documents = [];
       this.skills = [];
+      this.reasoningExpanded = false;
       this.messages = [];
       this.page = "chat";
       await this.save();
@@ -775,6 +805,10 @@ export class Session extends EventEmitter {
   async submit(text: string): Promise<number> {
     if (text === "/cancel") {
       await this.cancel();
+      return 0;
+    }
+    if (text === "/thinking" || text === "/select") {
+      await this.command(text);
       return 0;
     }
     if (this.busy) throw new Error("当前任务正在运行，请先取消。");
