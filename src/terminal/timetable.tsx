@@ -18,6 +18,7 @@ export function Timetable({
   start,
   count,
   dayStart,
+  selection,
   register,
 }: {
   courses: any[];
@@ -25,6 +26,7 @@ export function Timetable({
   start: number;
   count: number;
   dayStart: number;
+  selection: { day: number; period: number } | null;
   register: (index: number, element: DOMElement | null, items: any[]) => void;
 }) {
   const { days, timeWidth, cellWidth } = gridGeometry(width),
@@ -36,6 +38,7 @@ export function Timetable({
         c.startPeriod <= period &&
         c.endPeriod >= period,
     );
+  const selectedItems = selection ? at(selection.period, selection.day) : [];
   const line = (
     left: string,
     middle: string,
@@ -106,6 +109,7 @@ export function Timetable({
                 const day = dayStart + i,
                   items = at(period, day),
                   course = items[0];
+                const active = selection?.day === day && items.some(item => selectedItems.includes(item));
                 const lines = course
                   ? wrap(course.courseName, cellWidth).concat(
                       wrap(course.classroom || "未提供地点", cellWidth),
@@ -128,10 +132,10 @@ export function Timetable({
                         register((period - 1) * 7 + day, element, items)
                       }
                     >
-                      <Text color={course ? "#80cbc4" : "#dce1ea"}>
+                      <Text backgroundColor={active ? "#394858" : undefined} bold={active} color={course ? "#80cbc4" : "#dce1ea"}>
                         {fit(texts[0] || "", cellWidth)}
                       </Text>
-                      <Text color="#8993a4">
+                      <Text backgroundColor={active ? "#394858" : undefined} color={active ? "#dce1ea" : "#8993a4"}>
                         {fit(texts[1] || "", cellWidth)}
                       </Text>
                     </Box>

@@ -148,6 +148,7 @@ export function App({ session, copy = copySelection }: {
   const [courseState, setCourseState] = useState("all");
   const [grid, setGrid] = useState(true);
   const [dayStart, setDayStart] = useState(0);
+  const [gridSelection, setGridSelection] = useState<{ day: number; period: number } | null>(null);
   const [programSemester, setProgramSemester] = useState("all");
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionTop, setSuggestionTop] = useState(0);
@@ -323,6 +324,14 @@ export function App({ session, copy = copySelection }: {
     [plan, filteredCourses, width, programSemester, courseState],
   );
   const choices = page === "programs" ? programView.entries : filteredCourses;
+  const selectedGridItems = gridSelection ? filteredCourses.filter((course: any) =>
+    course.weekday === gridSelection.day + 1 && course.startPeriod <= gridSelection.period && course.endPeriod >= gridSelection.period) : [];
+  useEffect(() => { setGridSelection(null); }, [courses, term, week, filter, page, grid]);
+  const openCourseDetail = () => {
+    if (!isGrid) { setDetail(choices[selected]); return; }
+    if (selectedGridItems.length === 1) setDetail(selectedGridItems[0]);
+    else if (selectedGridItems.length > 1) { gridOptions.current = selectedGridItems; setModal("grid-courses"); }
+  };
   const displayLines = useMemo(
     () => messages.flatMap((message) => message.welcome
       ? welcomeLines(message.text, width) : messageLines(message, width)),
@@ -500,13 +509,13 @@ export function App({ session, copy = copySelection }: {
         setField(index);
         if (index === 0) setModal(page === "schedule" ? "semester" : "plan");
         if (index === 1) setModal(page === "schedule" ? "week" : "state");
-        if (index === 3) setDetail(choices[selected]);
+        if (index === 3) openCourseDetail();
         if (index === 4) setModal("program-semester");
         return;
       }
     }
     if (isGrid) {
-      for (const cell of gridCells.current) {
+      for (const [cellIndex, cell] of gridCells.current.entries()) {
         if (!cell?.element) continue;
         const box = measureElement(cell.element);
         if (
@@ -516,11 +525,8 @@ export function App({ session, copy = copySelection }: {
           y < box.y + box.height &&
           cell.items.length
         ) {
-          if (cell.items.length === 1) setDetail(cell.items[0]);
-          else {
-            gridOptions.current = cell.items;
-            setModal("grid-courses");
-          }
+          setGridSelection({ day: cellIndex % 7, period: Math.floor(cellIndex / 7) + 1 });
+          setField(3);
           return;
         }
       }
@@ -724,8 +730,9 @@ export function App({ session, copy = copySelection }: {
         page === "schedule" &&
         isGrid &&
         field !== 2 &&
-        (key.leftArrow || key.rightArrow)
+        (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow)
       ) {
+        if (key.upArrow || key.downArrow) { wheel(key.upArrow ? -1 : 1); return; }
         setDayStart((start) =>
           Math.max(
             0,
@@ -774,7 +781,7 @@ export function App({ session, copy = copySelection }: {
       if (key.return) {
         if (field === 0) setModal(page === "schedule" ? "semester" : "plan");
         else if (field === 1) setModal(page === "schedule" ? "week" : "state");
-        else if (field === 3) setDetail(choices[selected]);
+        else if (field === 3) openCourseDetail();
         else if (field === 4) setModal("program-semester");
         return;
       }
@@ -1072,8 +1079,7 @@ export function App({ session, copy = copySelection }: {
     const box = measureElement(fields.current[2]);
     nativeCursor = { x: box.x + 2 + Math.min(stringWidth(filter), Math.max(0, box.width - 5)), y: box.y + 2 };
   }
-  gridCells.current = [];
-  tableRows.current = [];
+  // Ref callbacks clear unmounted cells; keep mounted hit targets across React rerenders.
   return (
     <Box ref={rootRef} width={columns} height={rows} flexDirection="column" paddingX={1}>
       <Box
@@ -1141,7 +1147,7 @@ export function App({ session, copy = copySelection }: {
                   ? "周次"
                   : modal === "plan"
                     ? "培养方案"
-                    : "修读状态"}{" "}
+                    : modal === "grid-courses" ? "课程" : "修读状态"}{" "}
               · ↑↓ 选择 · Enter 确认 · Esc 取消
             </Text>
             <Select
@@ -1248,7 +1254,7 @@ export function App({ session, copy = copySelection }: {
                   : (states[courseState] ?? "全部"),
               )}
               {fieldBox(2, "搜索", filter || "输入课程名")}
-              {fieldBox(3, "课程详情", "Enter")}
+              {fieldBox(3, "课程详情", isGrid ? selectedGridItems.length ? "已选中 · Enter 查看" : "先点击课程" : "Enter")}
               {page === "programs" &&
                 fieldBox(
                   4,
@@ -1263,6 +1269,7 @@ export function App({ session, copy = copySelection }: {
                 start={tableTop}
                 count={gridCount}
                 dayStart={dayStart}
+                selection={gridSelection}
                 register={(index, element, items) => {
                   gridCells.current[index] = { element, items };
                 }}
