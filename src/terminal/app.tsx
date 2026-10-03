@@ -128,6 +128,8 @@ export function App({ session, copy = copySelection }: {
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
   const editor = useRef(new Composer());
+  const pendingPastes = useRef(0);
+  editor.current.onAttachmentRemoved = id => session.removeAttachment(id);
   const historyIndex = useRef(-1);
   const historyDraft = useRef("");
   const edit = (text: string, cursor: number) => {
@@ -685,9 +687,14 @@ export function App({ session, copy = copySelection }: {
   };
   usePaste((text) => {
     if (page === "chat" && !modal && !detail && !decisions) {
-      editor.current.paste(clean(text));
-      setInput(editor.current.text);
-      setCaret(editor.current.cursor);
+      pendingPastes.current++;
+      void session.attachPastedFiles(clean(text)).then(attachments => {
+        if (attachments) {
+          for (const attachment of attachments) editor.current.attachment(attachment.id, clean(attachment.name), attachment.kind);
+        } else editor.current.paste(clean(text));
+        setInput(editor.current.text);
+        setCaret(editor.current.cursor);
+      }).catch(error => session.show(error.message, '附件错误')).finally(() => { pendingPastes.current--; });
     }
   });
   const handleInput = (value: string, key: Key) => {
@@ -909,7 +916,8 @@ export function App({ session, copy = copySelection }: {
         return;
       }
       const text = editor.current.expanded().trim();
-      if (!text) return;
+      if (!text && !session.images.length && !session.documents.length) return;
+      if (pendingPastes.current || session.attachmentLoading) return;
       if (busy && text !== "/cancel") return;
       if (text === "/quit" || text === "/exit") {
         cancel();
@@ -920,7 +928,9 @@ export function App({ session, copy = copySelection }: {
         changePage("chat");
         return;
       }
-      edit("", 0);
+      editor.current.clearAfterSubmit();
+      setInput('');
+      setCaret(0);
       historyIndex.current = -1;
       setOffset(null);
       setModal(null);

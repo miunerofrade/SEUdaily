@@ -177,7 +177,9 @@ def backend_session(root: Path, *, auto_start: bool = True, verbose: bool = Fals
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "cli-backend.log"
     with log_path.open("wb") as log:
-        process = _spawn([*_runtime_prefix(), _npm_executable(), "start"], root, log)
+        if sys.stderr.isatty():
+            print("正在启动 SEUdaily 后端…", file=sys.stderr, flush=True)
+        process = _spawn([*_runtime_prefix(), "node", "--import", "tsx", "src/server/main.ts"], root, log)
         try:
             deadline = time.monotonic() + 45
             while not _backend_ready():
@@ -266,6 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-c", "--chat", action="store_true", help="进入终端交互聊天（也可使用 chat 子命令）")
     parser.add_argument("-p", "--prompt", help="单次提问（也可使用 exec 子命令）")
     parser.add_argument("--json", action="store_true", help="单次运行输出 JSONL 事件")
+    parser.add_argument("--vpn", type=int, metavar="PORT", help="仅运行校园 VPN，使用保存的账号密码；代理端口 1024–65535")
     _common_options(parser)
     subparsers = parser.add_subparsers(dest="command")
     start_parser = subparsers.add_parser("start", help="同时启动 Agent 后端和 Web 前端")
@@ -286,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def completion_script(shell: str) -> str:
-    words = "chat exec start sessions skills completion --chat --prompt --resume --cwd --no-start --timeout --no-color --vi --verbose --quiet --skill --json --help --version -c -p -r -v -q -h -V"
+    words = "chat exec start sessions skills completion --chat --prompt --resume --cwd --vpn --no-start --timeout --no-color --vi --verbose --quiet --skill --json --help --version -c -p -r -v -q -h -V"
     if shell == "bash":
         return f'''_seudaily_complete() {{
   if [[ "${{COMP_WORDS[COMP_CWORD-1]}}" == "--cwd" ]]; then
@@ -329,6 +332,11 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args()
+    if args.vpn is not None:
+        if not 1024 <= args.vpn <= 65535:
+            parser.error("--vpn 端口应为 1024–65535")
+        if args.command or args.chat or args.prompt or args.json or args.resume:
+            parser.error("--vpn 是独立运行模式，不能与聊天或其他子命令一起使用")
     if args.chat and args.command not in (None, "chat"):
         parser.error("--chat 不能与其他子命令一起使用")
     command = args.command or ("chat" if args.chat or not args.prompt else "exec")
@@ -341,7 +349,7 @@ def main() -> None:
         parser.error("--quiet 与 --verbose 不能同时使用")
     if args.json and command != "exec":
         parser.error("--json 仅用于 exec 或 --prompt 单次运行")
-    if command == "chat" and (not sys.stdin.isatty() or not sys.stdout.isatty()):
+    if args.vpn is None and command == "chat" and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         parser.error("交互聊天需要终端；管道请使用 seudaily exec 或 -p")
     try:
         if command == "start":
@@ -350,6 +358,15 @@ def main() -> None:
             raise SystemExit(start())
         root = _project_root(args.cwd)
         os.environ["SEUDAILY_PROJECT_ROOT"] = str(root)
+        if args.vpn is not None:
+            prefix = _runtime_prefix()
+            process = subprocess.Popen([*prefix, "node", "--import", "tsx", str(root / "src/terminal/vpn.ts"), str(args.vpn)], cwd=root)
+            try:
+                raise SystemExit(process.wait())
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=10)
         with backend_session(root, auto_start=not args.no_start, verbose=args.verbose):
             node = shutil.which("node")
             if not node:
@@ -357,7 +374,7 @@ def main() -> None:
             options = {**vars(args), "command": command, "cwd": str(root)}
             environment = {**os.environ, "SEUDAILY_CLI_OPTIONS": json.dumps(options, ensure_ascii=False)}
             prefix = _runtime_prefix()
-            process = subprocess.Popen([*prefix, "node" if prefix else node, str(root / "node_modules/tsx/dist/cli.mjs"), str(root / "src/terminal/main.tsx")], cwd=root, env=environment)
+            process = subprocess.Popen([*prefix, "node" if prefix else node, "--import", "tsx", str(root / "src/terminal/main.tsx")], cwd=root, env=environment)
             try:
                 raise SystemExit(process.wait())
             finally:

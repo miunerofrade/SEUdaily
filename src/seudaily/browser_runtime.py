@@ -9,6 +9,7 @@ from typing import Any, Iterator
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
 from .runtime_paths import env_value
+from .vpn import campus_proxy
 
 
 def selected_browser() -> str:
@@ -46,6 +47,7 @@ class BrowserRuntime:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._contexts: dict[str, BrowserContext] = {}
+        self._context_proxies: dict[str, str | None] = {}
 
     def _assert_thread(self) -> None:
         thread_id = threading.get_ident()
@@ -81,6 +83,13 @@ class BrowserRuntime:
             context: BrowserContext | None = None
             existing_pages: set[Page] = set()
             try:
+                proxy = campus_proxy() if portal in {'course-portal', 'schedule-portal', 'training-plan-portal'} else None
+                context_options = {**context_options, **({'proxy': {'server': proxy, 'bypass': 'localhost,127.0.0.1'}} if proxy else {})}
+                if self._context_proxies.get(portal) != proxy:
+                    old = self._contexts.pop(portal, None)
+                    if old is not None:
+                        old.close()
+                self._context_proxies[portal] = proxy
                 if visible:
                     temporary_browser = launch_browser(self._ensure_playwright(), visible=True)
                     temporary_context = temporary_browser.new_context(**context_options)

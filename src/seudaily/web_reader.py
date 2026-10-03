@@ -9,8 +9,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request
 
+from .vpn import campus_proxy, campus_opener
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
 
 
@@ -52,6 +53,9 @@ def validate_public_url(value: str) -> str:
         raise ValueError("拒绝本机或私网 URL")
     if any(_SENSITIVE_QUERY_KEY.search(key) for key in parse_qs(parsed.query)):
         raise ValueError("URL 包含可能泄露凭据的查询参数")
+    if campus_proxy() and (hostname == 'seu.edu.cn' or hostname.endswith('.seu.edu.cn')):
+        # The authenticated VPN resolves campus names, including those absent from public DNS.
+        return parsed._replace(fragment='').geturl()
     try:
         addresses = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
     except socket.gaierror as exc:
@@ -293,7 +297,7 @@ def read_web_page(
     if include_attachments not in {"none", "auto", "all"}:
         raise ValueError("includeAttachments 必须是 none、auto 或 all")
     safe_url = validate_public_url(url)
-    opener = build_opener(_SafeRedirectHandler())
+    opener = campus_opener(_SafeRedirectHandler())
     request = Request(safe_url, headers={"User-Agent": "Mozilla/5.0 (SEUdaily local web reader)", "Accept": "text/html,application/xhtml+xml"})
     with opener.open(request, timeout=timeout_seconds) as response:
         final_url = validate_public_url(response.geturl())

@@ -19,6 +19,7 @@
     "dev:all": "concurrently -k -n agent,web -c blue,green \"npm:start\" \"npm:dev:web\"",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
+    "install:browser": "node scripts/install-browser.mjs",
     "test:python": "uv run pytest",
     "cli": "tsx src/terminal/main.tsx"
   },
@@ -28,6 +29,7 @@
     "@libsql/client": "0.18.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@playwright/mcp": "0.0.81",
+    "playwright": "1.63.0",
     "dotenv": "16.6.1",
     "highlight.js": "^11.12.0",
     "hono": "4.13.12",
@@ -57,5 +59,9 @@
   "engines": {
     "node": "^22.22.0 || >=24.12.0",
     "npm": ">=10"
+  },
+  "overrides": {
+    "playwright": "$playwright",
+    "playwright-core": "$playwright"
   }
 }

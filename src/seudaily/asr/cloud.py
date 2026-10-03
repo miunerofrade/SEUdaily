@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 from seudaily.cancellation import raise_if_cancelled
 from seudaily.subprocess_utils import hidden_process_options
 from seudaily.ramdisk import TemporaryWorkspace
+from seudaily.vpn import campus_proxy
 
 
 def _timeout(config: dict, name: str, default: float) -> float:
@@ -42,6 +43,11 @@ class MediaWorker:
         self.temp_video_path = str(scratch / "video.mp4")
         command = ["ffmpeg", "-nostdin"]
         if urlsplit(video_url).scheme.lower() in {"http", "https"}:
+            proxy = campus_proxy()
+            host = (urlsplit(video_url).hostname or '').lower()
+            referer_host = (urlsplit(referer_url).hostname or '').lower()
+            if proxy and (host.endswith('.seu.edu.cn') or referer_host == 'cvs.seu.edu.cn'):
+                command.extend(['-http_proxy', proxy])
             command.extend(["-headers", f"Referer: {referer_url}\r\n"])
         command.extend(["-i", video_url])
         if not audio_only:

@@ -131,7 +131,7 @@ def test_cse_site_search_uses_search_form_and_endpoint(monkeypatch, tmp_path: Pa
                 return FakeResponse(search_html)
             return FakeResponse(__import__("json").dumps(result_payload))
 
-    monkeypatch.setattr(jwc_module, "build_opener", lambda *args: FakeOpener())
+    monkeypatch.setattr(jwc_module, "campus_opener", lambda *args: FakeOpener())
     service = CseService(cache_dir=str(tmp_path / "cse"), background_sync=False)
 
     result = service._search_remote("推免名单", None)

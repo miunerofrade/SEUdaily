@@ -3,7 +3,8 @@ export class Composer {
   text = "";
   cursor = 0;
   private serial = 0;
-  private blocks: { start: number; end: number; content: string }[] = [];
+  private blocks: { start: number; end: number; content: string; attachmentId?: string }[] = [];
+  onAttachmentRemoved?: (id: string) => void;
   set(text: string, cursor: number) {
     if (text !== this.text) {
       let start = 0,
@@ -26,6 +27,7 @@ export class Composer {
       const removed = this.blocks.filter(
         (b) => b.start < oldEnd && b.end > start,
       );
+      for (const block of removed) if (block.attachmentId) this.onAttachmentRemoved?.(block.attachmentId);
       const insertion = text.slice(start, newEnd);
       const expandedStart = Math.min(start, ...removed.map((b) => b.start));
       const expandedEnd = Math.max(oldEnd, ...removed.map((b) => b.end));
@@ -81,5 +83,19 @@ export class Composer {
     for (const block of [...this.blocks].reverse())
       text = text.slice(0, block.start) + block.content + text.slice(block.end);
     return text;
+  }
+  attachment(id: string, name: string, kind: '图片' | '文档') {
+    const label = `[${kind}：${name}]`;
+    const start = this.cursor;
+    this.set(this.text.slice(0, start) + label + this.text.slice(start), start + label.length);
+    this.blocks.push({ start, end: start + label.length, content: '', attachmentId: id });
+    this.blocks.sort((a, b) => a.start - b.start);
+  }
+  /** Sending consumes the editor tokens without deleting the pending uploads. */
+  clearAfterSubmit() {
+    this.text = '';
+    this.cursor = 0;
+    this.blocks = [];
+    this.serial = 0;
   }
 }

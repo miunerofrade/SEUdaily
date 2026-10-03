@@ -139,6 +139,11 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
+    if action in {"vpn-status", "vpn-connect", "vpn-disconnect", "vpn-verify"}:
+        from .vpn import manager
+        vpn = manager()
+        state = vpn.status() if action == 'vpn-status' else vpn.connect(payload.get('port')) if action == 'vpn-connect' else vpn.disconnect() if action == 'vpn-disconnect' else vpn.verify(str(payload.get('code', '')))
+        return {'status': 'completed', 'summary': state['message'], 'data': state}
     if action == "reveal-ramdisk":
         from .ramdisk import reveal_ramdisk
         return reveal_ramdisk()

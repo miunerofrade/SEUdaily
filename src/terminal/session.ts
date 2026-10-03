@@ -14,7 +14,9 @@ import { resolve, extname, isAbsolute } from "node:path";
 import { normalizedUsage, type Usage } from "./telemetry.js";
 import { Client, RESOURCE, clean } from "./client.js";
 import { diskSize, settingsForm, semesterForm, focusForm, type Form } from "./management.js";
+import { imageMediaTypes, pastedFilePaths } from './attachments.js';
 export interface Options {
+  vpn?: number;
   command: string;
   cwd?: string;
   resume?: string;
@@ -40,6 +42,7 @@ export const commands: Record<string, string> = {
   notices: "校园通知",
   focus: "关注任务",
   settings: "编辑环境变量和 AGENT.md",
+  vpn: "校园 VPN：connect / disconnect / status / verify",
   ramdisk: "内存盘：/ramdisk 512 MB；status / unmount / reveal",
   semester: "编辑学期名称、日期及总周数",
   skills: "项目 Skill",
@@ -49,7 +52,7 @@ export const commands: Record<string, string> = {
   login: "登录续接 [schedule/ID]",
   apply: "确认本地操作 [ID]",
   mode: "权限 [normal/full/extra]",
-  attach: '添加文档 "路径"',
+  attach: '添加图片或文档 "路径"；也可粘贴文件路径',
   detach: "清空文档",
   thinking: "展开 / 折叠模型思考（Ctrl+T）",
   "copy-on-select": "拖选后自动复制 [on/off]，默认关闭",
@@ -122,6 +125,8 @@ export class Session extends EventEmitter {
   auth = new Map<string, any>();
   actions = new Map<string, any>();
   documents: any[] = [];
+  images: { name: string; ref: string; mediaType: string }[] = [];
+  attachmentLoading = false;
   skills: string[];
   catalog: any[] = [];
   threads: any[] = [];
@@ -243,7 +248,7 @@ export class Session extends EventEmitter {
   }
   private welcome() {
     this.messages.push({ role: "系统", welcome: true,
-      text: "输入消息或 / 查看命令。\n/schedule 与 /programs 打开交互表格。" });
+      text: "输入消息或 / 查看命令。\n粘贴图片或文档文件路径可添加附件，方向键移动，Backspace/Delete 删除。\n/schedule 与 /programs 打开交互表格。" });
     this.changed();
   }
   result(result: any) {
@@ -368,6 +373,7 @@ export class Session extends EventEmitter {
     this.focusTarget = null;
     this.skills = [];
     this.documents = [];
+    this.images = [];
     this.auth.clear();
     this.actions.clear();
     this.pending = (await this.client.json(this.path("run"))).pending;
@@ -412,7 +418,10 @@ export class Session extends EventEmitter {
     const controller = new AbortController();
     this.controller = controller;
     await this.save();
-    if (typeof text === "string") this.show(text, "你");
+    if (typeof text === "string") this.show(text + (!approval && this.images.length ? '\n' + this.images.map(image => `[图片：${image.name}]`).join(' ') : ''), "你");
+    const input = typeof text === 'string' && !approval && this.images.length
+      ? [{ role: 'user', content: [{ type: 'text', text }, ...this.images.map(image => ({ type: 'file', data: `seudaily-image-ref:${image.ref}`, filename: image.name, mimeType: image.mediaType }))] }]
+      : text;
     this.reasoningExpanded = false;
     const message: TerminalMessage = { role: "SEUdaily", text: "", reasoning: "", process: [], streaming: true };
     // Match the Web process sequence: only adjacent deltas of the same kind merge.
@@ -435,7 +444,7 @@ export class Session extends EventEmitter {
       }
       for await (const event of this.client.stream(
         {
-          messages: text,
+          messages: input,
           memory: { thread: this.threadId, resource: this.resource },
           requestContext: {
             seudailyRunToken: this.runToken,
@@ -498,6 +507,7 @@ export class Session extends EventEmitter {
         this.changed();
       }
       this.documents = [];
+      this.images = [];
       if (!code && message.text.trim() && typeof text === "string")
         this.nameThread(titleThreadId, titleResourceId, text);
       return code;
@@ -622,6 +632,19 @@ export class Session extends EventEmitter {
       this.page = "chat";
       this.changed();
     }
+    if (name === 'vpn') {
+      const action = args[0] ?? 'status';
+      if (!['connect', 'disconnect', 'status', 'verify'].includes(action) || args.length > (action === 'connect' ? 2 : 1)) throw new Error('/vpn connect [端口]；或 disconnect / status / verify');
+      if (action === 'verify') {
+        this.openForm({ title: 'VPN 额外验证', fields: [{ key: 'code', label: '验证码', value: '', secret: true }], save: async values => {
+          this.result(await this.client.json('/app/vpn', 'POST', { action: 'verify', code: values.code })); this.show('已提交 VPN 验证');
+        } }); return;
+      }
+      const result = await this.client.json('/app/vpn', action === 'status' ? 'GET' : 'POST', action === 'status' ? undefined : { action, ...(args[1] ? { port: Number(args[1]) } : {}) });
+      if (action !== 'status') this.result(result);
+      const state = result.data ?? result;
+      this.show(`${state.message}${state.state === 'connected' && state.httpProxy ? ` · HTTP 代理 ${state.httpProxy}` : ''}`); return;
+    }
     if (name === 'settings') { this.openForm(await settingsForm(this)); return; }
     if (name === 'semester') { await this.loadSchedule(); this.openForm(semesterForm(this)); return; }
     if (name === 'ramdisk') {
@@ -672,6 +695,7 @@ export class Session extends EventEmitter {
       this.auth.clear();
       this.actions.clear();
       this.documents = [];
+      this.images = [];
       this.skills = [];
       this.reasoningExpanded = false;
       this.messages = [];
@@ -886,44 +910,74 @@ export class Session extends EventEmitter {
       return;
     }
     if (name === "attach") {
-      if (args.length !== 1 || this.documents.length >= 4)
-        throw new Error('/attach "文档路径"，最多 4 个');
-      const given = args[0].replace(/^~(?=$|[\\/])/, homedir());
-      const path = isAbsolute(given) ? given : resolve(this.root, given);
-      const info = await stat(path);
-      if (
-        !info.isFile() ||
-        !info.size ||
-        info.size > 50 * 1024 * 1024 ||
-        ![".pdf", ".docx", ".xlsx", ".pptx"].includes(
-          extname(path).toLowerCase(),
-        )
-      )
-        throw new Error("支持不超过 50 MB 的 PDF/DOCX/XLSX/PPTX");
-      const form = new FormData();
-      form.set(
-        "file",
-        new Blob([await readFile(path)]),
-        path.split(/[\\/]/).at(-1)!,
-      );
-      const result = await (
-        await this.client.request("/app/documents", {
-          method: "POST",
-          body: form,
-        })
-      ).json();
-      this.documents.push(result);
-      this.show("已添加 " + args[0]);
+      if (args.length !== 1) throw new Error('/attach "图片或文档路径"，最多 4 个附件');
+      const attachment = await this.attachFile(args[0]);
+      this.show('已添加 ' + attachment.name);
       return;
     }
     if (name === "detach") {
       this.documents = [];
+      this.images = [];
       this.show("已清空附件");
       return;
     }
     throw new Error("未知命令；/help 查看命令。");
   }
+  async attachFile(givenPath: string) {
+    if (this.attachmentLoading) throw new Error('正在添加附件，请稍候');
+    if (this.documents.length + this.images.length >= 4) throw new Error('每轮最多 4 个附件，请删除不需要的附件');
+    const given = givenPath.replace(/^~(?=$|[\\/])/, homedir());
+    const path = isAbsolute(given) ? given : resolve(this.root, given);
+    const extension = extname(path).toLowerCase();
+    const mediaType = imageMediaTypes[extension];
+    if (!mediaType && !['.pdf', '.docx', '.xlsx', '.pptx'].includes(extension))
+      throw new Error('支持 PNG/JPEG/WebP/GIF 图片和 PDF/DOCX/XLSX/PPTX 文档；暂不支持此格式');
+    this.attachmentLoading = true;
+    this.changed();
+    try {
+      const info = await stat(path);
+      const limit = (mediaType ? 10 : 50) * 1024 * 1024;
+      if (!info.isFile() || !info.size || info.size > limit)
+        throw new Error(mediaType ? '图片须为 10 MB 以内的非空文件' : '文档须为 50 MB 以内的非空文件');
+      const name = path.split(/[\\/]/).at(-1)!;
+      const bytes = await readFile(path);
+      if (mediaType) {
+        const image = await this.client.json('/app/images', 'POST', { name, dataUrl: `data:${mediaType};base64,${bytes.toString('base64')}` });
+        this.images.push(image);
+        return { id: image.ref as string, name, kind: '图片' as const };
+      } else {
+        const form = new FormData();
+        form.set('file', new Blob([bytes]), name);
+        const document = await (await this.client.request('/app/documents', { method: 'POST', body: form })).json();
+        this.documents.push(document);
+        return { id: document.contextRef as string, name, kind: '文档' as const };
+      }
+    } finally {
+      this.attachmentLoading = false;
+      this.changed();
+    }
+  }
+  removeAttachment(id: string) {
+    this.images = this.images.filter(image => image.ref !== id);
+    this.documents = this.documents.filter(document => document.contextRef !== id);
+    this.changed();
+  }
+  async attachPastedFiles(text: string) {
+    const paths = await pastedFilePaths(text, this.root);
+    if (!paths) return null;
+    if (this.busy) throw new Error('当前任务正在运行，请完成后再添加附件');
+    if (paths.length + this.documents.length + this.images.length > 4) throw new Error('每轮最多 4 个附件，请删除不需要的附件');
+    const added = [];
+    try {
+      for (const path of paths) added.push(await this.attachFile(path));
+      return added;
+    } catch (error) {
+      for (const attachment of added) this.removeAttachment(attachment.id);
+      throw error;
+    }
+  }
   async submit(text: string): Promise<number> {
+    if (this.attachmentLoading) throw new Error('附件仍在上传，请稍候再发送');
     if (text === "/cancel") {
       await this.cancel();
       return 0;

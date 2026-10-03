@@ -28,11 +28,12 @@ function parse(): Options {
       "no-color": { type: "boolean" },
       "no-start": { type: "boolean" },
       vi: { type: "boolean" },
+      vpn: { type: "string" },
     },
   });
   if (v.help) {
     console.log(
-      "SEUdaily Ink CLI\nchat | exec [问题] | sessions | skills\n-c, --chat  -p, --prompt 问题  -r, --resume [ID]\n--skill NAME  --timeout SECONDS  --cwd PATH\n--json  -q, --quiet  -v, --verbose  --no-color  --vi\n-h, --help  -V, --version\n通过 uv run seudaily 自动管理后端；npm run cli 连接已有后端。",
+      "SEUdaily Ink CLI\nchat | exec [问题] | sessions | skills\n-c, --chat  -p, --prompt 问题  -r, --resume [ID]\n--vpn PORT  仅运行校园 VPN，使用保存的账号密码\n--skill NAME  --timeout SECONDS  --cwd PATH\n--json  -q, --quiet  -v, --verbose  --no-color  --vi\n-h, --help  -V, --version\n通过 uv run seudaily 自动管理后端；npm run cli 连接已有后端。",
     );
     process.exit(0);
   }
@@ -44,6 +45,14 @@ function parse(): Options {
         ).version,
     );
     process.exit(0);
+  }
+  if (v.vpn !== undefined) {
+    if (p.length || v.chat || v.prompt || v.json || v.resume)
+      throw new Error('--vpn 是独立运行模式，不能与聊天或其他子命令一起使用');
+    const vpn = Number(v.vpn);
+    if (!Number.isInteger(vpn) || vpn < 1024 || vpn > 65535)
+      throw new Error('--vpn 端口应为 1024–65535');
+    return { command: 'vpn', vpn, cwd: v.cwd };
   }
   const command = p.shift() ?? (v.prompt ? "exec" : "chat");
   if (!["chat", "exec", "sessions", "skills"].includes(command))
@@ -77,6 +86,10 @@ const root = resolve(
 if (options.no_color || process.env.NO_COLOR) process.env.FORCE_COLOR = "0";
 const session = new Session(options, root);
 async function main() {
+  if (options.command === 'vpn') {
+    const { runVpn } = await import('./vpn.js');
+    return runVpn(options.vpn!, root);
+  }
   await session.initialize();
   if (options.command === "chat") {
     if (!process.stdin.isTTY || !process.stdout.isTTY)

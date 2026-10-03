@@ -16,3 +16,9 @@ test('MCP browser config selects the platform family without Chromium options on
   assert.equal(playwrightBrowserConfig('darwin', 'firefox').browser.browserName, 'firefox');
   assert.throws(() => playwrightBrowserConfig('darwin', 'not-a-browser'));
 });
+
+test('MCP campus proxy is scoped to browser contexts', () => {
+  const config = playwrightBrowserConfig('darwin', 'auto', 'http://127.0.0.1:11081');
+  assert.equal(config.browser.contextOptions.proxy.server, 'http://127.0.0.1:11081');
+  assert.equal(playwrightBrowserConfig('darwin').browser.contextOptions.proxy, undefined);
+});

@@ -10,6 +10,34 @@ import pytest
 from seudaily import launcher
 
 
+def test_vpn_option_accepts_port_without_chat():
+    args = launcher.build_parser().parse_args(['--vpn', '12081'])
+    assert args.vpn == 12081
+    assert args.command is None
+
+
+def test_standalone_vpn_missing_credentials_never_starts_core(monkeypatch):
+    from seudaily import vpn
+    monkeypatch.setattr(vpn, 'env_value', lambda *_: '')
+    monkeypatch.setattr(vpn, 'manager', lambda: pytest.fail('VPN must not start without credentials'))
+    with pytest.raises(RuntimeError, match='缺少校园账号或密码'):
+        vpn.run_standalone(12081)
+
+
+def test_standalone_vpn_interrupt_stops_owned_core(monkeypatch):
+    from unittest.mock import MagicMock
+    from seudaily import vpn
+    monkeypatch.setattr(vpn, 'env_value', lambda *_: 'test-credential')
+    monkeypatch.setattr(vpn, 'campus_proxy', lambda: None)
+    monkeypatch.setattr(vpn.socket, 'socket', MagicMock())
+    owned = MagicMock()
+    owned.status.side_effect = KeyboardInterrupt
+    monkeypatch.setattr(vpn, 'manager', lambda: owned)
+    assert vpn.run_standalone(12081) == 130
+    owned.connect.assert_called_once_with(12081)
+    owned.disconnect.assert_called_once()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process group shutdown")
 def test_stop_waits_for_and_cleans_children_after_session_leader_exits(monkeypatch):
     child_code = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"

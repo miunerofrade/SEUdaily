@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import tempfile
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -377,7 +378,7 @@ def test_read_confirmed_attachment_uses_temp_and_cleans_up(
         )
         return real_parse_document(path, filename)
 
-    monkeypatch.setattr(jwc_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(jwc_module, "campus_opener", lambda: SimpleNamespace(open=fake_urlopen))
     monkeypatch.setattr(jwc_module, "parse_document", tracking_parse)
 
     result = service.read_attachment(article_id)
@@ -443,8 +444,8 @@ def test_read_attachment_directly_from_notice_url(
     }
     monkeypatch.setattr(
         jwc_module,
-        "urlopen",
-        lambda request, timeout: _FakeDownload(pdf_bytes, attachment_url),
+        "campus_opener",
+        lambda: SimpleNamespace(open=lambda request, timeout: _FakeDownload(pdf_bytes, attachment_url)),
     )
 
     result = service.read_attachment(notice_url=article_url)

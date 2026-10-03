@@ -6,6 +6,10 @@ import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
+import { z } from 'zod';
+const diskSource = await fs.readFile(new URL('../src/shared/disk-size.ts', import.meta.url), 'utf8');
+const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const { diskSize } = await import(`data:text/javascript;base64,${Buffer.from(diskCompiled).toString('base64')}`);
 
 // Exercise the actual route helpers without initializing agents or API clients.
 const source = await fs.readFile(new URL('../src/runtime/app-routes.ts', import.meta.url), 'utf8');
@@ -20,10 +24,13 @@ const compiled = ts.transpileModule(declarations, { compilerOptions: { target: t
 async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
-  const context = vm.createContext({ ...fs, ...path, randomUUID, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
+  const calls = [];
+  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize,
+    runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
+    resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
   vm.runInContext(`${compiled}\nglobalThis.helpers = { safeLibraryTarget, walkFiles, updateEnvFile, routes: exports.appRoutes };`, context);
   await fs.mkdir(path.join(projectRoot, 'exports'));
-  return { projectRoot, context, ...context.helpers };
+  return { projectRoot, context, calls, ...context.helpers };
 }
 
 test('library preview and listing reject file and directory symlink escapes', async (t) => {
@@ -93,4 +100,17 @@ test('failed env persistence does not change process config or poison subsequent
   await fs.rmdir(env);
   await f.updateEnvFile({ SEUDAILY_TEST_RECOVERED: 'fixture' });
   assert.equal(await fs.readFile(env, 'utf8'), 'SEUDAILY_TEST_RECOVERED=fixture\n');
+});
+
+test('VPN controls use the worker and RAMdisk accepts custom capacity', async (t) => {
+  const f = await fixture(t);
+  const json = (body) => body;
+  const vpn = f.routes.find(route => route.route === '/app/vpn' && route.method === 'POST');
+  const response = await vpn.handler({ req: { json: async () => ({ action: 'connect', port: 12081 }) }, json });
+  assert.equal(response.data.state, 'connected');
+  assert.equal(f.calls[0].action, 'vpn-connect');
+  assert.equal(f.calls[0].payload.port, 12081);
+  const ramdisk = f.routes.find(route => route.route === '/app/ramdisk' && route.method === 'POST');
+  await ramdisk.handler({ req: { json: async () => ({ action: 'mount', size: '1.5 GB' }) }, json });
+  assert.equal(f.calls[1].payload.size, '1536M');
 });
