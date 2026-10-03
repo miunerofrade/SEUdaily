@@ -89,6 +89,8 @@ export function messageLines(
     append(spans);
   }
   if (message.role === "你") {
+    lines.unshift([{ text: " " }]);
+    lines.push([{ text: " " }]);
     for (const row of lines) {
       for (const span of row) span.user = true;
       const size = stringWidth(row.map((span) => span.text).join(""));
