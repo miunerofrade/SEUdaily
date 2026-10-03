@@ -1,3 +1,4 @@
+import { prepareTerminalInput, terminalKeyboard } from "./keyboard.js";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
@@ -81,18 +82,23 @@ async function main() {
       import("./app.js"),
       import("react"),
     ]);
-    const instance = render(React.createElement(App, { session }), {
-      alternateScreen: true,
-      exitOnCtrlC: false,
-      maxFps: 60,
-      kittyKeyboard: { mode: "auto", flags: ["disambiguateEscapeCodes", "reportAllKeysAsEscapeCodes", "reportEventTypes"] },
-    });
-    if (options.prompt)
-      void session
-        .submit(options.prompt)
-        .catch((e) => session.show(e.message, "错误"));
-    await instance.waitUntilExit();
-    await session.cancel();
+    const restoreInput = prepareTerminalInput(process.stdin);
+    try {
+      const instance = render(React.createElement(App, { session }), {
+        alternateScreen: true,
+        exitOnCtrlC: false,
+        maxFps: 60,
+        kittyKeyboard: terminalKeyboard(),
+      });
+      if (options.prompt)
+        void session
+          .submit(options.prompt)
+          .catch((e) => session.show(e.message, "错误"));
+      await instance.waitUntilExit();
+      await session.cancel();
+    } finally {
+      restoreInput();
+    }
     return 0;
   }
   if (options.command === "sessions" || options.command === "skills") {

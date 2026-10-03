@@ -36,3 +36,18 @@ export class TerminalReplyFilter {
     return false;
   }
 }
+
+/** Disable terminal echo before Ink's constructor sends any capability queries. */
+export function prepareTerminalInput(stdin: NodeJS.ReadStream): () => void {
+  const wasRaw = stdin.isRaw ?? false;
+  stdin.setRawMode(true);
+  return () => { if (!stdin.destroyed) stdin.setRawMode(wasRaw); };
+}
+
+export function terminalKeyboard(env: NodeJS.ProcessEnv = process.env): import("ink").KittyKeyboardOptions {
+  // Terminal.app does not implement kitty keyboard reporting. Avoid querying it at all.
+  return env.TERM_PROGRAM === "Apple_Terminal" ? { mode: "disabled" } : {
+    mode: "auto",
+    flags: ["disambiguateEscapeCodes", "reportAllKeysAsEscapeCodes", "reportEventTypes"],
+  };
+}
