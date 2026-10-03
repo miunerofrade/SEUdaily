@@ -1317,7 +1317,7 @@ export default function App() {
           <button type="submit" className="send-button" disabled={uploadingDocuments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
         )}
       </div>
-      <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>
+      {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
       {!!active.messages.length && <div className="composer-hint"><span>Enter 发送 · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
     </form>
   );
