@@ -165,15 +165,22 @@ export function App({ session, copy = copySelection }: {
     !session.pending &&
     !session.confirmation;
   const reasoningRef = useRef<DOMElement | null>(null);
+  const transcriptRef = useRef<DOMElement | null>(null);
+  const [selectedReasoning, setSelectedReasoning] = useState<string | null>(null);
+  const [reasoningOffset, setReasoningOffset] = useState<number | null>(null);
+  useEffect(() => { setSelectedReasoning(null); setReasoningOffset(null); }, [session.runToken, session.threadId]);
   const latestAnswer = [...messages].reverse().find(message => message.role === "SEUdaily");
-  const activeReasoning = [...(latestAnswer?.process ?? [])].reverse().find(part => part.type === "reasoning")?.text
-    ?? latestAnswer?.reasoning ?? "";
+  const activeReasoning = selectedReasoning ?? ([...(latestAnswer?.process ?? [])].reverse().find(part => part.type === "reasoning")?.text
+    ?? latestAnswer?.reasoning ?? "");
   const reasoningLines = wrap(activeReasoning, Math.max(1, width - 20));
   const reasoningCapacity = Math.min(8, Math.max(1, Math.floor(rows / 3)));
+  const reasoningMaxOffset = Math.max(0, reasoningLines.length - reasoningCapacity);
+  const reasoningTop = Math.min(reasoningMaxOffset, reasoningOffset ?? reasoningMaxOffset);
   const showReasoning = page === "chat" && !session.pending &&
     !session.confirmation && (showThinking || (session.reasoningExpanded && !!activeReasoning));
   const reasoningHeight = showReasoning ? 1 + (session.reasoningExpanded ? Math.min(reasoningCapacity, reasoningLines.length) : 0) : 0;
   const toggleReasoning = () => {
+    setReasoningOffset(session.busy ? null : 0);
     session.reasoningExpanded = !session.reasoningExpanded;
     session.changed();
   };
@@ -433,6 +440,10 @@ export function App({ session, copy = copySelection }: {
       return;
     }
     if (modal === "resume") { resumePicker.current?.scroll(amount); return; }
+    if (session.reasoningExpanded && inReasoning(x, y)) {
+      setReasoningOffset(current => Math.max(0, Math.min(reasoningMaxOffset, (current ?? reasoningMaxOffset) + amount)));
+      return;
+    }
     if (decisions) {
       setDecisionOffset((current) =>
         Math.max(0, Math.min(decisionMaxOffset, current + amount)),
@@ -473,7 +484,19 @@ export function App({ session, copy = copySelection }: {
     if (modal === "resume") { resumePicker.current?.click(x, y); return; }
     if (modal || detail || decisions) return;
     if (page === "chat") {
-      if (inReasoning(x, y)) toggleReasoning();
+      if (inReasoning(x, y)) { toggleReasoning(); return; }
+      if (transcriptRef.current) {
+        const box = measureElement(transcriptRef.current);
+        const line = displayLines[top + y - box.y];
+        const marker = line?.[0];
+        if (y >= box.y && y < box.y + box.height && x >= box.x &&
+          x < box.x + stringWidth(marker?.text ?? "") && marker?.reasoningText !== undefined) {
+          setSelectedReasoning(marker.reasoningText);
+          setReasoningOffset(0);
+          session.reasoningExpanded = true;
+          session.changed();
+        }
+      }
       return;
     }
     for (let index = 0; index < fields.current.length; index++) {
@@ -1080,6 +1103,7 @@ export function App({ session, copy = copySelection }: {
   return (
     <Box ref={rootRef} width={columns} height={rows} flexDirection="column" paddingX={1}>
       <Box
+        ref={transcriptRef}
         flexDirection="column"
         height={height}
         flexShrink={0}
@@ -1365,7 +1389,7 @@ export function App({ session, copy = copySelection }: {
               {session.reasoningExpanded ? "点击折叠 · Ctrl+T" : `${reasoningLines.at(-1) || "等待模型返回思考内容"} · Ctrl+T 展开`}
             </Text>
           </Box>
-          {session.reasoningExpanded && reasoningLines.slice(-reasoningCapacity).map((line, index) => (
+          {session.reasoningExpanded && reasoningLines.slice(reasoningTop, reasoningTop + reasoningCapacity).map((line, index) => (
             <Text key={index} color={color.muted}>{line}</Text>
           ))}
         </Box>

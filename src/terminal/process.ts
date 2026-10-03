@@ -15,7 +15,7 @@ export function processLines(message: TerminalMessage, width: number, expanded: 
     if (part.type === "text") return part.text ? messageLines({ role: "SEUdaily", text: part.text }, width) : [];
     if (part.type === "tool") return messageLines({ role: "SEUdaily", text: part.text }, width)
       .map(line => line.map(span => ({ ...span, muted: true })));
-    return [[{ text: "▸ 思考", muted: true }], [{ text: " " }]];
+    return [[{ text: "＋ 思考 · 点击或 Ctrl+T 展开", muted: true, reasoningText: part.text }], [{ text: " " }]];
   });
   cache.set(message, { key, lines });
   return lines;
