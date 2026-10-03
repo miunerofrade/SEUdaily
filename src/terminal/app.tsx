@@ -518,11 +518,15 @@ export function App({ session, copy = copySelection }: {
       for (const [cellIndex, cell] of gridCells.current.entries()) {
         if (!cell?.element) continue;
         const box = measureElement(cell.element);
+        const period = Math.floor(cellIndex / 7) + 1;
+        const nextItems = filteredCourses.filter((course: any) => course.weekday === cellIndex % 7 + 1 &&
+          course.startPeriod <= period + 1 && course.endPeriod >= period + 1);
+        const mergedBelow = cell.items.length === 1 && nextItems.length === 1 && cell.items[0] === nextItems[0];
         if (
           x >= box.x &&
           x < box.x + box.width &&
           y >= box.y &&
-          y < box.y + box.height &&
+          y < box.y + box.height + (mergedBelow ? 1 : 0) &&
           cell.items.length
         ) {
           setGridSelection({ day: cellIndex % 7, period: Math.floor(cellIndex / 7) + 1 });
@@ -553,12 +557,15 @@ export function App({ session, copy = copySelection }: {
       }
     }
   };
+  const textSelectionEnabled = useRef(page === "chat");
+  textSelectionEnabled.current = page === "chat";
   const copyRef = useRef(copyCurrent);
   copyRef.current = copyCurrent;
   useEffect(() => {
     restoreTextInput(stdout);
     stdout.write("\x1b[?1002h\x1b[?1006h");
     let pending = "";
+    let uiPress: { x: number; y: number } | null = null;
     const handler = (data: Buffer | string) => {
       pending += String(data);
       const events = [...pending.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/g)];
@@ -577,6 +584,16 @@ export function App({ session, copy = copySelection }: {
         else {
           const point = { x: Math.max(0, Number(event[2]) - 1), y: Math.max(0, Number(event[3]) - 1) };
           if ((button & 3) !== 0) continue;
+          if (!textSelectionEnabled.current) {
+            if (!(button & 32) && event[4] === "M") uiPress = point;
+            else if (event[4] === "m" && uiPress) {
+              const target = uiPress;
+              uiPress = null;
+              clickRef.current(target.x, target.y);
+            }
+            continue;
+          }
+          uiPress = null;
           if ((button & 32) && event[4] === "M") {
             const current = selectionRef.current;
             if (!current) continue;
