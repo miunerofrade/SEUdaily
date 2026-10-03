@@ -107,7 +107,7 @@ export class Session extends EventEmitter {
   resource = RESOURCE;
   runToken = "";
   model = "—";
-  effort = "默认";
+  effort = "high";
   usage: Usage = {};
   usageByRun = new Map<string, Usage>();
   pending: any = null;
@@ -203,7 +203,7 @@ export class Session extends EventEmitter {
     this.catalog = (await this.client.json("/app/skills")).skills;
     const info = await this.client.json("/app/agent-info").catch(() => ({}));
     this.model = typeof info.model === "string" ? clean(info.model) : "—";
-    this.effort = typeof info.effort === "string" ? clean(info.effort) : "默认";
+    this.effort = typeof info.effort === "string" ? clean(info.effort) : "high";
     for (const skill of this.skills)
       if (!this.catalog.some((s) => s.name === skill))
         throw new Error(`Skill 不存在：${skill}`);

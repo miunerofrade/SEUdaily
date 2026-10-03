@@ -28,6 +28,7 @@ import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
 import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
+import { InterruptHold, TerminalReplyFilter } from "./keyboard.js";
 import { copySelection } from "./clipboard.js";
 
 const color = {
@@ -95,6 +96,8 @@ export function App({ session, copy = copySelection }: {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [copyNotice, setCopyNotice] = useState("");
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interruptHold = useRef(new InterruptHold());
+  const terminalReplies = useRef(new TerminalReplyFilter());
   const clearSelection = () => {
     selectionRef.current = null;
     setSelection(null);
@@ -625,7 +628,23 @@ export function App({ session, copy = copySelection }: {
   });
   useInput((value, key) => {
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
-    if ((key.ctrl || (process.platform === "darwin" && key.super)) && value.toLowerCase() === "c" && selectionRef.current?.moved) {
+    if (terminalReplies.current.consume(value)) return;
+    if (key.eventType === "release") {
+      if (key.ctrl && value.toLowerCase() === "c") interruptHold.current.reset();
+      return;
+    }
+    const interrupt = () => {
+      const action = interruptHold.current.press();
+      if (action === "exit") { cancel(); exit(); return; }
+      if (action === "repeat") return;
+      if (selectionRef.current?.moved) copyCurrent();
+      else if (busy) cancel();
+      else { edit("", 0); setModal(null); setDetail(null); }
+    };
+    if (key.ctrl && value.toLowerCase() === "c") { interrupt(); return; }
+    if (/^\x03+$/.test(value)) { for (const _ of value) interrupt(); return; }
+    interruptHold.current.reset();
+    if (process.platform === "darwin" && key.super && value.toLowerCase() === "c" && selectionRef.current?.moved) {
       copyCurrent();
       return;
     }
@@ -638,23 +657,8 @@ export function App({ session, copy = copySelection }: {
       return;
     }
     if (key.ctrl && value === "d") {
-      if (editor.current.text && !decisions) {
-        const { text, cursor } = editor.current;
-        const length = [...text.slice(cursor)][0]?.length ?? 0;
-        edit(text.slice(0, cursor) + text.slice(cursor + length), cursor);
-        return;
-      }
       cancel();
       exit();
-      return;
-    }
-    if (key.ctrl && value === "c") {
-      if (busy) cancel();
-      else {
-        edit("", 0);
-        setModal(null);
-        setDetail(null);
-      }
       return;
     }
     if (key.escape) {
