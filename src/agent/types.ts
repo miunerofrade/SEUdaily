@@ -32,6 +32,10 @@ export type TurnContext = {
     namespaces?: string[];
     documentRefs?: string[];
     authResumeId?: string;
+    parentMessageId?: string | null;
+    userMessageId?: string;
+    assistantMessageId?: string;
+    regenerateFrom?: string;
     skills?: string[];
     interface?: 'web' | 'cli';
     capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
@@ -44,6 +48,7 @@ export type StoredMessage = {
     createdAt: string;
     content: {
         content?: string;
+        parentId?: string | null;
         parts: ContentPart[];
         modelMessages?: ModelMessage[];
         runToken?: string;

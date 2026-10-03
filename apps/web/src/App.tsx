@@ -1,3 +1,4 @@
+import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
 import {
   ArrowUp,
@@ -579,12 +580,13 @@ function MessageAuthRequests({ tools, disabled, onAuth }: { tools: ToolRun[]; di
   })}</div>{error && <div className="message-action-request-error">{error}</div>}</section>;
 }
 
-function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval, onActionRequest, onAuthRequest }: {
+function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval, onActionRequest, onAuthRequest, onBranch }: {
   message: ChatMessage;
   canRegenerate?: boolean;
   disabled?: boolean;
   onEdit?: (message: ChatMessage, content: string) => void;
   onRegenerate?: (message: ChatMessage) => void;
+  onBranch?: (message: ChatMessage) => void;
   onPreviewImage?: (image: ImageAttachment) => void;
   onApproval?: (tool: ToolRun, approved: boolean) => void;
   onActionRequest?: (request: AgentActionRequest) => Promise<void>;
@@ -632,7 +634,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
         {!message.streaming && !message.error && <MessageSources tools={message.tools ?? []} />}
-        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}</div>}
+        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}>⑂</button>}</div>}
       </div>
     </article>
   );
@@ -678,6 +680,7 @@ export default function App() {
   const [fullAccessExtra, setFullAccessExtra] = useState(false);
   const [permissionSaving, setPermissionSaving] = useState(false);
   const [permissionError, setPermissionError] = useState("");
+  const [conversationError, setConversationError] = useState("");
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const panelToggleRef = useRef<HTMLButtonElement>(null);
@@ -707,7 +710,8 @@ export default function App() {
     return () => window.removeEventListener("resize", updateOrigin);
   }, [rightOpen, view]);
 
-  const active = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const activeRaw = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  const active = { ...activeRaw, messages: conversationPath(activeRaw.messages, activeRaw.activeLeaf).filter(message => !message.hidden) };
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
   const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
   const recentConversations = useMemo(() => [
@@ -717,7 +721,6 @@ export default function App() {
   const allTools = useMemo(() => active.messages.flatMap((message) => message.tools ?? []).reverse(), [active.messages]);
   const allArtifacts = useMemo(() => allTools.flatMap((tool) => tool.result?.artifacts ?? []), [allTools]);
   const allCitations = useMemo(() => allTools.flatMap((tool) => tool.result?.citations ?? []), [allTools]);
-  const lastAssistantId = [...active.messages].reverse().find((message) => message.role === "assistant")?.id;
 
   useLayoutEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -1027,7 +1030,7 @@ export default function App() {
     }
   }
 
-  async function executeStream(conversationId: string, assistantId: string, input: AgentInput, documents: DocumentAttachment[] = [], authResumeId?: string, existingRunToken?: string, skills: string[] = []) {
+  async function executeStream(conversationId: string, assistantId: string, input: AgentInput, documents: DocumentAttachment[] = [], authResumeId?: string, existingRunToken?: string, skills: string[] = [], graph: { parentMessageId?: string | null; userMessageId?: string; regenerateFrom?: string } = {}) {
     setSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1042,6 +1045,9 @@ export default function App() {
         threadId: conversationId,
         documents,
         skills,
+        ...graph,
+        assistantMessageId: graph.userMessageId || graph.regenerateFrom ? assistantId : undefined,
+        resourceId: active.resourceId,
         authResumeId,
         runToken,
         signal: controller.signal,
@@ -1129,8 +1135,8 @@ export default function App() {
     const attachments = options.preserveComposer ? [] : pendingImages;
     const documents = options.preserveComposer ? [] : pendingDocuments;
     const modelContent = packageDocumentContent(effectivePrompt, documents);
-    const userMessage: ChatMessage = { id: uid(), role: "user", content: options.displayText ?? text, modelContent, createdAt: now, attachments, documents };
-    const assistantMessage: ChatMessage = { id: assistantId, role: "assistant", content: "", createdAt: now, tools: [], streaming: true };
+    const userMessage: ChatMessage = { id: uid(), parentId: active.messages.at(-1)?.id ?? null, role: "user", content: options.displayText ?? text, modelContent, createdAt: now, attachments, documents };
+    const assistantMessage: ChatMessage = { id: assistantId, parentId: userMessage.id, role: "assistant", content: "", createdAt: now, tools: [], streaming: true };
     if (!options.preserveComposer) {
       setDraft("");
       setSelectedSkill(null);
@@ -1142,9 +1148,9 @@ export default function App() {
       ...conversation,
       title: conversation.messages.length ? conversation.title : titleFromPrompt(documents[0]?.name || text || "图片对话"),
       updatedAt: now,
-      messages: [...conversation.messages, userMessage, assistantMessage],
+      messages: [...withParents(conversation.messages), userMessage, assistantMessage], activeLeaf: assistantId,
     } : conversation));
-    const assistantText = await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent, [], undefined, undefined, !options.preserveComposer && selectedSkill ? [selectedSkill] : []);
+    const assistantText = await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent, [], undefined, undefined, !options.preserveComposer && selectedSkill ? [selectedSkill] : [], {parentMessageId: userMessage.parentId, userMessageId: userMessage.id});
     if (firstTurn && assistantText.trim()) {
       const titleInput = documents[0]?.name || text || attachments[0]?.name || "新对话";
       void generateConversationTitle({ threadId: conversationId, resourceId: active.resourceId, titleInput })
@@ -1165,50 +1171,64 @@ export default function App() {
 
   async function handleAgentAuthRequest(request: AgentAuthRequest) {
     const resumed = await executeAgentAuthRequest(request.id);
-    const conversationId = active.id;
-    const assistantId = uid();
-    const now = Date.now();
-    setConversations((current) => current.map((conversation) => conversation.id === conversationId ? {
-      ...conversation,
-      updatedAt: now,
-      messages: [...conversation.messages, { id: assistantId, role: "assistant", content: "", createdAt: now, tools: [], streaming: true }],
-    } : conversation));
-    await executeStream(conversationId, assistantId, `[SEUDAILY_AUTH_RESUME id=${resumed.resumeId}] 登录已完成，请继续完成被中断的原任务。`, [], resumed.resumeId);
+    const conversationId=active.id,now=Date.now();
+    const user:ChatMessage={id:uid(),parentId:active.messages.at(-1)?.id ?? null,role:'user',hidden:true,content:`[SEUDAILY_AUTH_RESUME id=${resumed.resumeId}] 登录已完成，请继续完成被中断的原任务。`,createdAt:now};
+    const assistant:ChatMessage={id:uid(),parentId:user.id,role:'assistant',content:'',createdAt:now,tools:[],streaming:true};
+    setConversations(current=>current.map(conversation=>conversation.id===conversationId?{...conversation,updatedAt:now,activeLeaf:assistant.id,messages:[...withParents(conversation.messages),user,assistant]}:conversation));
+    await executeStream(conversationId,assistant.id,user.content,[],resumed.resumeId,undefined,[],{parentMessageId:user.parentId,userMessageId:user.id});
   }
 
   async function editPrompt(message: ChatMessage, content: string) {
     if (sending) return;
-    const index = active.messages.findIndex((item) => item.id === message.id);
-    if (index < 0) return;
-    const now = Date.now();
-    const branch = createConversation();
-    const editedUser: ChatMessage = { id: uid(), role: "user", content, createdAt: now };
-    const assistant: ChatMessage = { id: uid(), role: "assistant", content: "", createdAt: now, tools: [], streaming: true };
-    const prefix = active.messages.slice(0, index).filter((item) => !item.streaming && !item.error);
-    const messages = [...prefix, editedUser, assistant];
-    const next: Conversation = { ...branch, title: titleFromPrompt(content), updatedAt: now, messages };
-    setConversations((current) => [next, ...current]);
-    setActiveId(next.id);
-    setNavOpen(false);
-    const input = [...prefix, editedUser].map((item) => ({ role: item.role, content: messageContent(item) }));
-    await executeStream(next.id, assistant.id, input);
+    const original = withParents(activeRaw.messages).find(item => item.id === message.id);
+    if (!original) return;
+    const now = Date.now(), editedUser: ChatMessage = { ...original, id: uid(), content, modelContent: packageDocumentContent(content, original.documents ?? []), createdAt: now };
+    const assistant: ChatMessage = { id: uid(), parentId: editedUser.id, role: 'assistant', content: '', createdAt: now, tools: [], streaming: true };
+    setConversations(current => current.map(conversation => conversation.id === active.id ? {
+      ...conversation, updatedAt: now, activeLeaf: assistant.id, messages: [...withParents(conversation.messages), editedUser, assistant],
+    } : conversation));
+    await executeStream(active.id, assistant.id, [{role:'user',content:messageContent(editedUser)}], editedUser.documents ?? [], undefined, undefined, [], {parentMessageId: editedUser.parentId, userMessageId: editedUser.id});
   }
 
   async function regenerate(message: ChatMessage) {
     if (sending) return;
-    const index = active.messages.findIndex((item) => item.id === message.id);
-    if (index < 1) return;
-    const prefix = active.messages.slice(0, index).filter((item) => !item.streaming && !item.error);
-    const prompt = [...prefix].reverse().find((item) => item.role === "user")?.content;
-    if (!prompt) return;
-    const now = Date.now();
-    const branch = createConversation();
-    const assistant: ChatMessage = { id: uid(), role: "assistant", content: "", createdAt: now, tools: [], streaming: true };
-    const next: Conversation = { ...branch, title: active.title, updatedAt: now, messages: [...prefix, assistant] };
-    setConversations((current) => [next, ...current]);
-    setActiveId(next.id);
-    const input = prefix.map((item) => ({ role: item.role, content: messageContent(item) }));
-    await executeStream(next.id, assistant.id, input);
+    const original = withParents(activeRaw.messages).find(item => item.id === message.id);
+    const user = activeRaw.messages.find(item => item.id === original?.parentId && item.role === 'user');
+    if (!user) return;
+    const assistant: ChatMessage = { id: uid(), parentId: user.id, role: 'assistant', content: '', createdAt: Date.now(), tools: [], streaming: true };
+    setConversations(current => current.map(conversation => conversation.id === active.id ? {
+      ...conversation, updatedAt: Date.now(), activeLeaf: assistant.id, messages: [...withParents(conversation.messages), assistant],
+    } : conversation));
+    await executeStream(active.id, assistant.id, user.modelContent ?? user.content, [], undefined, undefined, [], {regenerateFrom: user.id});
+  }
+
+  async function branchConversation(message: ChatMessage) {
+    if(sending)return;
+    setConversationError("");
+    try {
+      const response=await fetch(`/api/memory/threads/${encodeURIComponent(active.id)}/fork`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({resourceId:active.resourceId || RESOURCE_ID,messageId:message.id})});
+      if(!response.ok)throw new Error((await response.json()).error || '创建分支失败');
+      const {threadId}=await response.json();await syncServerHistory();setActiveId(threadId);
+    }catch(error){setConversationError((error as Error).message);}
+  }
+
+  async function switchVersion(id: string) {
+    if (sending) return;
+    setConversationError("");
+    const leafId = latestDescendant(activeRaw.messages, id);
+    try {
+      const response = await fetch(`/api/memory/threads/${encodeURIComponent(active.id)}/version`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({resourceId:active.resourceId || RESOURCE_ID,leafId})});
+      if (!response.ok) throw new Error((await response.json()).error || '切换失败');
+      setConversations(current => current.map(conversation => conversation.id === active.id ? {...conversation,activeLeaf:leafId} : conversation));
+    } catch (error) { setConversationError((error as Error).message); }
+  }
+
+  function versionPicker(message: ChatMessage) {
+    const nodes=withParents(activeRaw.messages),node=nodes.find(item=>item.id===message.id);
+    const siblings=nodes.filter(item=>item.parentId===node?.parentId && item.role===message.role);
+    if(siblings.length<2)return null;
+    const index=siblings.findIndex(item=>item.id===message.id);
+    return <div className="message-versions"><button disabled={sending || index===0} aria-label="上一个版本" onClick={()=>void switchVersion(siblings[index-1].id)}>‹</button><span>{index+1} / {siblings.length}</span><button disabled={sending || index===siblings.length-1} aria-label="下一个版本" onClick={()=>void switchVersion(siblings[index+1].id)}>›</button></div>;
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -1396,7 +1416,8 @@ export default function App() {
             </div>
           ) : (
             <div className="message-list">
-              {active.messages.map((message) => <Message key={message.id} message={message} disabled={sending} canRegenerate={message.id === lastAssistantId} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} />)}
+              {conversationError && <div className="page-state error">{conversationError}</div>}
+              {active.messages.map((message) => <div key={message.id}><Message message={message} disabled={sending} canRegenerate={true} onBranch={message=>void branchConversation(message)} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} />{versionPicker(message)}</div>)}
               <div ref={messageEndRef} />
             </div>
           )}

@@ -35,6 +35,9 @@ import { committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } 
 import { InputCursor } from "./cursor.js";
 import { SessionPicker, type SessionPickerHandle } from "./session-picker.js";
 import { copySelection } from "./clipboard.js";
+import { ManagementForm } from "./form.js";
+import { FocusManager } from "./focus.js";
+import { courseForm, semesterForm, programStatusForm } from "./management.js";
 
 const color = {
   accent: "#80cbc4",
@@ -81,7 +84,7 @@ const states: Record<string, string> = {
   upcoming: "待开课",
   unscheduled: "未排定",
 };
-type Page = "chat" | "schedule" | "programs";
+type Page = "chat" | "schedule" | "programs" | "focus";
 
 export function App({ session, copy = copySelection }: {
   session: Session;
@@ -495,6 +498,7 @@ export function App({ session, copy = copySelection }: {
   wheelRef.current = wheel;
   const clickRef = useRef((x: number, y: number) => {});
   clickRef.current = (x, y) => {
+    if (session.form || page === 'focus') return;
     if (modal === "resume") { resumePicker.current?.click(x, y); return; }
     if (modal || detail || decisions) return;
     if (page === "chat") {
@@ -686,6 +690,7 @@ export function App({ session, copy = copySelection }: {
     }
   });
   const handleInput = (value: string, key: Key) => {
+    if (session.form || page === 'focus') return;
     if (value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value)) return;
     if (terminalReplies.current.consume(value)) return;
     if (key.eventType === "release") {
@@ -755,8 +760,17 @@ export function App({ session, copy = copySelection }: {
       setOffset(0);
       return;
     }
-    if (detail) return;
+    if (detail) {
+      if (value === 'e' && page === 'schedule' && (!term || term === schedule.currentSemester)) session.openForm(courseForm(session, detail));
+      if (value === 's' && page === 'programs') session.openForm(programStatusForm(session, plan.id, detail));
+      return;
+    }
     if (page !== "chat") {
+      if (page === 'schedule' && field !== 2 && (!term || term === schedule.currentSemester)) {
+        if (value === 'a') { session.openForm(courseForm(session)); return; }
+        if (value === 'o') { session.openForm(courseForm(session, undefined, true)); return; }
+        if (value === 'm') { session.openForm(semesterForm(session)); return; }
+      }
       if (
         page === "schedule" &&
         isGrid &&
@@ -914,21 +928,23 @@ export function App({ session, copy = copySelection }: {
       return;
     }
     if (key.upArrow || key.downArrow) {
+      const userHistory = session.inputHistory.filter(text => !text.startsWith('/'));
+      if (key.downArrow) { historyIndex.current = -1; edit('', 0); return; }
       if (historyIndex.current < 0) {
         historyDraft.current = editor.current.expanded();
-        historyIndex.current = session.inputHistory.length;
+        historyIndex.current = userHistory.length;
       }
       historyIndex.current = Math.max(
         0,
         Math.min(
-          session.inputHistory.length,
+          userHistory.length,
           historyIndex.current + (key.upArrow ? -1 : 1),
         ),
       );
       const value =
-        historyIndex.current === session.inputHistory.length
+        historyIndex.current === userHistory.length
           ? historyDraft.current
-          : (session.inputHistory[historyIndex.current] ?? "");
+          : (userHistory[historyIndex.current] ?? "");
       edit("", 0);
       editor.current.paste(value);
       setInput(editor.current.text);
@@ -1111,6 +1127,9 @@ export function App({ session, copy = copySelection }: {
     nativeCursor = { x: box.x + 2 + Math.min(stringWidth(filter), Math.max(0, box.width - 5)), y: box.y + 2 };
   }
   // Ref callbacks clear unmounted cells; keep mounted hit targets across React rerenders.
+  if (session.form) return <ManagementForm key={session.form.title} form={session.form} width={columns} height={rows}
+    onClose={() => { session.form = null; setDetail(null); session.changed(); }} />;
+  if (page === 'focus') return <FocusManager session={session} width={columns} height={rows} />;
   return (
     <Box ref={rootRef} width={columns} height={rows} flexDirection="column" paddingX={1}>
       <Box
@@ -1236,7 +1255,7 @@ export function App({ session, copy = copySelection }: {
                 </Text>
               </>
             )}
-            <Text color={color.muted}>Esc 返回列表</Text>
+            <Text color={color.muted}>{page === 'schedule' ? (!term || term === schedule.currentSemester ? 'e 编辑课程 · Esc 返回列表' : '历史课表只读 · Esc 返回列表') : 's 修改修读状态 · Esc 返回列表'}</Text>
           </Box>
         ) : page === "chat" ? (
           displayLines.slice(top, top + height).map((line, i) => (

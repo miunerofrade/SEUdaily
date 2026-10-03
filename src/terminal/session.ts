@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { resolve, extname, isAbsolute } from "node:path";
 import { normalizedUsage, type Usage } from "./telemetry.js";
 import { Client, RESOURCE, clean } from "./client.js";
+import { diskSize, settingsForm, semesterForm, focusForm, type Form } from "./management.js";
 export interface Options {
   command: string;
   cwd?: string;
@@ -33,11 +34,14 @@ export const commands: Record<string, string> = {
   sessions: "历史会话",
   resume: "打开会话列表；可指定 [ID/序号/latest]",
   history: "查看完整原记录 [数量]",
-  schedule: "课表 [--sync --semester ID --date YYYY-MM-DD --start-date 日期]",
+  schedule: "课表；Enter 详情，e 编辑；a 添加，o 单日课，m 学期设置；--sync 同步",
   programs: "培养方案 [--sync --plan ID --filter 文字 --page N --limit N]",
   audit: "培养方案 Skill 核查",
   notices: "校园通知",
   focus: "关注任务",
+  settings: "编辑环境变量和 AGENT.md",
+  ramdisk: "内存盘：/ramdisk 512 MB；status / unmount / reveal",
+  semester: "编辑学期名称、日期及总周数",
   skills: "项目 Skill",
   skill: "选择 Skill NAME [问题]，off 清除",
   approve: "批准当前工具",
@@ -135,6 +139,16 @@ export class Session extends EventEmitter {
   schedule: any = { courses: [], availableSemesters: [] };
   programs: any = { plans: [] };
   viewOptions: Record<string, any> = {};
+  form: Form | null = null;
+  focusItems: any[] = [];
+  focusTarget: any = null;
+  openForm(form: Form) { this.form = form; this.changed(); }
+  async loadFocus() { this.focusItems = this.result(await this.client.json('/app/focus')).data?.items ?? []; this.page = 'focus'; this.changed(); }
+  async openFocus(item: any) {
+    if (this.busy) throw new Error('请先等待当前任务完成');
+    this.threadId = item.threadId || item.id; this.resource = item.resourceId || 'seudaily-focus-local';
+    this.focusTarget = item; this.messages = []; this.page = 'chat'; await this.history(); this.changed();
+  }
   controller: AbortController | null = null;
   operation: AbortController | null = null;
   statePath: string;
@@ -262,7 +276,7 @@ export class Session extends EventEmitter {
   }
   async history(count = 100) {
     const result = await this.client.json(
-      this.path("messages") + `&perPage=${count}`,
+      this.path("messages") + `&perPage=${count}&selectedPath=true`,
     );
     for (const m of result.messages ?? []) {
       if (m.content?.runToken)
@@ -344,6 +358,7 @@ export class Session extends EventEmitter {
     this.page = "chat";
     this.threadId = selected.id;
     this.resource = selected.resourceId;
+    this.focusTarget = null;
     this.skills = [];
     this.documents = [];
     this.auth.clear();
@@ -402,7 +417,13 @@ export class Session extends EventEmitter {
     this.thinking = true;
     this.changed();
     let code = 0;
+    let focusRunId = '';
     try {
+      if (this.focusTarget && !approval) {
+        const claim = this.result(await this.client.json(`/app/focus/${encodeURIComponent(this.focusTarget.id)}/run/claim`, 'POST', { force: true, respectInterval: false }));
+        if (!claim.data?.claimed) throw new Error('这项关注正在执行或已暂停');
+        focusRunId = claim.data.runId;
+      }
       for await (const event of this.client.stream(
         {
           messages: text,
@@ -473,11 +494,16 @@ export class Session extends EventEmitter {
       return code;
     } catch (error) {
       if (controller.signal.aborted) {
+        code = 130;
         this.show("已取消");
         return 130;
       }
+      code = 1;
       throw error;
     } finally {
+      if (focusRunId) await this.client.json(`/app/focus/${encodeURIComponent(this.focusTarget.id)}/run/record`, 'POST', {
+        runId: focusRunId, status: code === 0 ? 'completed' : 'failed', message: code === 0 ? 'CLI 关注对话已完成' : 'CLI 关注任务中断或待审批',
+      }).catch(() => {});
       message.streaming = false;
       for (const part of message.process ?? []) part.expanded = false;
       this.reasoningExpanded = false;
@@ -587,6 +613,14 @@ export class Session extends EventEmitter {
       this.page = "chat";
       this.changed();
     }
+    if (name === 'settings') { this.openForm(await settingsForm(this)); return; }
+    if (name === 'semester') { await this.loadSchedule(); this.openForm(semesterForm(this)); return; }
+    if (name === 'ramdisk') {
+      const action = args.join(' ').toLowerCase();
+      const result = await this.client.json(action === 'reveal' ? '/app/ramdisk/reveal' : '/app/ramdisk',
+        !action || action === 'status' ? 'GET' : 'POST', !action || action === 'status' ? undefined : action === 'reveal' ? {} : {action: action === 'unmount' ? 'unmount' : 'mount', ...(action === 'unmount' ? {} : {size:diskSize(args.join(' '))})});
+      this.result(result); this.show(result.summary || JSON.stringify(result.data)); return;
+    }
     if (name === "copy-on-select") {
       if (args.length > 1 || (args.length && !["on", "off"].includes(args[0])))
         throw new Error("/copy-on-select [on/off]");
@@ -619,6 +653,7 @@ export class Session extends EventEmitter {
       return;
     }
     if (name === "new") {
+      this.focusTarget = null; this.resource = RESOURCE;
       if (this.pending) this.show("原会话的待审批状态保留，可 /resume 恢复。");
       this.threadId = randomUUID();
       this.usageByRun.clear();
@@ -771,6 +806,11 @@ export class Session extends EventEmitter {
       return;
     }
     if (name === "notices" || name === "focus") {
+      if (name === 'focus') {
+        if (!args.length) { await this.loadFocus(); return; }
+        if (args[0] === 'add') { this.openForm(focusForm(this)); return; }
+        if (args[0] === 'run') { this.result(await this.client.json('/app/focus/run','POST')); await this.loadFocus(); return; }
+      }
       if (name === "focus" && !args.length) {
         const result = this.result(await this.client.json("/app/focus"));
         this.show(

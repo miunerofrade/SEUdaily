@@ -51,6 +51,8 @@ export type AgentProcessEntry =
 
 export type ChatMessage = {
   id: string;
+  parentId?: string | null;
+  hidden?: boolean;
   role: "user" | "assistant";
   content: string;
   modelContent?: string;
@@ -86,6 +88,7 @@ export type DocumentAttachment = {
 
 export type Conversation = {
   id: string;
+  activeLeaf?: string;
   resourceId?: string;
   focusId?: string;
   title: string;

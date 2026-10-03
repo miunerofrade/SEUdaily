@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { RunState, StoredMessage, Thread } from './types.js';
+import { conversationPath, branchKey, withParents } from '../shared/conversation-tree.js';
 export type Summary = {
     throughSequence: number;
     value: Record<string, any>;
@@ -115,15 +116,50 @@ export class AgentStore {
         const row = result.rows[0];
         return row ? { ...row, content: JSON.parse(String(row.content)), sequence: Number(row.sequence) } as unknown as StoredMessage : undefined;
     }
+    async contextMessages(threadId: string, resourceId: string) {
+        const all = await this.allMessages(threadId, resourceId);
+        const nodes = withParents(all.map(m => ({ ...m, ...(Object.hasOwn(m.content, 'parentId') ? { parentId: m.content.parentId } : {}) })));
+        const thread = await this.getThreadById({ threadId, resourceId });
+        const leaf = thread?.metadata.activeLeaf;
+        return { messages: conversationPath(nodes, leaf), summaryKey: branchKey(nodes, leaf) ? `${threadId}:branch:${branchKey(nodes, leaf)}` : threadId };
+    }
+    async selectLeaf(threadId: string, resourceId: string, leaf: string | null) {
+        const thread = await this.getThreadById({ threadId, resourceId });
+        if (!thread) throw new Error('会话不存在');
+        const all = await this.allMessages(threadId, resourceId);
+        if (leaf && !all.some(m => m.id === leaf)) throw new Error('对话版本不存在');
+        await this.patchThread({ id: threadId, metadata: { ...thread.metadata, activeLeaf: leaf }, preserveUpdatedAt: true });
+    }
+    async forkThread(threadId: string, resourceId: string, messageId: string, newId: string) {
+        const thread = await this.getThreadById({threadId,resourceId});
+        if (!thread) throw new Error('会话不存在');
+        const all = await this.allMessages(threadId,resourceId);
+        const nodes = all.map(m=>({...m,...(Object.hasOwn(m.content,'parentId')?{parentId:m.content.parentId}:{})}));
+        const path = conversationPath(nodes,messageId);
+        const { randomUUID } = await import('node:crypto');
+        const now=new Date().toISOString(),tx=await this.client.transaction('write');
+        let parent: string|null=null;
+        try {
+            await tx.execute({sql:'INSERT INTO threads VALUES (?,?,?,?,?,?)',args:[newId,resourceId,thread.title || '',JSON.stringify({forkedFrom:threadId}),now,now]});
+            for (const message of path) {
+                const id=randomUUID();
+                await tx.execute({sql:'INSERT INTO messages(id,threadId,resourceId,role,content,createdAt) VALUES (?,?,?,?,?,?)',args:[id,newId,resourceId,message.role,JSON.stringify({...message.content,parentId:parent}),message.createdAt]});
+                parent=id;
+            }
+            await tx.execute({sql:'UPDATE threads SET metadata=? WHERE id=?',args:[JSON.stringify({forkedFrom:threadId,activeLeaf:parent}),newId]});
+            await tx.commit();
+        } catch (error) { await tx.rollback(); throw error; } finally { tx.close(); }
+    }
     async listMessages(input: {
         threadId: string;
         resourceId?: string;
         perPage?: number;
         page?: number;
         includeTotal?: boolean;
+        selectedPath?: boolean;
     }) {
         const thread = await this.getThreadById(input);
-        const all = thread ? await this.allMessages(thread.id, thread.resourceId) : [];
+        const all = thread ? input.selectedPath ? (await this.contextMessages(thread.id, thread.resourceId)).messages : await this.allMessages(thread.id, thread.resourceId) : [];
         const size = input.perPage ?? 100;
         const start = Math.max(0, all.length - ((input.page ?? 0) + 1) * size);
         const end = Math.max(0, all.length - (input.page ?? 0) * size);
@@ -140,7 +176,15 @@ export class AgentStore {
         const thread = await this.getThreadById({ threadId, resourceId });
         if (!thread)
             return;
-        await this.client.batch(['messages', 'runs', 'summaries', 'legacy_memory'].map(table => ({ sql: `DELETE FROM ${table} WHERE threadId=?`, args: [threadId] })).concat([{ sql: 'DELETE FROM threads WHERE id=?', args: [threadId] }]), 'write');
+        const statements: InStatement[] = ['messages', 'runs', 'legacy_memory'].map(table => ({
+            sql: `DELETE FROM ${table} WHERE threadId=?`, args: [threadId],
+        }));
+        const prefix = `${threadId}:branch:`;
+        statements.push(
+            { sql: 'DELETE FROM summaries WHERE threadId=? OR substr(threadId,1,?)=?', args: [threadId, prefix.length, prefix] },
+            { sql: 'DELETE FROM threads WHERE id=?', args: [threadId] },
+        );
+        await this.client.batch(statements, 'write');
     }
     async saveRun(run: RunState) {
         await this.ready;

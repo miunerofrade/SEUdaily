@@ -25,6 +25,10 @@ type StreamOptions = {
   authResumeId?: string;
   runToken?: string;
   skills?: string[];
+  parentMessageId?: string | null;
+  userMessageId?: string;
+  assistantMessageId?: string;
+  regenerateFrom?: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
 };
@@ -81,7 +85,7 @@ function agentErrorMessage(value: unknown) {
   return errorDetail(value) || "Agent 请求失败，但服务端没有提供错误详情。";
 }
 
-export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], authResumeId, runToken, skills = [], signal, onEvent }: StreamOptions) {
+export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID, documents = [], authResumeId, runToken, skills = [], parentMessageId, userMessageId, assistantMessageId, regenerateFrom, signal, onEvent }: StreamOptions) {
   const toolNamespaces = inferToolNamespaces(message, typeof window === "undefined" ? "" : window.location.pathname);
   const response = await fetch(AGENT_ENDPOINT, {
     method: "POST",
@@ -93,6 +97,10 @@ export async function streamAgent({ message, threadId, resourceId = RESOURCE_ID,
         seudailySkills: skills,
         seudailyRunToken: runToken ?? crypto.randomUUID(),
         seudailyThreadId: threadId,
+        seudailyParentMessageId: parentMessageId,
+        seudailyUserMessageId: userMessageId,
+        seudailyAssistantMessageId: assistantMessageId,
+        seudailyRegenerateFrom: regenerateFrom,
         seudailyToolNamespaces: toolNamespaces,
         seudailyPagePath: typeof window === "undefined" ? "" : window.location.pathname,
         ...(authResumeId ? { seudailyAuthResumeId: authResumeId } : {}),
@@ -185,6 +193,7 @@ type StoredThread = {
   resourceId: string;
   createdAt: string;
   updatedAt: string;
+  metadata?: { activeLeaf?: string };
 };
 
 type StoredMessage = {
@@ -192,6 +201,7 @@ type StoredMessage = {
   role: "user" | "assistant";
   createdAt: string;
   content?: {
+    parentId?: string | null;
     content?: string;
     parts?: Array<Record<string, unknown>>;
     runToken?: string;
@@ -321,21 +331,28 @@ function legacyStoredDocuments(messageId: string, content: string): DocumentAtta
 }
 
 async function fetchThreadMessages(thread: StoredThread): Promise<Conversation | null> {
-  const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "100" });
-  const response = await fetch(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
-  if (!response.ok) return null;
-  const data = await response.json() as { messages?: StoredMessage[] };
-  const restored = await Promise.all((data.messages ?? []).map(async (item): Promise<ChatMessage | null> => {
+  const records: StoredMessage[] = [];
+  for (let page = 0; ; page++) {
+    const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "1000", page: String(page) });
+    const response = await fetch(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
+    if (!response.ok) return null;
+    const data = await response.json() as { messages?: StoredMessage[]; hasMore?: boolean };
+    records.unshift(...(data.messages ?? []));
+    if (!data.hasMore) break;
+  }
+  const restored = await Promise.all(records.map(async (item): Promise<ChatMessage | null> => {
     if (item.role !== "user" && item.role !== "assistant") return null;
     const storedContent = item.content?.content ?? "";
-    if (item.role === "user" && /^\[SEUDAILY_AUTH_RESUME\s+id=auth-[^\]]+\]/i.test(storedContent)) return null;
+    const hidden = item.role === "user" && /^\[SEUDAILY_AUTH_RESUME\s+id=auth-[^\]]+\]/i.test(storedContent);
     const parts = item.content?.parts ?? [];
     const content = item.role === "user" ? visibleStoredContent(storedContent) : storedAssistantContent(parts, storedContent);
     const attachments = item.role === "user" ? await storedAttachments(item.id, item.content?.parts) : undefined;
     const documents = item.role === "user" ? legacyStoredDocuments(item.id, storedContent) : undefined;
-    if (!content && item.role === "user" && !attachments?.length && !documents?.length) return null;
+
     return {
       id: item.id,
+      ...(Object.hasOwn(item.content ?? {}, 'parentId') ? { parentId: item.content?.parentId } : {}),
+      hidden,
       role: item.role,
       content,
       modelContent: item.role === "user" && storedContent !== content ? storedContent : undefined,
@@ -355,6 +372,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   const firstPrompt = messages.find((message) => message.role === "user")?.content ?? "新对话";
   return {
     id: thread.id,
+    activeLeaf: thread.metadata?.activeLeaf,
     resourceId: thread.resourceId,
     title: thread.title?.trim() || (firstPrompt.length > 18 ? `${firstPrompt.slice(0, 18)}…` : firstPrompt),
     createdAt: Date.parse(thread.createdAt),

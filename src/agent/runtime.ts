@@ -54,15 +54,33 @@ export class AgentRuntime {
             const run: RunState = { id: context.runToken, context, status: 'running', step: 0, messages: [], parts: [], pendingCalls: [], cursor: 0, startedAt: new Date().toISOString(), inputMessageIds: [] };
             if (await this.config.store.getRun(run.id))
                 throw new ApprovalError('运行令牌已使用，请重新发起请求');
+            if (context.userMessageId && input.length !== 1) throw new Error('指定消息 ID 时只接受一条用户消息');
+            if (context.userMessageId && context.userMessageId === context.assistantMessageId) throw new Error('用户消息与回复必须使用不同 ID');
+            const history = await this.config.store.contextMessages(context.threadId, context.resourceId);
+            let parent = context.parentMessageId === undefined ? history.messages.at(-1)?.id ?? null : context.parentMessageId;
+            const all = await this.config.store.allMessages(context.threadId, context.resourceId);
+            if (parent && !all.some(m => m.id === parent)) throw new Error('父消息不存在于当前会话');
+            if (context.regenerateFrom) {
+                const source = all.find(m => m.id === context.regenerateFrom && m.role === 'user');
+                if (!source || input.length) throw new Error('重新生成必须引用当前会话中的用户消息');
+                parent = source.id;
+                run.inputMessageIds!.push(source.id);
+            }
+            if (context.assistantMessageId && await this.config.store.client.execute({sql:'SELECT id FROM messages WHERE id=?',args:[context.assistantMessageId]}).then(r=>r.rows.length>0)) throw new Error('回复 ID 已使用');
             for (const message of input) {
                 if (message.role !== 'user')
                     throw new Error('新轮次只接受用户消息');
                 const parts = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : (message.content ?? []).map(part => part.type === 'image_url' ? { type: 'file', data: part.image_url.url, filename: part.filename, mimeType: part.mediaType } : part);
-                const messageId = randomUUID();
+                const messageId = context.userMessageId ?? randomUUID();
+                if (all.some(m => m.id === messageId) || await this.config.store.client.execute({sql:'SELECT id FROM messages WHERE id=?',args:[messageId]}).then(r=>r.rows.length>0)) throw new Error('消息 ID 已使用');
                 run.inputMessageIds!.push(messageId);
-                await this.config.store.saveMessage({ id: messageId, threadId: context.threadId, resourceId: context.resourceId, role: 'user', createdAt: new Date().toISOString(), content: { content: parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n'), parts, modelMessages: [message] } });
+                await this.config.store.saveMessage({ id: messageId, threadId: context.threadId, resourceId: context.resourceId, role: 'user', createdAt: new Date().toISOString(), content: { parentId: parent, content: parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n'), parts, modelMessages: [message] } });
+                parent = messageId;
             }
-            await this.config.store.saveRun(run);
+            context.parentMessageId = parent;
+            await this.config.store.selectLeaf(context.threadId, context.resourceId, parent);
+            // Reserve the answer node before building context so sibling answers get separate summary checkpoints.
+            await this.persist(run);
             return this.drive(run, combined);
         }
         catch (error) {
@@ -103,7 +121,9 @@ export class AgentRuntime {
         }
     }
     private async persist(run: RunState) {
-        await this.config.store.saveTurn(run, { id: `${run.id}-assistant`, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage } });
+        const id = run.context.assistantMessageId ?? `${run.id}-assistant`;
+        await this.config.store.saveTurn(run, { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage } });
+        await this.config.store.selectLeaf(run.context.threadId, run.context.resourceId, id);
     }
     private async *drive(run: RunState, signal: AbortSignal, decision?: {
         callId: string;
@@ -188,7 +208,7 @@ export class AgentRuntime {
                 if (run.step >= (this.config.maxSteps ?? 30))
                     throw new Error('已达到本轮最多 30 步的限制，请缩小任务范围');
                 const prefix: ModelMessage[] = [{ role: 'system', content: await this.config.instructions(run.context) }];
-                const contextHistoryId = `${run.id}-assistant`;
+                const contextHistoryId = run.context.assistantMessageId ?? `${run.id}-assistant`;
                 let context = await this.memory.build(run.context.threadId, run.context.resourceId, prefix, definitions, run.messages, signal, false, contextHistoryId, run.inputMessageIds);
                 let completed = false;
                 let retried = false;

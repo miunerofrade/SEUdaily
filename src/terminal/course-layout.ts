@@ -161,6 +161,7 @@ export function programDocument(
         ...course,
         status: opt.status ?? course.status,
         displaySemester: opt.label,
+        semester: opt.value,
         manualStatus: opt.manualStatus ?? course.manualStatus,
       });
       groups.set(opt.value, group);
