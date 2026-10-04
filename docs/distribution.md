@@ -76,9 +76,9 @@ npm run pack:local
 
 固定用例包括原 Agent/HTTP/附件回归、事务隔离、注册表下载失败重试、纯打包安装、同时打开两个 Web 与 CLI、同一核心复用、最后退出/重启、Host/Origin 校验、空 Focus 列表不安装 Python，以及旧数据复制不覆盖原件。PTY 固定用例继续覆盖中文输入、附件、流式输出、取消、退出和终端恢复；浏览器只访问本机 fixture。
 
-最终回归为 Node 74/74、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。基础包压缩约 296 KiB，CLI 约 186 KiB，两者解压合计约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
+最终回归为 Node 75/75、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。基础包压缩约 296 KiB，CLI 约 186 KiB，两者解压合计约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
 
-本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24 六组全部通过。发布前仍需：
+本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24、Python 3.11/3.12/3.13 九组全部通过。发布前仍需：
 
 1. 云端安装、生命周期和默认浏览器验收已完成；Windows ConPTY 和 macOS/Linux PTY 用例均通过。校园 VPN/短信需要本机网络和人工验证，未把校园凭据交给 CI。
 2. 确认五个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-04 查询五个名称均返回 404，仍须在发布时核对及取得所有权。
@@ -89,4 +89,4 @@ npm run pack:local
 
 GitHub 已配置三系统 × Node 22/24 自动验收和手动发布候选流程；具体凭据、Environment 审核及 Trusted Publisher 配置见 [npm 发布说明](npm-release.md)。云端结果以对应 Actions run 为准。
 
-最终六组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37217534104)，[结果清单](research/data/github-distribution-ci.json)。
+最终九组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37221572065)，[结果清单](research/data/github-distribution-ci.json)。

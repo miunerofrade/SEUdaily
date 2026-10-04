@@ -2,7 +2,7 @@
 
 ## 自动验收
 
-`.github/workflows/distribution-ci.yml` 在 main push、PR 和手动触发时运行，也可由发布工作流复用。矩阵：Ubuntu 24.04、Windows Server 2025、macOS 15 × Node 22.22.0/24.12.0。
+`.github/workflows/distribution-ci.yml` 在 main push、PR 和手动触发时运行，也可由发布工作流复用。矩阵：Ubuntu 24.04、Windows Server 2025、macOS 15，分别验证 Node 22.22.0 + Python 3.11、Node 24.12.0 + Python 3.12、Node 24.12.0 + Python 3.13，共九组。Windows ConPTY 测试驱动单独固定 Python 3.13，不属于产品依赖；业务 Python 仍按矩阵版本测试。
 
 每组执行锁文件安装、类型检查、生产构建、Node/Python 回归、纯打包安装与多界面生命周期验证。macOS/Linux 使用 POSIX PTY，Windows 使用 ConPTY；Windows 强制结束进程由租约超时回收。真实私有 Python 安装和平台默认浏览器访问本机 fixture，页面导航/点击/快照均做验收。不传校园账号、模型密钥，也不测试真实校园 VPN；验证码、短信和校园连通性仍需要本机验证。
 
