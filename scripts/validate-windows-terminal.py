@@ -81,9 +81,11 @@ def terminal(exit_method):
                     if (path / 'clean-exit').exists() or not proc.isalive(): break
                     send('\x03', .1)
             wait_for(lambda: not proc.isalive())
+            assert proc.exitstatus == 0
             assert (path / 'clean-exit').exists()
-            assert '\x1b[?1049l' in output, 'alternate screen must be restored'
-            return {'chineseCommit': True, 'imagePaste': True, 'backspace': True, 'cancel': True, 'resize': True, 'exit': exit_method, 'screenRestored': True}
+            assert (path / 'screen-restore-emitted').exists(), 'alternate screen exit must be emitted'
+            assert (path / 'input-restored').read_text() == 'true', 'raw input mode must be restored'
+            return {'chineseCommit': True, 'imagePaste': True, 'backspace': True, 'cancel': True, 'resize': True, 'exit': exit_method, 'restoreSequenceEmitted': True, 'rawInputRestored': True}
         finally:
             proc.close(force=True)
 

@@ -32,11 +32,23 @@ export async function run() {
     }
   };
   await session.initialize();
+  // ConPTY interprets/normalizes alternate-buffer sequences before forwarding output.
+  // Observe the real writes without changing them, so Windows can verify teardown too.
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  if (process.platform === 'win32') process.stdout.write = ((...args: any[]) => {
+    if (String(args[0]).includes('\x1b[?1049l')) writeFileSync(join(root, 'screen-restore-emitted'), 'true');
+    return (originalWrite as any)(...args);
+  }) as typeof process.stdout.write;
+  const initialRaw = process.stdin.isRaw ?? false;
   const restore = prepareTerminalInput(process.stdin);
   try {
     const instance = render(<App session={session} />, { alternateScreen: true, exitOnCtrlC: false, maxFps: 60, kittyKeyboard: terminalKeyboard() });
     writeFileSync(join(root, 'ready'), JSON.stringify({ rss: process.memoryUsage().rss }));
     await instance.waitUntilExit(); await session.cancel();
     writeFileSync(join(root, 'clean-exit'), 'true');
-  } finally { restore(); }
+  } finally {
+    restore();
+    writeFileSync(join(root, 'input-restored'), String((process.stdin.isRaw ?? false) === initialRaw));
+    process.stdout.write = originalWrite;
+  }
 }
