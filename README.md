@@ -14,7 +14,17 @@ SEUdaily 是面向东南大学学习与校园事务的本地助手，提供终�
 
 ## 安装
 
-npm 发布包正在准备，尚未公开发布。当前从源码构建，需要：
+npm 发布包正在准备，尚未公开发布。发布后的使用方式为：
+
+```bash
+npm install -g seudaily
+seudaily       # 直接使用内置 CLI 与后端
+seudaily web   # 首次自动安装 Web；复用共享后端
+```
+
+普通聊天无需安装 Python、uv 或浏览器。相关工具首次使用时自动准备可选环境，已有兼容 uv/Python 会优先复用。
+
+当前从源码构建，需要：
 
 - Node.js **22.22+（22.x）或 24.12+**、npm **10+**。
 - Python **3.11+（包括 3.12、3.13）** 和 [uv](https://docs.astral.sh/uv/)。
@@ -84,7 +94,7 @@ Agent 可通过工具访问工作区并执行命令。应用的权限设置控�
 
 ## 开发
 
-`main` 统一维护 CLI、Web 与公共核心，`cli` 已合入，旧 `dev` 停止维护。CLI、Web、公共核心、Python 与浏览器组件已经分开构建，实施状态见 [分发说明](docs/distribution.md)。
+`main` 统一维护 CLI、Web 与公共核心，`cli` 已合入，旧 `dev` 停止维护。默认发布包包含 CLI 与公共核心，Web、Python 与浏览器为可选组件，实施状态见 [分发说明](docs/distribution.md)。
 
 ```bash
 npm run typecheck

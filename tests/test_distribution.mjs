@@ -63,20 +63,21 @@ test('packed installation runs without source/node_modules, installs only select
   });
   const install = join(temporary, 'install'), data = join(temporary, 'data'), cache = join(temporary, 'cache');
   const packages = new Map(), counts = new Map();
-  for (const name of ['host', 'cli', 'web', 'python']) {
+  for (const name of ['host', 'web', 'python']) {
     const directory = name === 'host' ? root : join(root, 'dist', 'components', name);
     const packed = JSON.parse((await npm(['pack', '--json', '--pack-destination', temporary], { cwd: directory })).stdout)[0];
     const bytes = await readFile(join(temporary, packed.filename));
     if (name === 'host') {
       assert.ok(packed.files.every(file => !/node_modules|\.env|agent\.db|components\/|src\//.test(file.path)));
+      assert.ok(packed.files.some(file => file.path === 'dist/cli/index.mjs'));
       await npm(['install', '--prefix', install, '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', join(temporary, packed.filename)]);
     } else packages.set(`seudaily-${name}`, { bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` });
   }
   let registryPort;
-  let rejectCli = true;
+  let rejectWeb = true;
   registry = createServer((request, response) => {
     const name = decodeURIComponent(request.url.split('/')[1]);
-    if (name === 'seudaily-cli' && rejectCli) { response.writeHead(404); response.end('{}'); return; }
+    if (name === 'seudaily-web' && rejectWeb) { response.writeHead(404); response.end('{}'); return; }
     const record = packages.get(name);
     if (!record) { response.writeHead(404); response.end('{}'); return; }
     counts.set(name, (counts.get(name) ?? 0) + 1);
@@ -94,8 +95,13 @@ test('packed installation runs without source/node_modules, installs only select
   assert.match((await command(['--help'])).stdout, /--web \/ -w/);
   assert.ok(!existsSync(data)); assert.ok(!existsSync(cache));
   assert.match((await command(['status'])).stdout, /未运行/);
-  await assert.rejects(command(['sessions']));
-  rejectCli = false;
+  // Built-in CLI works with an unavailable registry and an empty component cache.
+  assert.match((await command(['sessions'])).stdout, /暂无会话/);
+  assert.equal(counts.size, 0);
+  await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
+  await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
+  await assert.rejects(command(['web']));
+  rejectWeb = false;
   assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli', 'ready.json')));
   assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli.lock')));
   const launchWeb = () => {
@@ -114,7 +120,7 @@ test('packed installation runs without source/node_modules, installs only select
   assert.equal((await fetch(api + '/.env')).status, 404);
   assert.equal((await fetch(api + '/app/not-found')).status, 404);
   assert.match((await command(['sessions'])).stdout, /暂无会话/);
-  assert.ok(counts.has('seudaily-cli')); assert.ok(counts.has('seudaily-web'));
+  assert.ok(!counts.has('seudaily-cli')); assert.ok(counts.has('seudaily-web'));
   assert.ok(!counts.has('seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
   first.kill('SIGTERM'); await eventually(async () => { assert.ok(first.exitCode !== null || first.signalCode !== null); });
   const surviving = await eventually(async () => { const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 1); return value; }, exitTimeout); assert.equal(surviving.processId, identity.processId);
@@ -122,8 +128,8 @@ test('packed installation runs without source/node_modules, installs only select
   second.kill('SIGTERM');
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); }, exitTimeout);
   await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
-  // Same installation/data/cache can restart, without downloading the CLI again.
-  const before = counts.get('seudaily-cli'); assert.match((await command(['sessions'])).stdout, /暂无会话/); assert.equal(counts.get('seudaily-cli'), before);
+  // Restarting the built-in CLI neither downloads CLI nor requests Web again.
+  const before = counts.get('seudaily-web'); assert.match((await command(['sessions'])).stdout, /暂无会话/); assert.equal(counts.get('seudaily-web'), before);
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
   const manual = spawn(node, [join(dirname(dirname(host)), 'dist/core.mjs')], { cwd: temporary, env: { ...env, SEUDAILY_INSTALL_ROOT: dirname(dirname(host)), SEUDAILY_PROJECT_ROOT: data, SEUDAILY_PORT: String(port), SEUDAILY_MANAGED: '0' }, stdio: 'ignore' });
   launchers.push(manual);

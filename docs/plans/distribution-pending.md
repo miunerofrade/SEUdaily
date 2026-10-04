@@ -9,7 +9,7 @@
 1. **轻量公共核心**：正式存储改为 Node 内置 SQLite，移除 libsql 原生依赖。旧数据库 schema 保持兼容，旧 Mastra 导入只读且不再调用 Python。
 2. **统一入口**：npm `bin` 提供 `seudaily`；采用 `chat / web / ask / vpn / status / stop / sessions / skills / completion / import-data`。`-c/--chat`、`-w/--web`、`--vpn PORT` 共用同一解析。旧 `start / exec / --prompt / --cwd / --no-start` 已移除；源码 Python 入口只转交 Node 启动器。
 3. **CLI/Web 边界**：核心、CLI、Web 分开构建；Web 为同端口静态页面，运行时不需要 Vite。多入口核对身份、版本、协议和数据目录后复用同一个核心，正常释放及崩溃租约维护生命周期。独立开发后端不会因界面退出而停止。
-4. **数据和按需组件**：默认数据目录与安装目录分离，可显式复制旧数据而不删除原件。CLI/Web/Python/浏览器按版本安装到私有缓存；失败可重试，完整组件再原子发布。uv 固定 URL/SHA256，Python 依赖按 lock 导出且检查 hash。Python/Node 的浏览器共用同一版本和缓存，视频提取依赖只在真实 fallback 时安装。
+4. **数据和按需组件**：默认数据目录与安装目录分离，可显式复制旧数据而不删除原件。默认包内置 CLI 与核心；Web/Python/浏览器按版本安装到私有缓存；失败可重试，完整组件再原子发布。uv 固定 URL/SHA256，Python 依赖按 lock 导出且检查 hash。Python/Node 的浏览器共用同一版本和缓存，视频提取依赖只在真实 fallback 时安装。
 5. **本地发布候选**：基础包使用文件白名单，分组件生成 `.tgz`；脱离源码仓库的安装、失败重试、共享后端、退出/重启和数据导入验收通过。根据实际模块生成许可证文本。仍未发布。
 
 Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、完整业务边界和许可证，最终大小以 `npm run pack:local` 的 `build/packages/index.json` 为准。Node 路线复用已有 Node，不包括 Python 环境或浏览器引擎；不能把原型体积当成全部功能安装大小。
@@ -21,7 +21,7 @@ Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、�
 按以下顺序推进，不自动发布：
 
 1. 已完成 GitHub Windows/Ubuntu/macOS × Node 22.22.0/24.12.0 九组安装、进程退出、Python 和浏览器验收；Windows 使用独立进程的 ConPTY 用例。真实校园 VPN/短信和图形交互仍在本机验收，CI 不使用校园凭据。
-2. 确认包名所有权，选择新的发布版本，统一基础包及四个组件版本。当前五个名称查询返回 404，但尚未注册。
+2. 确认包名所有权，选择新的发布版本，统一默认包及三个可选组件版本。当前四个名称查询返回 404，但尚未注册。
 3. CI 和手动发布候选流程已接入 GitHub Actions；等三系统 × Node 22/24 云端结果通过，复核许可证及包内容，先发组件、再发基础包。Node 22 的 SQLite 警告保留在核心日志。
 4. 验收实际注册表安装、升级和旧数据导入；本地注册表 fixture 不能替代真实发布验收。
 

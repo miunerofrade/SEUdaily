@@ -1,10 +1,10 @@
 {
-  "date": "2026-10-04",
+  "date": "2026-10-05",
   "platform": "macOS arm64",
   "node": "22.23.3",
   "checks": {
     "node": {
-      "passed": 74,
+      "passed": 75,
       "failed": 0
     },
     "python": {
@@ -19,37 +19,30 @@
     {
       "component": "host",
       "filename": "seudaily-1.1.0.tgz",
-      "size": 303190,
-      "unpackedSize": 1097486,
-      "integrity": "sha512-xsIX2Lc9qge+AmT6aqezCDXsRqzt1Sg5yk1839QqluB8Z3U6Xevk/XIotWFIm1Tw2SrMJ3g7XVFYCIeCoOxO8Q=="
-    },
-    {
-      "component": "cli",
-      "filename": "seudaily-cli-1.1.0.tgz",
-      "size": 190716,
-      "unpackedSize": 612743,
-      "integrity": "sha512-vgHCgA5bQzp96HrVKIkEhkRgHlfw3NOBPAygL6PqnWWX/WT6VEkJ5SM8Cj3yGSxkzyGDIsYyvHpOUNFqwjoOGA=="
+      "size": 492505,
+      "unpackedSize": 1711442,
+      "integrity": "sha512-97e3q+B7ykFMpez3PI6aGCui3h7YUBky/82/nODNvG0LmMPNP5uE8WqNVENngNzfvU9+8oLEsJ2UkPRL16DAsw=="
     },
     {
       "component": "web",
       "filename": "seudaily-web-1.1.0.tgz",
-      "size": 1083950,
-      "unpackedSize": 2120226,
-      "integrity": "sha512-fYUl3HDXp1/AdXVE8CNXoJuVZmDLbewkOPDA+nyWzw60X65exAZoqAlTjECqLEVuha3Qdqfy9Y/9WUAORHWlLA=="
+      "size": 1084254,
+      "unpackedSize": 2120674,
+      "integrity": "sha512-X+grwIPAqzCDwFoBHBM8birhgEB2E3H4k+itehHIn90JbdP3iL12GHn1TvxSo4QNtK2gbNiAjmA+TXuOPNnx2w=="
     },
     {
       "component": "python",
       "filename": "seudaily-python-1.1.0.tgz",
-      "size": 206004,
-      "unpackedSize": 288949,
-      "integrity": "sha512-SenJVagyG6ovMcXAH485EaPXeozhjqJy5M+LsAqBaQ6nXpjzDN7/KphtuVXaac2TKxnyzNoBdLH37gt48XbhIQ=="
+      "size": 239027,
+      "unpackedSize": 362892,
+      "integrity": "sha512-7gqcj5zGiN+CZRaNYDmh7mrhNgEJNvsS4yVQZ8TUCEJjxMQ6S0J4BqpO0NUCJ3HcDLzHgKxDUkt9K9pEAdhHsg=="
     },
     {
       "component": "browser",
       "filename": "seudaily-browser-1.1.0.tgz",
-      "size": 38438,
-      "unpackedSize": 128302,
-      "integrity": "sha512-kRWmkY9HQIa4WusBxZfHJTMtA2rYm048IIqBU1Zp83Mf2A8Ugds4tIEjIv/N9v34JFy83D1+dUiLjBmSATA1tA=="
+      "size": 38677,
+      "unpackedSize": 128780,
+      "integrity": "sha512-Qc4VHLmeXg3Z2G+SOwgRu+w2rlJ9r701DLXI5kAfowxgKL2NBZ7I6GN5Br2HUZ0VqdTP2zlI+tpsfPuf1lUW5w=="
     }
   ],
   "fixtureValidation": {
@@ -114,5 +107,45 @@
       "close": true
     }
   },
-  "published": false
+  "published": false,
+  "releasePackages": [
+    {
+      "component": "web",
+      "name": "seudaily-web",
+      "version": "1.1.0",
+      "filename": "seudaily-web-1.1.0.tgz",
+      "integrity": "sha512-icBBhv2u98451v/r7aNV3GOOQc21w4FWMKRc/469gh5nVtmhEQn+4Y4faNev5hEBPjLM4+/yfqTr2qKssTSRow==",
+      "size": 1084395,
+      "unpackedSize": 2121019
+    },
+    {
+      "component": "python",
+      "name": "seudaily-python",
+      "version": "1.1.0",
+      "filename": "seudaily-python-1.1.0.tgz",
+      "integrity": "sha512-j5xSuXhldNq9AKi7wUS4I8CLGBBPTqc5c2AFb0IDsZOcctKzzycGLim0KMnBMYy9HsHTk7IdzEpOIF46DK9mPw==",
+      "size": 239163,
+      "unpackedSize": 363237
+    },
+    {
+      "component": "browser",
+      "name": "seudaily-browser",
+      "version": "1.1.0",
+      "filename": "seudaily-browser-1.1.0.tgz",
+      "integrity": "sha512-ZFS2KptCsWLhfeo7xfQUqhEFtQ3qk1Cr04bIVp5f6Puo6hspd3/T1/RUVFtnvIyZt4ju//DE4kxuPba3RKI/dA==",
+      "size": 38776,
+      "unpackedSize": 129125
+    },
+    {
+      "component": "host",
+      "name": "seudaily",
+      "version": "1.1.0",
+      "filename": "seudaily-1.1.0.tgz",
+      "integrity": "sha512-R1N5JeLbodOq4VBnMnkrfZob8LON9vmnGLSQulYLzbUZjQU51/ZmkvTHhBvMkEQl+OJgEF9kEl9Dfp6r6S+iUA==",
+      "size": 491890,
+      "unpackedSize": 1709538
+    }
+  ],
+  "cliBundled": true,
+  "cliRegistryRequired": false
 }

@@ -17,23 +17,22 @@ node bin/seudaily.mjs --help
 
 `uv run seudaily` 作为源码兼容入口，转交同一个 Node 启动器并默认保留仓库数据。`start`、`exec`、`--prompt`、`--cwd`、`--no-start` 不再作为公共命令接受。新的动作是 `chat`、`web`、`ask`、`vpn`、`status`、`stop`、`sessions`、`skills`、`completion`、`import-data`；`-c/--chat`、`-w/--web`、`--vpn PORT` 是别名。
 
-npm 发布后，基础包安装提供 `seudaily` 命令。现在不能把正式注册表中尚未发布的组件当作已经可下载；本地构建优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
+npm 发布后，基础包安装提供 `seudaily` 命令。现在不能把正式注册表中尚未发布的组件当作已经可下载；CLI 始终使用包内 `dist/cli/`，本地可选组件优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
 
 ## 包边界
 
 | 包 | 内容 | 何时使用 |
 | --- | --- | --- |
-| `seudaily` | Node 启动器、公共核心、内置 Skill、组件清单 | 基础入口 |
-| `seudaily-cli` | 合并后的 Ink 终端界面 | chat、ask、sessions、skills |
+| `seudaily` | Node 启动器、内置 CLI、公共核心、内置 Skill、可选组件清单 | 安装即可使用终端 |
 | `seudaily-web` | React 静态页面及资源 | web |
 | `seudaily-python` | Python wheel、固定版本且带 hash 的基础/媒体依赖清单 | 校园、文档、VPN 等工具 |
 | `seudaily-browser` | 合并后的 MCP 服务与固定 Playwright core 依赖 | 通用浏览器工具 |
 
-构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。CLI 组件也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
+构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。内置 CLI 也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
 
 公共核心与终端通过 HTTP/SSE 通信。Web 静态页面由核心同端口托管，不启动 Vite。启动器检查后端名称、协议、版本和数据目录；数据目录锁在加载数据库前取得。多个界面共用一个核心，连接每 10 秒续租，正常退出立即释放；崩溃租约约 30 秒失效。自动核心在最后一个界面退出后停止，独立开发后端不由租约回收。Web 启动器关闭的入口是终端 Ctrl+C，关闭浏览器标签本身不等于结束启动器。
 
-组件按当前应用版本安装至私有缓存，用目录锁避免重复安装，npm 校验包 integrity，禁用安装脚本；下载/安装完成后原子发布目录。失败目录清理后可重试。Python 环境先安装锁定 wheel 和 hash 清单，再写就绪标记，不把半成品交给 worker。uv 0.11.1 的下载 URL 和 SHA256 已固定，保留 MIT/Apache 许可证，不修改全局 uv、Python 或 Shell 配置。
+CLI 不下载、不写入组件缓存。可选组件按当前应用版本安装至私有缓存，用目录锁避免重复安装，npm 校验包 integrity，禁用安装脚本；下载/安装完成后原子发布目录。失败目录清理后可重试。Python 环境先安装锁定 wheel 和 hash 清单，再写就绪标记，不把半成品交给 worker。uv 0.11.1 的下载 URL 和 SHA256 已固定，保留 MIT/Apache 许可证，不修改全局 uv、Python 或 Shell 配置。
 
 Python 与 Node Playwright 同为 1.63.0，共享浏览器缓存。浏览器引擎直到实际浏览器操作时才准备；Windows 默认已有 Edge。官方 PDF 导出成功时不安装视频提取依赖；确实落到视频幻灯片提取时才准备媒体 extras。FFmpeg 与 Linux 浏览器系统库仍是外部系统依赖。本地 ASR 尚不可用。
 
@@ -76,12 +75,12 @@ npm run pack:local
 
 固定用例包括原 Agent/HTTP/附件回归、事务隔离、注册表下载失败重试、纯打包安装、同时打开两个 Web 与 CLI、同一核心复用、最后退出/重启、Host/Origin 校验、空 Focus 列表不安装 Python，以及旧数据复制不覆盖原件。PTY 固定用例继续覆盖中文输入、附件、流式输出、取消、退出和终端恢复；浏览器只访问本机 fixture。
 
-最终回归为 Node 75/75、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。基础包压缩约 296 KiB，CLI 约 186 KiB，两者解压合计约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
+最终回归为 Node 75/75、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。默认包（已含 CLI）压缩约 480 KiB，解压约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
 
 本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24、Python 3.11/3.12/3.13 九组全部通过。发布前仍需：
 
 1. 云端安装、生命周期和默认浏览器验收已完成；Windows ConPTY 和 macOS/Linux PTY 用例均通过。校园 VPN/短信需要本机网络和人工验证，未把校园凭据交给 CI。
-2. 确认五个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-04 查询五个名称均返回 404，仍须在发布时核对及取得所有权。
+2. 确认四个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-05 查询四个名称均返回 404，仍须在发布时核对及取得所有权。
 3. 复核生成的第三方许可证清单、npm 文件白名单，复核已接入的 CI/发布流程。SQLite 警告保留在核心日志，不全局屏蔽其他警告。
 4. 再次验收实际 npm 注册表安装和升级。当前本地临时注册表验证不能替代实际发布验收。
 

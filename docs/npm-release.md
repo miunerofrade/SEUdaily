@@ -12,13 +12,15 @@
 
 Actions → `npm release candidate` → Run workflow，选择 main，版本必须等于已提交的 `package.json`（当前 1.1.0），`publish` 默认 false。流程先跑完整矩阵，再构建并生成公开发布候选。不设置 npm 凭据也能完成这一步。
 
-源代码根包和组件仍保持 private。`scripts/prepare-release.mjs` 在 `build/release/staging/` 复制文件白名单、移除主包开发依赖与脚本、设置公开清单，再打包；不会修改源码 package.json 或直接发布。发布顺序为 CLI、Web、Python、浏览器，最后基础包。
+源代码根包和组件仍保持 private。`scripts/prepare-release.mjs` 在 `build/release/staging/` 复制文件白名单、移除主包开发依赖与脚本、设置公开清单，再打包；不会修改源码 package.json 或直接发布。默认包 `seudaily` 内置 CLI 与后端，不再发布 `seudaily-cli`。发布顺序为 Web、Python、浏览器，最后默认包；用户只安装默认包，可选组件由启动器自动安装。
 
 ## 需要维护者完成的 npm 配置
 
-1. npm 账号、已验证邮箱、2FA；取得 `seudaily`、`seudaily-cli`、`seudaily-web`、`seudaily-python`、`seudaily-browser` 五个包的发布权限。首次注册包名需要登录后的首次发布，不能把 registry 404 当作已经拥有包名。
-2. 首次发布可将具备相应发布权限的 npm token 放入 GitHub 的 **npm Environment Secret `NPM_TOKEN`**；不要提交到仓库或发进对话。凭据和 2FA 方式以 npm 当前账号策略为准。
-3. 包存在后，建议每个包设置 npm Trusted Publisher：GitHub owner `miunerofrade`，repository `SEUdaily`，workflow `npm-release.yml`，environment `npm`。工作流用 OIDC（npm >=11.5.1），随后可移除 NPM_TOKEN。官方说明：https://docs.npmjs.com/trusted-publishers/ 。
-4. GitHub 的 npm environment 保留人工审核和 main 分支限制。只有明确要求发布时，才把 `publish` 选为 true；审批通过后才执行 npm publish。
+1. 本机 `npm whoami` 已确认账号 `miunerofrade`，邮箱已验证；当前 `npm profile get` 返回 `tfa: false`，维护者需先在 npm 账号设置启用 2FA，并保留验证设备。不得向对话提供密码、验证码或 token。
+2. 当前候选统一版本为 **1.1.0**；四个名称是 `seudaily`、`seudaily-web`、`seudaily-python`、`seudaily-browser`。2026-10-05 注册表均返回 404，但名称尚未取得所有权，发布前要再次核对。默认不改为带 scope 的名称。
+3. **首次发布推荐使用已经登录的本机**，在明确授权并确认最新 CI/候选文件后，依次发布 `build/release/packages/` 中的三个可选组件和主包；通过 npm 的交互流程完成 2FA。首次本地发布不带 `--provenance`（来源证明由后续 GitHub 发布生成）。这一步不要求提前创建 GitHub npm token。候选生成和本次准备均不执行发布。
+4. 包创建后，在四个包的 npm Settings → Trusted Publisher 配置 GitHub owner **miunerofrade**、repository **SEUdaily**、workflow filename **npm-release.yml**、environment **npm**，允许直接 `npm publish`。配置后 GitHub 使用 OIDC，不需要长期 token。官方说明：[Trusted Publisher](https://docs.npmjs.com/trusted-publishers/)。
+5. 如果首次也必须由 GitHub 发布，则另需将具备这四个名称发布权限、能满足 2FA 策略的 npm granular token 保存为 GitHub **npm Environment Secret `NPM_TOKEN`**；不提交到仓库、不发进对话。后续配置 Trusted Publisher 后移除它。这是替代方案，不是本机首次发布的必备条件。
+6. GitHub 的 npm environment 保留人工审核和 main 分支限制。后续明确要求发布时，才把 `publish` 选为 true，审批通过后才执行 npm publish。
 
 版本在首次发布前可继续调整。工作流会先检查所有版本是否已存在，避免意外覆盖；如中途部分发布成功，先检查 registry 已发布版本再决定补发或统一新版本，不自动跳过已有包。跨系统矩阵通过也不意味着校园登录、短信、VPN 和所有设备上的图形交互已经实测。

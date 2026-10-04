@@ -23,7 +23,7 @@ export const HELP = `SEUdaily ${VERSION}
   --help / -h          帮助
   --version / -V       版本
 
-首次使用 CLI/Web/校园工具时准备对应组件；普通聊天不需要 Python。`;
+CLI 与后端已内置；首次使用 Web/校园工具时准备可选组件；普通聊天不需要 Python。`;
 export function parseCommand(args: string[]) {
   const normalized = args.flatMap((value, index) => (value === '--resume' || value === '-r') && (!args[index + 1] || args[index + 1].startsWith('-')) ? [value, 'choose'] : [value]);
   const { values, positionals } = parseArgs({ args: normalized, allowPositionals: true, options: {

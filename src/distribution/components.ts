@@ -28,6 +28,11 @@ async function npmCommand() {
   throw new Error('安装可选组件需要 npm；请使用包含 npm 的 Node.js 安装。');
 }
 export async function ensureComponent(name: Component): Promise<string> {
+  if (name === 'cli') {
+    const bundled = join(installRoot(), 'dist', 'cli');
+    if (!existsSync(join(bundled, 'index.mjs'))) throw new Error('安装包缺少内置 CLI，请重新安装 SEUdaily。');
+    return bundled;
+  }
   // Source builds keep separately packed components beside the host; npm's file whitelist excludes them.
   const local = join(process.env.SEUDAILY_COMPONENT_DIR ?? join(installRoot(), 'dist', 'components'), name);
   if (existsSync(join(local, 'package.json'))) {

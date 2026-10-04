@@ -15,15 +15,20 @@ const core = await build({ ...common, metafile: true, entryPoints: [resolve(root
 await writeFile(resolve(output, 'THIRD_PARTY_NOTICES.txt'), await thirdPartyNotices([...Object.keys(launcher.metafile.inputs), ...Object.keys(core.metafile.inputs)]));
 await cp(resolve(root, '.agent/skills'), resolve(output, 'skills'), { recursive: true });
 const components = {};
-for (const name of ['cli', 'web', 'python', 'browser']) {
+const cliDirectory = resolve(output, 'cli'); await mkdir(cliDirectory, { recursive: true });
+const cli = await build({ ...common, metafile: true, entryPoints: [resolve(root, 'src/terminal/main.tsx')], outfile: resolve(cliDirectory, 'index.mjs') });
+await writeFile(resolve(cliDirectory, 'THIRD_PARTY_NOTICES.txt'), await thirdPartyNotices(Object.keys(cli.metafile.inputs)));
+for (const name of ['web', 'python', 'browser']) {
   const directory = resolve(output, 'components', name); await mkdir(directory, { recursive: true });
   const packageName = `seudaily-${name}`; components[name] = packageName;
-  await writeFile(resolve(directory, 'package.json'), JSON.stringify({ name: packageName, version, private: true, type: 'module', license: 'MIT',
+  const descriptions = { web: 'Optional Web interface for SEUdaily.', python: 'Optional Python campus, document and VPN tools for SEUdaily.', browser: 'Optional browser automation service for SEUdaily.' };
+  await writeFile(resolve(directory, 'README.md'), `# ${packageName}\n\n${descriptions[name]}\n\nThis component is installed automatically by [SEUdaily](https://www.npmjs.com/package/seudaily) when needed. Install the main application with \`npm install -g seudaily\`; run \`seudaily\` for the terminal UI or \`seudaily web\` for the Web interface.\n\n[Source and documentation](https://github.com/miunerofrade/SEUdaily). Licensed under MIT.\n`);
+  await writeFile(resolve(directory, 'package.json'), JSON.stringify({ name: packageName, version, description: descriptions[name], private: true, type: 'module', license: 'MIT',
     ...(name === 'browser' ? { dependencies: { 'playwright-core': metadata.dependencies?.playwright ?? metadata.devDependencies.playwright } } : {}), files: name === 'python' ? ['*.whl', '*requirements.txt'] : name === 'web' ? ['assets'] : ['index.mjs', 'THIRD_PARTY_NOTICES.txt'] }, null, 2));
   await cp(resolve(root, 'LICENSE'), resolve(directory, 'LICENSE'));
-  if (name === 'cli' || name === 'browser') {
-    const result = await build({ ...common, metafile: true, entryPoints: [resolve(root, name === 'cli' ? 'src/terminal/main.tsx' : 'src/distribution/browser.ts')], outfile: resolve(directory, 'index.mjs'),
-      ...(name === 'browser' ? { external: [...common.external, 'playwright-core/lib/coreBundle'] } : {}) });
+  if (name === 'browser') {
+    const result = await build({ ...common, metafile: true, entryPoints: [resolve(root, 'src/distribution/browser.ts')], outfile: resolve(directory, 'index.mjs'),
+      external: [...common.external, 'playwright-core/lib/coreBundle'] });
     await writeFile(resolve(directory, 'THIRD_PARTY_NOTICES.txt'), await thirdPartyNotices(Object.keys(result.metafile.inputs)));
   }
   if (name === 'web') {
@@ -38,4 +43,4 @@ for (const name of ['cli', 'web', 'python', 'browser']) {
   }
 }
 await writeFile(resolve(output, 'components.json'), JSON.stringify(components, null, 2));
-console.log('构建完成：基础包与 CLI、Web、Python、浏览器组件独立；未发布。');
+console.log('构建完成：默认包包含 CLI 和后端；Web、Python、浏览器组件按需安装；未发布。');

@@ -10,13 +10,13 @@ const output = join(root, 'build/release');
 await rm(output, { recursive: true, force: true });
 await mkdir(join(output, 'packages'), { recursive: true });
 const report = [];
-for (const component of ['cli', 'web', 'python', 'browser', 'host']) {
+for (const component of ['web', 'python', 'browser', 'host']) {
   const source = component === 'host' ? root : join(root, 'dist/components', component);
   const directory = join(output, 'staging', component);
   const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
   if (manifest.version !== metadata.version) throw new Error('组件版本未对齐');
   await mkdir(directory, { recursive: true });
-  const files = component === 'host' ? [...metadata.files, 'README.md', 'LICENSE'] : ['LICENSE', ...manifest.files.map(file => file.startsWith('*') ? null : file).filter(Boolean)];
+  const files = component === 'host' ? [...metadata.files, 'README.md', 'LICENSE'] : ['LICENSE', 'README.md', ...manifest.files.map(file => file.startsWith('*') ? null : file).filter(Boolean)];
   if (component === 'python') {
     const { readdir } = await import('node:fs/promises');
     files.push(...(await readdir(source)).filter(file => file.endsWith('.whl') || file.endsWith('requirements.txt')));
