@@ -17,7 +17,7 @@ async function shutdown(code = 0) {
     stopFocusRuntime();
     await agentRuntime.shutdown();
     server.close();
-    const deadline = setTimeout(() => process.exit(code), 5000);
+    const deadline = setTimeout(() => process.exit(code), 15_000);
     deadline.unref();
     closeApplicationWorkspace();
     await Promise.allSettled([closePythonWorker(), closeBrowserTools()]);

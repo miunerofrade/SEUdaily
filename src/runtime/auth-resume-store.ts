@@ -22,6 +22,7 @@ type AuthResume = {
   expiresAt: string;
   result?: ToolResult;
   error?: string;
+  challengeId?: string;
 };
 type State = { version: 1; resumes: AuthResume[] };
 
@@ -73,7 +74,7 @@ export async function issueAuthResume(input: Pick<AuthResume, "target" | "action
   });
 }
 
-export async function executeAuthResume(id: string) {
+export async function executeAuthResume(id: string, resetSession = true) {
   const claim = await serialized(async () => {
     const state = await load();
     const item = state.resumes.find((entry) => entry.id === id);
@@ -104,8 +105,20 @@ export async function executeAuthResume(id: string) {
     const authorization = await runPythonTool<ToolResult>(claim.item.target === "schedule" ? "authorize-schedule" : "authorize", {
       ...claim.item.payload,
       timeoutSeconds: 300,
-      resetSession: true,
+      resetSession,
     });
+    const authData = authorization.data as { challengeId?: string; authenticationReason?: string } | undefined;
+    const challengeId = authData?.challengeId;
+    if (authData?.authenticationReason === "sms_required" && typeof challengeId === "string") {
+      await serialized(async () => {
+        const state = await load();
+        const item = state.resumes.find(entry => entry.id === id)!;
+        item.status = "pending";
+        item.attempts -= 1;
+        await save(state);
+      });
+      return { ...claim.item, status: "pending" as const, challengeId };
+    }
     if (authorization.status !== "completed") throw new Error(authorization.summary || "登录未完成");
     const result = await runPythonTool<ToolResult>(claim.item.action, claim.item.payload);
     if (result.status === "auth_required" || result.status === "failed" || result.status === "cancelled") throw new Error(result.summary || "原工具重试失败");

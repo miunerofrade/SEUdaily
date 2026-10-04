@@ -341,8 +341,13 @@ export const appRoutes = [
     return c.json(await fullResultData(result));
   } }),
   registerApiRoute('/app/vpn', { method: 'POST', handler: async (c: any) => {
-    const input = z.object({ action: z.enum(['connect', 'disconnect', 'verify']), code: z.string().max(16).optional(), port: z.number().int().min(1024).max(65535).optional() }).strict().parse(await c.req.json());
+    const input = z.object({ action: z.enum(['connect', 'disconnect', 'verify', 'resend']), code: z.string().max(16).optional(), port: z.number().int().min(1024).max(65535).optional() }).strict().parse(await c.req.json());
     const result = await runPythonTool<ToolResult>(`vpn-${input.action}`, { code: input.code, port: input.port });
+    return c.json({ ...resultResponse(result), data: await fullResultData(result) });
+  } }),
+  registerApiRoute('/app/auth/sms', { method: 'POST', handler: async (c: any) => {
+    const input = z.object({ challengeId: z.string().regex(/^[a-f0-9]{32}$/), operation: z.enum(['send', 'verify']), code: z.string().max(16).optional() }).strict().parse(await c.req.json());
+    const result = await runPythonTool<ToolResult>('campus-sms', input);
     return c.json({ ...resultResponse(result), data: await fullResultData(result) });
   } }),
   registerApiRoute("/app/ramdisk/reveal", { method: "POST", handler: async (c: any) => {
@@ -602,7 +607,8 @@ export const appRoutes = [
     method: "POST",
     requiresAuth: false,
     handler: async (c: any) => {
-      const result = await runPythonTool<ToolResult>("authorize-schedule", { timeoutSeconds: 300, resetSession: true });
+      const input = z.object({ resetSession: z.boolean().default(true) }).parse(await c.req.json().catch(() => ({})));
+      const result = await runPythonTool<ToolResult>("authorize-schedule", { timeoutSeconds: 300, resetSession: input.resetSession });
       return c.json(resultResponse(result));
     },
   }),
@@ -611,8 +617,9 @@ export const appRoutes = [
     requiresAuth: false,
     handler: async (c: any) => {
       try {
-        const resume = await executeAuthResume(c.req.param("id"));
-        return c.json({ status: resume.status, resumeId: resume.id, target: resume.target });
+        const input = z.object({ resetSession: z.boolean().default(true) }).parse(await c.req.json().catch(() => ({})));
+        const resume = await executeAuthResume(c.req.param("id"), input.resetSession);
+        return c.json({ status: resume.status, resumeId: resume.id, target: resume.target, challengeId: resume.challengeId });
       } catch (error) {
         return c.json({ error: error instanceof Error ? error.message : "登录续接失败" }, 409);
       }

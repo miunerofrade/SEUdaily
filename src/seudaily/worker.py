@@ -9,7 +9,7 @@ import traceback
 from typing import Any
 
 from . import __version__
-from .cancellation import TaskCancelledError, set_current_cancel_event
+from .cancellation import TaskCancelledError, raise_if_cancelled, set_current_cancel_event
 from .cli import dispatch
 from .protocol import normalize_tool_result
 from .runtime_paths import env_value, migrate_runtime_directory
@@ -26,7 +26,6 @@ def main() -> None:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
-    os.environ["SEUDAILY_SHARED_BROWSER"] = "1"
     migration = migrate_runtime_directory(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
     if migration["errors"] or migration["skipped"]:
         raise RuntimeError("旧运行数据迁移未完成；请检查 .seudaily/.migration-status.json 后重试")
@@ -46,10 +45,10 @@ def main() -> None:
             if message.get("type") == "cancel":
                 with active_lock:
                     event = cancellation_events.get(request_id)
-                if event is not None:
-                    event.set()
-                else:
-                    cancelled_requests.add(request_id)
+                    if event is not None:
+                        event.set()
+                    else:
+                        cancelled_requests.add(request_id)
                 continue
             requests.put(message)
         requests.put(None)
@@ -65,13 +64,14 @@ def main() -> None:
         action = str(request.get("action") or "")
         payload = request.get("payload") or {}
         event = threading.Event()
-        if request_id in cancelled_requests:
-            event.set()
-            cancelled_requests.discard(request_id)
         with active_lock:
+            if request_id in cancelled_requests:
+                event.set()
+                cancelled_requests.discard(request_id)
             cancellation_events[request_id] = event
         set_current_cancel_event(event)
         try:
+            raise_if_cancelled()
             if action == "health":
                 raw_result = {"status": "completed", "version": __version__, "worker": True}
             else:

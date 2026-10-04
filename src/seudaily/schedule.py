@@ -175,7 +175,9 @@ class ScheduleService:
                     session.ensure_authenticated(self.entry_url)
                 return {"status": "authorized", "cookieFile": str(self.cookie_file.resolve()),
                         "sessionReset": session_reset, "authenticationMethod": "http"}
-            except CampusAuthError:
+            except CampusAuthError as error:
+                if error.status == "sms_required":
+                    return error.result()
                 # Keep the visible login entry for CAPTCHA and other interactive checks.
                 pass
         with self._page(

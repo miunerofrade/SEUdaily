@@ -1,5 +1,8 @@
-import { useVpn, VpnPanel } from './vpn-panel';
+import { MAX_ATTACHMENTS } from "../../../src/shared/attachment-limits";
+import { CampusSmsDialog } from "./campus-sms";
+import { useVpn, VpnPanel, VpnLicense } from './vpn-panel';
 import { useRamDisk } from './ramdisk';
+import { matchSlashCommands, slashCommandHint } from './slash-commands';
 import { packageDocumentContent } from '../../../src/shared/document-content';
 import { useImeComposition } from "./ime";
 import { PromptVersions } from "./prompt-versions";
@@ -645,9 +648,10 @@ export default function App() {
     void fetchSkills().then(result => { if (!stopped) setProjectSkills(result.skills); }).catch(() => { if (!stopped) setSkillError("技能目录暂时不可用"); });
     return () => { stopped = true; };
   }, []);
+  const attachmentUploadRef = useRef<object | null>(null);
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   const [pendingDocuments, setPendingDocuments] = useState<DocumentAttachment[]>([]);
-  const [uploadingDocuments, setUploadingDocuments] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState("");
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
@@ -673,6 +677,22 @@ export default function App() {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const slashListRef = useRef<HTMLDivElement | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slashMatches = matchSlashCommands(draft);
+  const slashOpen = !slashDismissed && !sending && slashMatches.length > 0;
+  const selectedSlashIndex = Math.min(slashIndex, Math.max(0, slashMatches.length - 1));
+  useEffect(() => { setSlashIndex(0); setSlashDismissed(false); }, [draft, activeId]);
+  useLayoutEffect(() => {
+    if (!slashOpen) return;
+    const list = slashListRef.current;
+    const row = list?.children[selectedSlashIndex] as HTMLElement | undefined;
+    if (!list || !row) return;
+    const top = row.offsetTop - list.offsetTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + row.offsetHeight - list.clientHeight;
+  }, [slashOpen, selectedSlashIndex, draft]);
 
   useLayoutEffect(() => {
     if (!rightOpen || view !== "chat") return;
@@ -689,6 +709,16 @@ export default function App() {
   }, [rightOpen, view]);
 
   const activeRaw = conversations.find((item) => item.id === activeId) ?? conversations[0];
+  function resetComposerAttachments() {
+    attachmentUploadRef.current = null;
+    setUploadingAttachments(false);
+    setPendingImages([]); setPendingDocuments([]);
+    setAttachmentError(""); setPreviewImage(null);
+    setSelectedSkill(null);
+  }
+  useLayoutEffect(() => {
+    resetComposerAttachments();
+  }, [activeRaw.id]);
   const active = { ...activeRaw, messages: activeRaw.messagesLoaded === false ? [] : conversationPath(activeRaw.messages, activeRaw.activeLeaf).filter(message => !message.hidden) };
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
   const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
@@ -838,6 +868,7 @@ export default function App() {
     if (sending) abortRef.current?.abort();
     setView("chat");
     setRightOpen(false);
+    resetComposerAttachments();
     if (!active.messages.length && activeRaw.messagesLoaded !== false) {
       setDraft("");
       setNavOpen(false);
@@ -1118,7 +1149,7 @@ export default function App() {
 
   async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string } = {}) {
     const text = prompt.trim();
-    if ((!text && !pendingImages.length && !pendingDocuments.length) || sending || activeRaw.messagesLoaded === false) return;
+    if ((!text && !pendingImages.length && !pendingDocuments.length) || sending || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
     if (!options.preserveComposer && /^\/ramdisk(?:\s|$)/i.test(text)) {
       if (ramdisk.busy) return;
       setDraft(''); setRightOpen(true);
@@ -1234,6 +1265,17 @@ export default function App() {
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (ime.isComposing(event)) return;
+    if (slashOpen && !event.shiftKey) {
+      if (event.key === 'Escape') { event.preventDefault(); setSlashDismissed(true); return; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashIndex((selectedSlashIndex + (event.key === 'ArrowDown' ? 1 : -1) + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if (event.key === 'Tab' || event.key === 'Enter') {
+        event.preventDefault(); completeSlashCommand(slashMatches[selectedSlashIndex].command); return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       if (sending) return;
       event.preventDefault();
@@ -1241,49 +1283,49 @@ export default function App() {
     }
   }
 
+  function completeSlashCommand(command: string) {
+    setDraft(command + ' ');
+    setSlashDismissed(true);
+    composerTextareaRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (slashOpen) { completeSlashCommand(slashMatches[selectedSlashIndex].command); return; }
     void send();
   }
 
-  async function addImages(files: File[]) {
-    const accepted = files.filter((file) => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024).slice(0, Math.max(0, 4 - pendingImages.length));
-    if (!accepted.length) {
-      setAttachmentError("仅支持 10 MB 以内的图片，一次最多 4 张。");
-      return;
-    }
-    setAttachmentError("");
-    try {
-      const images = await Promise.all(accepted.map(async (file) => {
-        const image = await readImage(file);
-        const stored = await uploadTemporaryImage({ dataUrl: image.dataUrl!, name: image.name });
-        return { ...image, path: stored.path, ref: `seudaily-image-ref:${stored.ref}` };
-      }));
-      setPendingImages((current) => [...current, ...images].slice(0, 4));
-    } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : "图片暂存失败");
-    }
-  }
-
-  async function addDocuments(files: File[]) {
+  async function addAttachments(files: File[]) {
+    if (!files.length) return;
+    if (attachmentUploadRef.current) { setAttachmentError("附件正在上传，请稍候。"); return; }
+    const remaining = MAX_ATTACHMENTS - pendingImages.length - pendingDocuments.length;
+    if (remaining <= 0) { setAttachmentError("每轮最多 10 个附件，请删除不需要的附件。"); return; }
     const allowed = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
-    const accepted = files.filter((file) => allowed.has(file.name.slice(file.name.lastIndexOf(".")).toLowerCase()) && file.size <= 50 * 1024 * 1024).slice(0, Math.max(0, 4 - pendingDocuments.length));
-    if (!accepted.length) {
-      setAttachmentError("仅支持 50 MB 以内的 PDF、DOCX、XLSX、PPTX，不支持旧版 Office 文件。");
-      return;
-    }
-    setAttachmentError("");
-    setUploadingDocuments(true);
+    const accepted = files.filter(file => file.type.startsWith("image/")
+      ? file.size <= 10 * 1024 * 1024
+      : allowed.has(file.name.slice(file.name.lastIndexOf(".")).toLowerCase()) && file.size <= 50 * 1024 * 1024).slice(0, remaining);
+    if (!accepted.length) { setAttachmentError("支持 10 MB 以内的图片，以及 50 MB 以内的 PDF、DOCX、XLSX、PPTX。"); return; }
+    const upload = {};
+    attachmentUploadRef.current = upload;
+    setUploadingAttachments(true); setAttachmentError("");
     try {
-      const documents = await Promise.all(accepted.map(async (file) => {
+      const uploaded = await Promise.all(accepted.map(async file => {
+        if (file.type.startsWith("image/")) {
+          const image = await readImage(file);
+          const stored = await uploadTemporaryImage({ dataUrl: image.dataUrl!, name: image.name });
+          return { image: { ...image, path: stored.path, ref: `seudaily-image-ref:${stored.ref}` } };
+        }
         const parsed = await uploadDocument(file);
-        return { id: uid(), name: parsed.filename, mediaType: parsed.mediaType, contextRef: parsed.contextRef, markdown: parsed.markdown, charCount: parsed.charCount } satisfies DocumentAttachment;
+        return { document: { id: uid(), name: parsed.filename, mediaType: parsed.mediaType, contextRef: parsed.contextRef, markdown: parsed.markdown, charCount: parsed.charCount } satisfies DocumentAttachment };
       }));
-      setPendingDocuments((current) => [...current, ...documents].slice(0, 4));
+      if (attachmentUploadRef.current !== upload) return;
+      setPendingImages(current => [...current, ...uploaded.flatMap(item => item.image ? [item.image] : [])]);
+      setPendingDocuments(current => [...current, ...uploaded.flatMap(item => item.document ? [item.document] : [])]);
+      if (accepted.length < files.length) setAttachmentError("部分文件未添加：每轮最多 10 个附件，并受格式与大小限制。");
     } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : "文档解析失败");
+      if (attachmentUploadRef.current === upload) setAttachmentError(error instanceof Error ? error.message : "附件上传失败");
     } finally {
-      setUploadingDocuments(false);
+      if (attachmentUploadRef.current === upload) { attachmentUploadRef.current = null; setUploadingAttachments(false); }
     }
   }
 
@@ -1291,13 +1333,12 @@ export default function App() {
     const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
     if (!images.length) return;
     event.preventDefault();
-    void addImages(images);
+    void addAttachments(images);
   }
 
   function onImageInput(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
-    void addImages(files.filter((file) => file.type.startsWith("image/")));
-    void addDocuments(files.filter((file) => !file.type.startsWith("image/")));
+    void addAttachments(files);
     event.target.value = "";
   }
 
@@ -1310,8 +1351,14 @@ export default function App() {
   const composer = (
     <form className={`composer-wrap ${active.messages.length ? "" : "centered"}`} onSubmit={onSubmit}>
       <div className="composer">
-        {uploadingDocuments && <div className="composer-attachment-error">正在解析文档，请稍候…</div>}
-        {attachmentError && !uploadingDocuments && <div className="composer-attachment-error">{attachmentError}</div>}
+        {slashOpen && <div className="slash-menu">
+          <div className="slash-menu-heading">命令 <span>↑↓ 选择 · Tab / Enter 补全 · Esc 收起</span></div>
+          <div id="composer-slash-list" className="slash-menu-list" role="listbox" aria-label="斜杠命令" ref={slashListRef}>
+            {slashMatches.map((item, index) => <button type="button" role="option" id={`composer-slash-${index}`} aria-selected={index === selectedSlashIndex} className={index === selectedSlashIndex ? 'selected' : ''} key={item.command} onMouseDown={event => event.preventDefault()} onClick={() => completeSlashCommand(item.command)}><strong>{item.command}</strong><span>{item.description}</span></button>)}
+          </div>
+        </div>}
+        {uploadingAttachments && <div className="composer-attachment-error">正在上传附件，请稍候…</div>}
+        {attachmentError && !uploadingAttachments && <div className="composer-attachment-error">{attachmentError}</div>}
         {!!pendingImages.length && <div className={`composer-images ${pendingImages.length > 2 ? "compact" : ""}`}>{pendingImages.map((image) => <div key={image.id}><button type="button" className="composer-image-preview" aria-label={`预览图片：${image.name}`} onClick={() => setPreviewImage(image)}><img src={image.dataUrl} alt={image.name} /></button><button type="button" className="composer-image-remove" aria-label={`移除图片：${image.name}`} onClick={() => setPendingImages((current) => current.filter((item) => item.id !== image.id))}><X size={12} /></button></div>)}</div>}
         {!!pendingDocuments.length && <div className="composer-files">{pendingDocuments.map((document) => <div className="composer-file" key={document.id}><FileText size={16} /><span title={document.name}>{document.name}</span><button type="button" aria-label={`移除文件：${document.name}`} onClick={() => setPendingDocuments((current) => current.filter((item) => item.id !== document.id))}><X size={13} /></button></div>)}</div>}
         <div className="composer-add-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setComposerMenuOpen(false); }}>
@@ -1332,13 +1379,14 @@ export default function App() {
         </div>
         <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
-        <textarea ref={composerTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
+        <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
         {sending ? (
           <button type="button" className="send-button stop" onClick={() => abortRef.current?.abort()} aria-label="停止回答"><CircleStop size={19} /></button>
         ) : (
-          <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingDocuments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
+          <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
         )}
       </div>
+      {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
       {!!active.messages.length && <div className="composer-hint"><span>Enter 发送 · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
     </form>
@@ -1359,6 +1407,7 @@ export default function App() {
 
   return (
     <div className={`app-shell ${rightOpen && view === "chat" ? "with-inspector" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <CampusSmsDialog />
       <div className={`mobile-scrim ${navOpen ? "visible" : ""}`} onClick={() => setNavOpen(false)} />
       <aside className={`sidebar ${navOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
         <div className="brand">
@@ -1462,7 +1511,7 @@ export default function App() {
             ))}</div>
           </section>}
         </div>
-        <p className="inspector-footer">课程凭据不会发送到对话内容中</p>
+        <div className="inspector-footer"><span>课程凭据不会发送到对话内容中</span><VpnLicense /></div>
       </aside>
       {previewImage && attachmentSource(previewImage) && <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }}><div className="image-preview-dialog" role="dialog" aria-modal="true" aria-label="图片预览"><button type="button" className="preview-close" aria-label="关闭预览" onClick={() => setPreviewImage(null)}><X size={19} /></button><img src={attachmentSource(previewImage)} alt={previewImage.name} /></div></div>}
       {deleteTarget && (

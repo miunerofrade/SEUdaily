@@ -13,8 +13,6 @@ type PendingRequest<T> = {
   resolve: (value: T) => void;
   reject: (reason: Error) => void;
   timeout: NodeJS.Timeout;
-  cancelFallback?: NodeJS.Timeout;
-  settled: boolean;
   cleanup?: () => void;
 };
 
@@ -25,6 +23,8 @@ class PythonWorkerClient {
 
   private ensureWorker(): ChildProcessWithoutNullStreams {
     if (this.child && this.child.exitCode === null && !this.child.killed) return this.child;
+    // exitCode can change before close; settle the old generation before replacing it.
+    if (this.child) this.failAll(new Error(`SEUdaily worker is no longer running (exit code ${this.child.exitCode}); restarting`));
 
     const child = spawn("uv", ["run", "seudaily-worker"], {
       cwd: projectRoot,
@@ -46,9 +46,11 @@ class PythonWorkerClient {
       this.stderrTail = `${this.stderrTail}${chunk}`.slice(-16_000);
     });
     createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
-    child.on("error", (error) => this.failAll(error));
+    child.stdin.on("error", (error) => { if (this.child === child) this.failAll(error); });
+    child.on("error", (error) => { if (this.child === child) this.failAll(error); });
     child.on("close", (code) => {
-      if (this.child === child) this.child = undefined;
+      if (this.child !== child) return;
+      this.child = undefined;
       this.failAll(
         new Error(
           `SEUdaily worker exited with code ${code}.${this.stderrTail ? `\n${this.stderrTail}` : ""}`,
@@ -66,26 +68,24 @@ class PythonWorkerClient {
       this.stderrTail = `${this.stderrTail}\nInvalid worker output: ${line}`.slice(-16_000);
       return;
     }
-    const pending = this.pending.get(message.requestId);
+    const pending = this.takeRequest(message.requestId);
     if (!pending) return;
-    this.pending.delete(message.requestId);
-    clearTimeout(pending.timeout);
-    if (pending.cancelFallback) clearTimeout(pending.cancelFallback);
-    pending.cleanup?.();
-    if (pending.settled) return;
-    pending.settled = true;
     if (message.type === "error") pending.reject(new Error(message.error));
     else pending.resolve(message.result);
   }
 
-  private failAll(error: Error): void {
-    for (const pending of this.pending.values()) {
+  private takeRequest(requestId: string) {
+    const pending = this.pending.get(requestId);
+    if (pending) {
+      this.pending.delete(requestId);
       clearTimeout(pending.timeout);
-      if (pending.cancelFallback) clearTimeout(pending.cancelFallback);
       pending.cleanup?.();
-      if (!pending.settled) pending.reject(error);
     }
-    this.pending.clear();
+    return pending;
+  }
+
+  private failAll(error: Error): void {
+    for (const requestId of this.pending.keys()) this.takeRequest(requestId)?.reject(error);
   }
 
   private terminateWorkerTree(): void {
@@ -104,10 +104,15 @@ class PythonWorkerClient {
   async close(): Promise<void> {
     const child = this.child;
     if (!child) return;
+    for (const requestId of this.pending.keys()) {
+      if (!child.stdin.destroyed && child.stdin.writable) {
+        child.stdin.write(`${JSON.stringify({ requestId, type: "cancel" })}\n`, () => {});
+      }
+    }
     this.failAll(new Error('SEUdaily worker is shutting down'));
     const ended = new Promise<void>(resolve => child.once('close', () => resolve()));
     child.stdin.end();
-    const fallback = setTimeout(() => this.terminateWorkerTree(), 3000);
+    const fallback = setTimeout(() => this.terminateWorkerTree(), 10_000);
     await ended;
     clearTimeout(fallback);
   }
@@ -123,30 +128,24 @@ class PythonWorkerClient {
     const taskId = `task-${randomUUID()}`;
 
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        child.stdin.write(`${JSON.stringify({ requestId, type: "cancel" })}\n`);
-        const current = this.pending.get(requestId);
-        if (current && !current.settled) {
-          current.settled = true;
-          current.reject(new Error(`Python tool timed out: ${action}`));
-          current.cancelFallback = setTimeout(() => this.terminateWorkerTree(), 5_000);
-        }
-      }, 30 * 60 * 1000);
+      const timeout = setTimeout(() => cancel(new Error(`Python tool timed out: ${action}`)), 30 * 60 * 1000);
 
-      const pending: PendingRequest<T> = { resolve, reject, timeout, settled: false };
+      const pending: PendingRequest<T> = { resolve, reject, timeout };
       this.pending.set(requestId, pending as PendingRequest<unknown>);
 
-      const abort = () => {
-        child.stdin.write(`${JSON.stringify({ requestId, type: "cancel" })}\n`);
-        if (!pending.settled) {
-          pending.settled = true;
-          const error = new Error(`Python tool cancelled: ${action}`);
-          error.name = "AbortError";
-          reject(error);
-          pending.cancelFallback = setTimeout(() => {
-            if (this.pending.has(requestId)) this.terminateWorkerTree();
-          }, 5_000);
+      const cancel = (error: Error) => {
+        if (!this.takeRequest(requestId)) return;
+        // Cancellation belongs to this request. Killing the shared worker here
+        // would also discard unrelated queued requests and skip resource cleanup.
+        if (!child.stdin.destroyed && child.stdin.writable) {
+          child.stdin.write(`${JSON.stringify({ requestId, type: "cancel" })}\n`, () => {});
         }
+        reject(error);
+      };
+      const abort = () => {
+        const error = new Error(`Python tool cancelled: ${action}`);
+        error.name = "AbortError";
+        cancel(error);
       };
 
       if (abortSignal?.aborted) {
@@ -156,13 +155,7 @@ class PythonWorkerClient {
       abortSignal?.addEventListener("abort", abort, { once: true });
       pending.cleanup = () => abortSignal?.removeEventListener("abort", abort);
       child.stdin.write(`${JSON.stringify({ requestId, taskId, action, payload })}\n`, (error) => {
-        if (error && !pending.settled) {
-          pending.settled = true;
-          this.pending.delete(requestId);
-          clearTimeout(timeout);
-          pending.cleanup?.();
-          reject(error);
-        }
+        if (error) this.takeRequest(requestId)?.reject(error);
       });
     });
   }

@@ -1,3 +1,4 @@
+import { completeCampusLogin } from "./campus-sms";
 import { normalizedUsage } from "../../../src/shared/telemetry";
 import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 
@@ -169,8 +170,8 @@ export type AgentAuthRequest = {
 };
 
 export function executeAgentAuthRequest(id: string) {
-  return jsonRequest<{ status: string; resumeId: string; target: "schedule" | "course" }>(
-    `/app/auth-resumes/${encodeURIComponent(id)}/execute`, { method: "POST" },
+  return completeCampusLogin<{ status: string; resumeId: string; target: "schedule" | "course" }>(
+    `/app/auth-resumes/${encodeURIComponent(id)}/execute`,
   );
 }
 
@@ -723,7 +724,7 @@ export async function loadFocusConversations(): Promise<Conversation[]> {
 }
 
 export function authorizeSchedule() {
-  return jsonRequest<ScheduleResponse>("/app/schedule/authorize", { method: "POST" });
+  return completeCampusLogin<ScheduleResponse>("/app/schedule/authorize");
 }
 
 export function fetchLibrary() {

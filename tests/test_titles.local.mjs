@@ -1,0 +1,23 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+import {AgentStore} from '../src/agent/storage.ts';
+const source=await readFile(new URL('../src/runtime/app-routes.ts',import.meta.url),'utf8');
+const ast=ts.createSourceFile('routes.ts',source,ts.ScriptTarget.Latest,true);
+const names=new Set(['compactTitleInput','cleanGeneratedTitle','fallbackConversationTitle','requestConversationTitle','generateFirstTurnTitle']);
+const code=ts.transpileModule(ast.statements.filter(s=>ts.isFunctionDeclaration(s)&&names.has(s.name?.text)).map(s=>s.getText(ast)).join('\n'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+test('old unnamed multi-turn title uses original topic; generated and named histories are protected',async(t)=>{
+ const store=new AgentStore(':memory:');t.after(()=>store.close());
+ await store.ensureThread({threadId:'old',resourceId:'local'});
+ for(let i=0;i<25;i++)await store.saveMessage({id:'m'+i,threadId:'old',resourceId:'local',role:'user',createdAt:new Date().toISOString(),content:{parts:[{type:'text',text:i?'后续问题':'最初的学习规划问题'}]}});
+ const updatedAt=(await store.getThreadById({threadId:'old'})).updatedAt;
+ let calls=0;
+ const context=vm.createContext({agentStore:store,AbortSignal,process:{env:{DEEPSEEK_API_KEY:'mock'}},fetch:async(_,request)=>{calls++;assert.equal(JSON.parse(request.body).messages[1].content,'最初的学习规划问题');return Response.json({choices:[{message:{content:'{"title":"学习规划"}'}}]});}});
+ vm.runInContext(code+'\nglobalThis.generate=generateFirstTurnTitle;',context);
+ const result=await context.generate({threadId:'old',resourceId:'local',titleInput:'后续问题'});assert.equal(result.title,'学习规划');assert.equal((await store.getThreadById({threadId:'old'})).title,'学习规划');assert.equal((await store.getThreadById({threadId:'old'})).updatedAt,updatedAt);
+ await context.generate({threadId:'old',resourceId:'local',titleInput:'新主题'});assert.equal(calls,1);
+ await store.patchThread({id:'old',title:'用户自定标题',metadata:{}});const preserved=await context.generate({threadId:'old',resourceId:'local',titleInput:'新主题'});assert.equal(preserved.reason,'not-first-turn');assert.equal(calls,1);
+ const invalid=await context.generate({threadId:'old',resourceId:'other',titleInput:'新主题'});assert.equal(invalid.reason,'thread-not-found');assert.equal(calls,1);
+});

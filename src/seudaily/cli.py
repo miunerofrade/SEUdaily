@@ -139,10 +139,16 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     action = request.get("action")
     payload = request.get("payload") or {}
 
-    if action in {"vpn-status", "vpn-connect", "vpn-disconnect", "vpn-verify"}:
+    if action == "campus-sms":
+        from .campus_auth import sms_challenge_action, CampusAuthError
+        try:
+            return sms_challenge_action(payload.get("challengeId"), payload.get("operation"), str(payload.get("code", "")))
+        except CampusAuthError as error:
+            return {"status": "failed", "message": str(error)}
+    if action in {"vpn-status", "vpn-connect", "vpn-disconnect", "vpn-verify", "vpn-resend"}:
         from .vpn import manager
         vpn = manager()
-        state = vpn.status() if action == 'vpn-status' else vpn.connect(payload.get('port')) if action == 'vpn-connect' else vpn.disconnect() if action == 'vpn-disconnect' else vpn.verify(str(payload.get('code', '')))
+        state = vpn.status() if action == 'vpn-status' else vpn.connect(payload.get('port')) if action == 'vpn-connect' else vpn.disconnect() if action == 'vpn-disconnect' else vpn.resend() if action == 'vpn-resend' else vpn.verify(str(payload.get('code', '')))
         return {'status': 'completed', 'summary': state['message'], 'data': state}
     if action == "reveal-ramdisk":
         from .ramdisk import reveal_ramdisk
