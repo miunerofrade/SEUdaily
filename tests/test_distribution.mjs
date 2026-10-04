@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseCommand } from '../src/distribution/arguments.ts';
+import { ensureUv } from '../src/distribution/components.ts';
 const exec = promisify(execFile), root = resolve(import.meta.dirname, '..');
 const node = process.execPath;
 const npm = (args, options) => process.platform === 'win32' ? exec(node, [process.env.npm_execpath ?? join(dirname(node), 'node_modules/npm/bin/npm-cli.js'), ...args], options) : exec('npm', args, options);
@@ -19,6 +20,26 @@ async function freePort() { const server = netServer(); await new Promise(r => s
 async function eventually(operation, timeout = 10_000) { let error; const end = Date.now() + timeout; do { try { return await operation(); } catch (e) { error = e; await delay(100); } } while (Date.now() < end); throw error; }
 // TerminateProcess on Windows cannot execute a signal handler: test expiry of the crashed client's lease.
 const exitTimeout = process.platform === 'win32' ? 45_000 : 10_000;
+
+test('existing uv is reused without downloading; explicit invalid uv reports an error', async t => {
+  const temporary = await mkdtemp(join(tmpdir(), 'seudaily-uv-reuse-'));
+  const previous = { cache: process.env.SEUDAILY_CACHE_DIR, uv: process.env.SEUDAILY_UV_BINARY };
+  t.after(async () => {
+    for (const [key, value] of [['SEUDAILY_CACHE_DIR', previous.cache], ['SEUDAILY_UV_BINARY', previous.uv]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await rm(temporary, { recursive: true, force: true });
+  });
+  process.env.SEUDAILY_CACHE_DIR = temporary;
+  delete process.env.SEUDAILY_UV_BINARY;
+  const uv = await ensureUv();
+  assert.ok(existsSync(uv));
+  assert.ok(!existsSync(join(temporary, 'uv')));
+  process.env.SEUDAILY_UV_BINARY = uv;
+  assert.equal(await ensureUv(), uv);
+  process.env.SEUDAILY_UV_BINARY = join(temporary, 'missing-uv');
+  await assert.rejects(ensureUv(), /指定的 uv/);
+});
 
 test('unified commands and aliases reject removed/conflicting arguments', () => {
   for (const alias of [[], ['chat'], ['--chat'], ['-c']]) assert.equal(parseCommand(alias).command, 'chat');

@@ -16,30 +16,34 @@ concurrency:
 
 jobs:
   verify:
-    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    name: ${{ matrix.os }} / Node ${{ matrix.runtime.node }} / Python ${{ matrix.runtime.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2025, macos-15]
-        node: ['22.22.0', '24.12.0']
+        runtime:
+          - { node: '22.22.0', python: '3.11' }
+          - { node: '24.12.0', python: '3.12' }
+          - { node: '24.12.0', python: '3.13' }
     defaults:
       run:
         shell: bash
     env:
       PYTHONUTF8: '1'
+      UV_PYTHON: ${{ matrix.runtime.python }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/build/browsers
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.runtime.node }}
           cache: npm
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: '0.11.1'
-          python-version: '3.13'
+          python-version: ${{ matrix.runtime.python }}
           enable-cache: true
       - run: npm ci
       - run: uv sync --frozen
@@ -71,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: distribution-${{ matrix.os }}-node-${{ matrix.node }}
+          name: distribution-${{ matrix.os }}-node-${{ matrix.runtime.node }}-python-${{ matrix.runtime.python }}
           path: |
             build/packages/
             build/validation/*result.json

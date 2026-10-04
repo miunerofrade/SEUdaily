@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -31,6 +32,9 @@ try {
   process.env.PYTHONIOENCODING = 'utf-8';
   const python = await ensurePython();
   await health(python);
+  // CI supplies uv and a compatible Python: optional setup must reuse them.
+  assert.ok(!existsSync(join(directory, 'cache', 'uv')), 'existing uv was not reused');
+  assert.ok(!existsSync(join(directory, 'cache', 'python-runtime')), 'existing Python was not reused');
   const component = await browserComponent();
   const config = join(directory, 'browser.json');
   const engine = process.platform === 'darwin' ? 'webkit' : process.platform === 'win32' ? 'chromium' : 'firefox';

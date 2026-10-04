@@ -501,7 +501,7 @@ class TrainingPlanService:
 
     @staticmethod
     def _display_number(value: float) -> int | float:
-        return int(value) if value.is_integer() else round(value, 2)
+        return int(value) if float(value).is_integer() else round(value, 2)
 
     @staticmethod
     def _rows(payload: dict[str, Any], dataset: str) -> list[dict[str, Any]]:

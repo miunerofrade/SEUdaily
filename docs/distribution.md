@@ -57,7 +57,7 @@ node bin/seudaily.mjs import-data /absolute/old/repository
 
 历史数据库 schema 不变；旧 Mastra 数据只读导入也已改为 SQLite，不依赖 Python。用户可以继续通过 `--data-dir /absolute/old/repository` 使用原目录，不要求迁移。
 
-额外部署配置：`SEUDAILY_COMPONENT_DIR` 可指向本地构建组件目录；`SEUDAILY_UV_BINARY` 可显式指定现有 uv；`PLAYWRIGHT_BROWSERS_PATH` 可复用已有对应版本引擎。默认仍为私有安装。修改已有后端的端口/数据目录需要先停止它，不会把另一服务当成可复用后端。
+额外部署配置：`SEUDAILY_COMPONENT_DIR` 可指向本地构建组件目录；`SEUDAILY_UV_BINARY` 可显式指定现有 uv，否则优先复用 PATH 中的 uv（最低 0.11.1），不存在兼容版本才下载到私有缓存。Python 优先复用已有 3.11 或更高版本的解释器；不存在时才下载 3.13。依赖始终安装在应用自己的虚拟环境，不修改用户环境。`PLAYWRIGHT_BROWSERS_PATH` 可复用已有对应版本引擎。修改已有后端的端口/数据目录需要先停止它，不会把另一服务当成可复用后端。
 
 ## 验收与发布门槛
 

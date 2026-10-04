@@ -3,7 +3,7 @@ name = "seudaily-core"
 version = "1.1.0"
 description = "Python automation and media runtime for the SEUdaily assistant"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "dashscope>=1.25.15",
     "openai>=2.30.0",

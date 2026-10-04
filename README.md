@@ -17,7 +17,7 @@ SEUdaily 是面向东南大学学习与校园事务的本地助手，提供终�
 npm 发布包正在准备，尚未公开发布。当前从源码构建，需要：
 
 - Node.js **22.22+（22.x）或 24.12+**、npm **10+**。
-- Python **3.13+** 和 [uv](https://docs.astral.sh/uv/)。
+- Python **3.11+（包括 3.12、3.13）** 和 [uv](https://docs.astral.sh/uv/)。
 - Playwright 浏览器运行时；媒体下载与转写还需要系统 **FFmpeg**。
 
 ```bash

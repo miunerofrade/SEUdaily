@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, writeFile, chmod } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipSync } from 'fflate';
 import uvRelease from './uv-release.json' with { type: 'json' };
@@ -67,8 +67,27 @@ export async function ensureComponent(name: Component): Promise<string> {
 }
 
 const UV_VERSION = uvRelease.version;
+async function compatibleUv(command: string): Promise<boolean> {
+  try {
+    const { stdout } = await execute(command, ['--version'], { timeout: 5000, windowsHide: true });
+    const version = /^uv (\d+)\.(\d+)\.(\d+)/.exec(stdout);
+    if (!version) return false;
+    const actual = version.slice(1).map(Number), minimum = UV_VERSION.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if (actual[i] !== minimum[i]) return actual[i] > minimum[i];
+    return true;
+  } catch { return false; }
+}
 export async function ensureUv(): Promise<string> {
-  if (process.env.SEUDAILY_UV_BINARY) return resolve(process.env.SEUDAILY_UV_BINARY);
+  if (process.env.SEUDAILY_UV_BINARY) {
+    const configured = resolve(process.env.SEUDAILY_UV_BINARY);
+    if (!await compatibleUv(configured)) throw new Error(`指定的 uv 无法运行或版本低于 ${UV_VERSION}`);
+    return configured;
+  }
+  for (const directory of (process.env.PATH ?? '').split(delimiter)) {
+    if (!directory) continue;
+    const candidate = resolve(directory, process.platform === 'win32' ? 'uv.exe' : 'uv');
+    if (existsSync(candidate) && await compatibleUv(candidate)) return candidate;
+  }
   const directory = join(cacheRoot(), 'uv', UV_VERSION);
   const executable = join(directory, process.platform === 'win32' ? 'uv.exe' : 'uv');
   if (existsSync(executable)) return executable;
@@ -105,7 +124,6 @@ async function preparePython(): Promise<string> {
   const component = await ensureComponent('python');
   process.env.SEUDAILY_MEDIA_REQUIREMENTS = join(component, 'media-requirements.txt');
   process.env.UV_CACHE_DIR ??= join(cacheRoot(), 'uv-cache');
-  process.env.UV_PYTHON_INSTALL_DIR ??= join(cacheRoot(), 'python-runtime');
   const directory = join(cacheRoot(), 'python', VERSION);
   const executable = join(directory, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
   if (existsSync(join(directory, 'ready.json')) && existsSync(executable)) {
@@ -127,7 +145,16 @@ async function preparePython(): Promise<string> {
       // The final venv path must be used when creating it: scripts contain absolute paths.
       await rm(directory, { recursive: true, force: true });
       await mkdir(directory, { recursive: true });
-      await exec(uv, ['venv', '--python', '3.13', join(directory, 'venv')], { env: environment, timeout: 10 * 60_000 });
+      let interpreter: string;
+      try {
+        const found = await execute(uv, ['python', 'find', '--no-config', '--no-project', '--system', '--no-python-downloads', '>=3.11'], { env: environment, timeout: 30_000, windowsHide: true });
+        interpreter = found.stdout.trim();
+      } catch {
+        // No compatible interpreter exists: keep the downloaded runtime in our cache.
+        environment.UV_PYTHON_INSTALL_DIR ??= join(cacheRoot(), 'python-runtime');
+        interpreter = '3.13';
+      }
+      await exec(uv, ['venv', '--python', interpreter, join(directory, 'venv')], { env: environment, timeout: 10 * 60_000 });
       const wheel = (await readdir(component)).find(file => file.endsWith('.whl'));
       if (!wheel) throw new Error('Python 组件缺少 wheel');
       await exec(uv, ['pip', 'install', '--python', executable, '--no-deps', join(component, wheel)], { env: environment, timeout: 10 * 60_000 });
