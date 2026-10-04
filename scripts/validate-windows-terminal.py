@@ -31,10 +31,6 @@ def terminal(exit_method):
         env.update(SEUDAILY_PROJECT_ROOT=str(path), PROBE_COMPONENT=str(OUTPUT / 'terminal.mjs'), NODE_ENV='production', TERM='xterm-256color', FORCE_COLOR='1')
         env.pop('CI', None)
         env.pop('NO_COLOR', None)
-        # This controls pywinpty's parent-side native reader, not the child app.
-        # Poll output instead of leaving ConPTY's background read blocked while
-        # the child waits for terminal writes/input to finish.
-        os.environ['PYWINPTY_BLOCK'] = '0'
         proc = PtyProcess.spawn([shutil.which('node'), str(OUTPUT / 'node/core.mjs'), 'cli'], cwd=directory, env=env, dimensions=(32, 100), backend=1)
         output = ''
 
@@ -60,13 +56,13 @@ def terminal(exit_method):
             return [json.loads(line) for line in file.read_text(encoding='utf-8').splitlines()] if file.exists() else []
 
         try:
-            wait_for(lambda: 'fixture-model' in output and (path / 'ready').exists())
+            wait_for(lambda: (path / 'model-rendered').exists() and (path / 'ready').exists())
             pump(.5)
             send('中文输入\r')
             assert not [item for item in records() if 'messages' in item], 'IME commit must remain in draft'
             send('\r', .5)
             wait_for(lambda: any(item.get('messages') == '中文输入' for item in records()))
-            wait_for(lambda: '回答完成' in output)
+            wait_for(lambda: (path / 'answer-rendered').exists())
             paste = '\x1b[200~' + json.dumps(str(image), ensure_ascii=False) + '\x1b[201~'
             send(paste, .5)
             wait_for(lambda: any(item.get('uploaded') for item in records()))

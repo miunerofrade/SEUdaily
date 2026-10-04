@@ -37,7 +37,11 @@ export async function run() {
   // Observe the real writes without changing them, so Windows can verify teardown too.
   const originalWrite = process.stdout.write.bind(process.stdout);
   if (process.platform === 'win32') process.stdout.write = ((...args: any[]) => {
-    if (String(args[0]).includes('\x1b[?1049l')) writeFileSync(join(root, 'screen-restore-emitted'), 'true');
+    const output = String(args[0]);
+    if (output.includes('\x1b[?1049l')) writeFileSync(join(root, 'screen-restore-emitted'), 'true');
+    // ConPTY may split/replace visible text with cursor updates in its VT stream.
+    if (output.includes('fixture-model')) writeFileSync(join(root, 'model-rendered'), 'true');
+    if (output.includes('回答完成')) writeFileSync(join(root, 'answer-rendered'), 'true');
     return (originalWrite as any)(...args);
   }) as typeof process.stdout.write;
   const initialRaw = process.stdin.isRaw ?? false;
