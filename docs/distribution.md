@@ -88,4 +88,4 @@ npm run pack:local
 
 GitHub 已配置三系统 × Node 22/24 自动验收和手动发布候选流程；具体凭据、Environment 审核及 Trusted Publisher 配置见 [npm 发布说明](npm-release.md)。云端结果以对应 Actions run 为准。
 
-最终九组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37221572065)，[结果清单](research/data/github-distribution-ci.json)。
+最终九组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37222669721)，[结果清单](research/data/github-distribution-ci.json)。

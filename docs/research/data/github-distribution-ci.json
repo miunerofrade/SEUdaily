@@ -1,19 +1,15 @@
 {
   "date": "2026-10-05",
-  "run": "https://github.com/miunerofrade/SEUdaily/actions/runs/37221572065",
-  "commit": "e4e39544d5ef61cee2c13246e61b9ecd083192b1",
+  "run": "https://github.com/miunerofrade/SEUdaily/actions/runs/37222669721",
+  "commit": "60089f3e32cdf42cd5909006450b98cc7002aa9b",
   "conclusion": "success",
   "jobs": [
-    {
-      "name": "ubuntu-24.04 / Node 24.12.0 / Python 3.12",
-      "conclusion": "success"
-    },
     {
       "name": "ubuntu-24.04 / Node 24.12.0 / Python 3.13",
       "conclusion": "success"
     },
     {
-      "name": "windows-2025 / Node 22.22.0 / Python 3.11",
+      "name": "macos-15 / Node 24.12.0 / Python 3.13",
       "conclusion": "success"
     },
     {
@@ -21,7 +17,19 @@
       "conclusion": "success"
     },
     {
-      "name": "macos-15 / Node 24.12.0 / Python 3.13",
+      "name": "macos-15 / Node 24.12.0 / Python 3.12",
+      "conclusion": "success"
+    },
+    {
+      "name": "ubuntu-24.04 / Node 24.12.0 / Python 3.12",
+      "conclusion": "success"
+    },
+    {
+      "name": "windows-2025 / Node 22.22.0 / Python 3.11",
+      "conclusion": "success"
+    },
+    {
+      "name": "windows-2025 / Node 24.12.0 / Python 3.12",
       "conclusion": "success"
     },
     {
@@ -31,53 +39,47 @@
     {
       "name": "ubuntu-24.04 / Node 22.22.0 / Python 3.11",
       "conclusion": "success"
-    },
-    {
-      "name": "macos-15 / Node 24.12.0 / Python 3.12",
-      "conclusion": "success"
-    },
-    {
-      "name": "windows-2025 / Node 24.12.0 / Python 3.12",
-      "conclusion": "success"
     }
   ],
   "artifacts": [
     {
+      "name": "distribution-windows-2025-node-24.12.0-python-3.12",
+      "size_in_bytes": 1857835
+    },
+    {
       "name": "distribution-macos-15-node-24.12.0-python-3.12",
-      "size_in_bytes": 1857913
+      "size_in_bytes": 1856860
     },
     {
       "name": "distribution-macos-15-node-22.22.0-python-3.11",
-      "size_in_bytes": 1857913
-    },
-    {
-      "name": "distribution-ubuntu-24.04-node-24.12.0-python-3.13",
-      "size_in_bytes": 1857912
-    },
-    {
-      "name": "distribution-windows-2025-node-24.12.0-python-3.13",
-      "size_in_bytes": 1858968
-    },
-    {
-      "name": "distribution-macos-15-node-24.12.0-python-3.13",
-      "size_in_bytes": 1857912
-    },
-    {
-      "name": "distribution-windows-2025-node-24.12.0-python-3.12",
-      "size_in_bytes": 1858968
-    },
-    {
-      "name": "distribution-ubuntu-24.04-node-22.22.0-python-3.11",
-      "size_in_bytes": 1857909
-    },
-    {
-      "name": "distribution-ubuntu-24.04-node-24.12.0-python-3.12",
-      "size_in_bytes": 1857909
+      "size_in_bytes": 1856858
     },
     {
       "name": "distribution-windows-2025-node-22.22.0-python-3.11",
-      "size_in_bytes": 1858968
+      "size_in_bytes": 1857835
+    },
+    {
+      "name": "distribution-windows-2025-node-24.12.0-python-3.13",
+      "size_in_bytes": 1857835
+    },
+    {
+      "name": "distribution-ubuntu-24.04-node-22.22.0-python-3.11",
+      "size_in_bytes": 1856854
+    },
+    {
+      "name": "distribution-macos-15-node-24.12.0-python-3.13",
+      "size_in_bytes": 1856857
+    },
+    {
+      "name": "distribution-ubuntu-24.04-node-24.12.0-python-3.13",
+      "size_in_bytes": 1856856
+    },
+    {
+      "name": "distribution-ubuntu-24.04-node-24.12.0-python-3.12",
+      "size_in_bytes": 1856855
     }
   ],
+  "cliBundled": true,
+  "publishedPackageCount": 4,
   "npmPublished": false
 }

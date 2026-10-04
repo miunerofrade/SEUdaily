@@ -35,4 +35,4 @@ Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、�
 
 GitHub 工作流、npm 账号和授权准备见 [发布说明](../npm-release.md)。当前没有执行 npm 发布。
 
-2026-10-05 云端最终九组全部通过：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37221572065)。结果清单见 [验收记录](../research/data/github-distribution-ci.json)。Windows 验收修复了共享后端随窗口退出、异步命令强制退出及 VPN 进程存活查询问题；终端测试使用独立 ConPTY 进程，检查真实输入及恢复指令。
+2026-10-05 云端最终九组全部通过：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37222669721)。结果清单见 [验收记录](../research/data/github-distribution-ci.json)。Windows 验收修复了共享后端随窗口退出、异步命令强制退出及 VPN 进程存活查询问题；终端测试使用独立 ConPTY 进程，检查真实输入及恢复指令。
