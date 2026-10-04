@@ -59,12 +59,11 @@ jobs:
       - name: POSIX terminal input, cancellation and exit
         if: runner.os != 'Windows'
         run: uv run python scripts/validate-terminal.py --python
-      - name: Install Windows terminal test driver
-        if: runner.os == 'Windows'
-        run: uv pip install --python .venv/Scripts/python.exe pywinpty==3.0.5
       - name: Windows ConPTY input, attachment and exit
         if: runner.os == 'Windows'
-        run: .venv/Scripts/python.exe scripts/validate-windows-terminal.py
+        # ConPTY's native test driver is independent of the product's Python worker.
+        # Keep its verified interpreter stable while varying the worker version above.
+        run: uv run --no-project --python 3.13 --with pywinpty==3.0.5 python scripts/validate-windows-terminal.py
       - name: Linux browser system libraries
         if: runner.os == 'Linux'
         run: node node_modules/playwright-core/cli.js install-deps firefox
