@@ -265,7 +265,7 @@ const authorizePortalTool = createTool({
   ...pythonToolOutput,
   id: "authorize-course-portal",
   description:
-    "Open a visible browser and establish a course-portal session. Use only when authentication is missing or expired.",
+    "Establish the course application's session over HTTP using saved credentials. Open a visible login window only for captcha or interactive verification. Use when a course tool returns auth_required.",
   inputSchema: z.object(commonPortalFields),
   execute: async (context, options) => runPythonTool("authorize", context, options?.abortSignal),
 });
@@ -692,7 +692,7 @@ const captureCourseSessionsTool = createTool({
   ...pythonToolOutput,
   id: "capture-course-sessions",
   description:
-    "Capture a queue of course sessions. The current shared-browser worker serializes portal access to control memory use; video, ASR fallback, and slide processing are also serialized.",
+    "Capture a queue of course sessions over HTTP. Media, ASR fallback, and slide processing stay serialized to limit peak resource use; no browser is required for normal course access.",
   inputSchema: z.object({
     ...commonPortalFields,
     scheduleCacheFile: z.string().default(".seudaily/schedule.json"),
