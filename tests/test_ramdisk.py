@@ -29,6 +29,8 @@ def test_mac_mount_rollback_detaches_allocated_device(monkeypatch, tmp_path):
 
 def test_linux_options_and_unmount(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, 'platform', 'linux')
+    monkeypatch.setattr(ramdisk.os, 'getuid', lambda: 1000, raising=False)
+    monkeypatch.setattr(ramdisk.os, 'getgid', lambda: 1000, raising=False)
     calls = []
     monkeypatch.setattr(ramdisk, '_linux_run', lambda *args: calls.append(args) or '')
     disk = ramdisk.RamDisk('64M', mount_point=tmp_path / 'ram')
@@ -83,7 +85,7 @@ def test_cloud_cleanup_preserves_imported_user_audio(tmp_path):
 
 
 def test_linux_sudo_is_noninteractive_and_missing_sudo_fails(monkeypatch):
-    monkeypatch.setattr(ramdisk.os, 'geteuid', lambda: 1000)
+    monkeypatch.setattr(ramdisk.os, 'geteuid', lambda: 1000, raising=False)
     monkeypatch.setattr(ramdisk.shutil, 'which', lambda _: '/usr/bin/sudo')
     calls=[]
     monkeypatch.setattr(ramdisk, '_run', lambda *args: calls.append(args) or '')
@@ -95,6 +97,8 @@ def test_linux_sudo_is_noninteractive_and_missing_sudo_fails(monkeypatch):
 
 def test_linux_unmount_failure_preserves_owned_mount_for_retry(monkeypatch,tmp_path):
     monkeypatch.setattr(sys,'platform','linux')
+    monkeypatch.setattr(ramdisk.os, 'getuid', lambda: 1000, raising=False)
+    monkeypatch.setattr(ramdisk.os, 'getgid', lambda: 1000, raising=False)
     monkeypatch.setattr(ramdisk,'_linux_run',lambda *args:'')
     disk=ramdisk.RamDisk('64M',mount_point=tmp_path/'ram');disk.mount()
     def fail(*args):raise ramdisk.RamDiskError('busy')

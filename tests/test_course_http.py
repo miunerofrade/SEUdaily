@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from unittest.mock import MagicMock
 import threading
+import os
 
 import httpx
 import pytest
@@ -176,4 +177,6 @@ def test_explicit_manual_login_waits_for_app_and_saves_final_cookies(monkeypatch
     assert not predicate("https://auth.seu.edu.cn/dist/#/secondary-verification")
     assert predicate("https://cvs.seu.edu.cn/jy-application-resourcemanage-ui/#/login?type=cas")
     assert '"value": "final"' in service.cookie_file.read_text()
-    assert service.cookie_file.stat().st_mode & 0o777 == 0o600
+    # Windows chmod controls read-only status, not POSIX owner/group permissions.
+    if os.name != 'nt':
+        assert service.cookie_file.stat().st_mode & 0o777 == 0o600

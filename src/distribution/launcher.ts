@@ -73,13 +73,12 @@ async function importData(source: string) {
     console.log(`数据已复制到 ${dataRoot}；原件保留。`);
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
-if (options.command === 'import-data') { await importData(options.argument!); process.exit(0); }
-if (options.command === 'status' || options.command === 'stop') {
+if (options.command === 'import-data') { await importData(options.argument!); }
+else if (options.command === 'status' || options.command === 'stop') {
   const identity = await probe();
   if (!identity) console.log('未运行');
   else { verify(identity); console.log(options.command === 'stop' ? await request('/app/runtime/stop', 'POST') : identity); }
-  process.exit(0);
-}
+} else {
 await mkdir(dataRoot, { recursive: true, mode: 0o700 });
 // Seed editable built-in skills once; updates never overwrite user changes.
 const releaseInitialization = await acquireLock(join(dataRoot, '.seudaily', 'init.lock'), 30_000);
@@ -116,6 +115,7 @@ if (options.command === 'vpn') {
     clearInterval(heartbeat);
     await request(`/app/runtime/clients/${id}`, 'DELETE').catch(() => {});
   }
+}
 }
 async function runChild(command: string, args: string[], cwd: string): Promise<number> {
   const child = spawn(command, args, { cwd, stdio: 'inherit', env: process.env, windowsHide: true });

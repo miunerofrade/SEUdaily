@@ -21,6 +21,7 @@ def test_proxy_lifetime_tracks_owner_process(tmp_path, monkeypatch):
         state = {'state': 'connected', 'ownerPid': child.pid, 'httpProxy': 'http://127.0.0.1:11081'}
         (directory / 'status.json').write_text(json.dumps(state))
         assert vpn.campus_proxy() == state['httpProxy']
+        assert child.poll() is None, 'Checking VPN state must not terminate its owner'
         child.terminate(); child.wait(timeout=5)
         assert vpn.campus_proxy() is None
     finally:
