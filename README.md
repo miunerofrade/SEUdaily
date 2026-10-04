@@ -17,11 +17,11 @@ seudaily
 seudaily web
 ```
 
-首次运行 Web 时自动安装网页组件，并打开 `http://127.0.0.1:4111`。终端和 Web 可以同时运行，无需另外启动后端，也不需要 Vite。
+首次运行 Web 时自动安装网页组件，并打开 `http://127.0.0.1:4111`。终端和 Web 可以同时运行，共享自动启动的后端。
 
-`-g` 将命令安装到当前 Node 环境的全局目录；安装后可在不同工作目录执行 `seudaily`。公开包的安装不需要登录作者的 npm 账号。
+`-g` 将命令安装到当前 Node 环境的全局目录，随后可在任意工作目录执行 `seudaily`。
 
-普通聊天不需要 Python、uv 或自动化浏览器。校园、文档及浏览器工具在首次使用时自动准备对应组件和运行环境。首次准备需要联网，后续复用缓存；模型调用和校园服务仍需要网络。
+校园、文档及浏览器工具在首次使用时联网准备对应组件和运行环境，后续复用缓存。普通聊天直接使用主包。
 
 ## 首次配置
 
@@ -40,7 +40,7 @@ TAVILY_API_KEY=你的搜索服务密钥
 SEUDAILY_ASR_API_KEY=你的云端转写服务密钥
 ```
 
-不使用某项服务时，无需填写它的密钥。完整配置项见 [.env.example](https://github.com/miunerofrade/SEUdaily/blob/main/.env.example)。也可以直接通过系统环境变量配置，例如：
+按需填写对应服务的密钥。完整配置项见 [.env.example](https://github.com/miunerofrade/SEUdaily/blob/main/.env.example)。也可以直接通过系统环境变量配置，例如：
 
 ```bash
 # macOS / Linux；只影响当前终端及其子进程
@@ -54,7 +54,7 @@ $env:DEEPSEEK_API_KEY = "你的密钥"
 seudaily
 ```
 
-校园服务需要有效账号与校园网络，或本地校园 VPN。验证码、短信和其他二次验证仍需本人完成。模型、搜索与转写服务按各自规则计费。
+校园服务使用校园账号，通过校园网络或本地 VPN 访问；短信与二次验证按界面提示完成。
 
 ## 可以做什么
 
@@ -65,7 +65,7 @@ seudaily
 - **通知与 Focus**：查看校园通知，创建、编辑、暂停关注任务。
 - **校园 VPN**：连接本地代理，让校园工具和指定代理的宿主机程序访问授权资源。
 
-课表、培养方案和常规课程查询优先使用 HTTP。通用网页操作以及部分交互登录保留浏览器方式，浏览器不会在应用启动时自动运行。
+课表、培养方案和常规课程查询优先使用 HTTP。通用网页操作与部分交互登录按需启动浏览器。
 
 ## 常用命令
 
@@ -91,7 +91,7 @@ seudaily --data-dir ./my-seudaily
 seudaily web --data-dir ./my-seudaily --port 4112
 ```
 
-同时运行的界面须使用相同数据目录、后端端口和应用版本，才能共享后端。启动器会检查已运行服务的身份；端口被其他服务占用时会报错。
+使用相同数据目录、后端端口和应用版本的界面共享后端。
 
 关闭 Web 启动终端时按 `Ctrl+C`；仅关闭网页标签不会结束启动器。终端聊天短按 `Ctrl+C` 取消当前运行，`Ctrl+D` 或持续重复 `Ctrl+C` 退出。自动启动的后端会在最后一个界面退出后停止。
 
@@ -104,7 +104,7 @@ seudaily completion zsh
 
 ## 附件与斜杠命令
 
-终端中粘贴或拖入本地文件路径，支持的文件会显示为附件项；输入提示词后按 Enter 发送，无需附件命令。左右方向键跨过附件项，Backspace/Delete 删除对应项。终端必须实际传入文件路径；目前不直接读取系统剪贴板中的图片二进制。
+终端中粘贴或拖入本地文件路径，文件会显示为附件项；输入提示词后按 Enter 发送。左右方向键跨过附件项，Backspace/Delete 删除对应项。图片通过本地文件路径添加。
 
 Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**：
 
@@ -113,7 +113,7 @@ Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**�
 | 图片 | PNG、JPEG、WebP、GIF | 10 MB |
 | 文档 | PDF、DOCX、XLSX、PPTX | 50 MB |
 
-图片能力取决于所用模型；文档解析结果作为用户消息中的资料发送，不放入系统提示词。音视频文件不作为直接聊天附件。
+图片由支持图像输入的模型读取，文档解析结果随用户消息发送。
 
 常用输入框命令：
 
@@ -148,9 +148,9 @@ seudaily vpn 11081
 curl --noproxy '' -I -x http://127.0.0.1:11081 https://cvs.seu.edu.cn/
 ```
 
-代理不修改系统路由或全局代理，也不承载 `ping` 的 ICMP。校园域名通过隧道中的校园 DNS 解析，默认 `202.119.24.12`，可用 `SEUDAILY_VPN_DNS_SERVER` 覆盖。可访问资源取决于学校授予账号的权限。
+宿主机程序通过 HTTP 代理访问校园网。校园域名使用隧道中的校园 DNS，默认 `202.119.24.12`，可用 `SEUDAILY_VPN_DNS_SERVER` 修改。
 
-登录优先复用已有会话，失效时重新认证；Cookie 不能永久有效，VPN 会话与业务门户会话也相互独立。普通登录使用 HTTP，短信验证支持应用内续接；验证码或复杂交互保留人工登录与浏览器兜底。
+VPN 与业务门户分别维护登录会话，失效时重新认证。普通登录使用 HTTP，短信验证支持应用内续接，复杂交互通过浏览器完成。
 
 首次连接按需下载固定版本的 zju-connect 核心并校验 SHA256，也可用 `SEUDAILY_VPN_BINARY` 指定已有核心。它是独立的 AGPL-3.0 第三方程序，不包含在 npm 发布包内；对应许可证与源码入口见 [VPN 许可证说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/licensing-vpn.md)。
 
@@ -158,7 +158,7 @@ curl --noproxy '' -I -x http://127.0.0.1:11081 https://cvs.seu.edu.cn/
 
 创建 Focus 前会提示授权：该任务可免逐次工具审批，但不获得 extra 工作区文件和终端能力。编辑要求沿用同一任务与会话，后续执行使用新要求并保留历史版本；暂停停止自动执行，删除撤回授权。Focus 没有自动到期时间，登录续接请求有效期为 30 分钟。
 
-普通对话的工具访问由应用权限设置控制。工作区与命令执行涉及本机文件；云端模型、搜索或转写调用会向对应服务发送完成任务所需的内容。账号、密钥和 Cookie 不应提交到 Git。
+普通对话的工具访问由应用权限设置控制；模型、搜索与转写使用配置的服务。
 
 ## 数据、更新与卸载
 
@@ -179,7 +179,7 @@ seudaily stop
 npm install -g seudaily@latest
 ```
 
-组件版本与主包保持一致，首次需要时自动安装对应版本。更新或卸载 npm 包不会主动删除用户数据；重要会话与资料请自行备份。
+组件与主包版本保持一致，首次使用时自动安装。更新或卸载后保留用户数据。
 
 ```bash
 npm uninstall -g seudaily
@@ -195,7 +195,7 @@ seudaily import-data /path/to/old/SEUdaily
 
 ## 分发与运行环境
 
-用户只需安装 `seudaily`，无需手动逐个安装组件：
+`seudaily` 负责安装与管理以下组件：
 
 | npm 包 | 职责 |
 | --- | --- |
@@ -204,9 +204,9 @@ seudaily import-data /path/to/old/SEUdaily
 | `@miunerofrade/seudaily-python` | 校园、文档、VPN 管理的 Python 代码与依赖清单 |
 | `@miunerofrade/seudaily-browser` | 按需安装的浏览器自动化服务与驱动 |
 
-Python 解释器没有打进 npm 包。工具首次使用时优先复用已有 uv 0.11.1+ 和 Python 3.11+；找不到兼容版本才自动下载。依赖安装在应用自己的虚拟环境，不修改用户现有 Python 环境。Python 3.11、3.12、3.13 均有 CI 验证。
+工具首次使用时优先复用已有 uv 0.11.1+ 和 Python 3.11+，缺少时自动下载。依赖安装在应用专用虚拟环境。Python 3.11、3.12、3.13 均有 CI 验证。
 
-浏览器引擎按需安装，Python 与 Node 的 Playwright 版本和缓存统一。Windows 默认使用已有 Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Linux 可能需要额外系统库；媒体处理需要系统 FFmpeg。视频幻灯片提取依赖只在使用相关功能时准备；本地 ASR 尚未实现。
+浏览器引擎按需安装，Python 与 Node 的 Playwright 版本和缓存统一。Windows 默认使用已有 Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Linux 浏览器所需系统库按安装提示准备；媒体处理使用系统 FFmpeg。视频幻灯片提取依赖按需安装，语音转写使用云端 ASR。
 
 ## 从源码开发
 
@@ -229,7 +229,7 @@ uv run --frozen pytest -q
 npm run test:distribution
 ```
 
-`main` 统一维护 CLI、Web 与公共核心，旧 `cli` 分支已合入，旧 `dev` 停止维护。GitHub Actions 验证 Windows、macOS、Linux，以及 Node 22/24 和 Python 3.11/3.12/3.13 的组合；真实校园登录、短信和校园权限需在实际环境验证。
+`main` 统一维护 CLI、Web 与公共核心，旧 `cli` 分支已合入，旧 `dev` 停止维护。GitHub Actions 验证 Windows、macOS、Linux，以及 Node 22/24 和 Python 3.11/3.12/3.13 的组合。
 
 更多信息：[分发说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/distribution.md) · [发布维护](https://github.com/miunerofrade/SEUdaily/blob/main/docs/npm-release.md) · [版本历史](https://github.com/miunerofrade/SEUdaily/blob/main/CHANGELOG.md)。
 

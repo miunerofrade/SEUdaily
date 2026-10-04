@@ -21,7 +21,7 @@ Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、�
 1. GitHub 九组跨平台验收全部通过；真实校园 VPN/短信继续在本机验证，CI 不使用校园凭据。
 2. `seudaily@1.1.0` 及三个 `@miunerofrade/seudaily-*` 可选组件已公开发布，维护者均为 miunerofrade；注册表完整性与候选一致。
 3. 无 npm 登录配置的真实注册表安装已通过；内置 CLI、Web 自动安装、共享后端和退出清理已验证。
-4. 后续配置四个包的 Trusted Publisher，再通过受保护的 GitHub 发布工作流发布新版本；统一版本，组件先发，主包最后发。
+4. 四个包已配置 GitHub Trusted Publisher，绑定 `miunerofrade/SEUdaily` 的 `npm-release.yml` 和 `npm` environment。后续通过 OIDC 发布新版本，统一版本，组件先发，主包最后发。
 
 完整的跨界面实时变更广播仍待实施。常驻后台 Focus、Bun 可选独立程序和 Node SEA 继续搁置；这些不阻塞当前本地 Node 候选方案。
 
