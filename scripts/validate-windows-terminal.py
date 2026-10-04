@@ -31,6 +31,10 @@ def terminal(exit_method):
         env.update(SEUDAILY_PROJECT_ROOT=str(path), PROBE_COMPONENT=str(OUTPUT / 'terminal.mjs'), NODE_ENV='production', TERM='xterm-256color', FORCE_COLOR='1')
         env.pop('CI', None)
         env.pop('NO_COLOR', None)
+        # This controls pywinpty's parent-side native reader, not the child app.
+        # Poll output instead of leaving ConPTY's background read blocked while
+        # the child waits for terminal writes/input to finish.
+        os.environ['PYWINPTY_BLOCK'] = '0'
         proc = PtyProcess.spawn([shutil.which('node'), str(OUTPUT / 'node/core.mjs'), 'cli'], cwd=directory, env=env, dimensions=(32, 100), backend=1)
         output = ''
 
