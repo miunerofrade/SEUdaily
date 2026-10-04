@@ -10,6 +10,7 @@ import { prepareTerminalInput, terminalKeyboard } from '../../src/terminal/keybo
 export async function run() {
   const root = process.env.SEUDAILY_PROJECT_ROOT!;
   const record = (value: any) => appendFileSync(join(root, 'requests.jsonl'), JSON.stringify(value) + '\n');
+  if (process.platform === 'win32') process.stdin.on('data', bytes => record({ input: String(bytes), at: Date.now() }));
   const session = new Session({ command: 'chat' }, root);
   session.client.json = async (path: string, _method?: string, body?: any) => {
     if (path === '/app/agent-info') return { model: 'fixture-model', effort: 'high' };

@@ -42,7 +42,7 @@ def terminal(exit_method):
         def wait_for(check, timeout=15):
             end = time.monotonic() + timeout
             while not check() and time.monotonic() < end: pump(.05)
-            assert check(), output[-5000:]
+            assert check(), json.dumps(records(), ensure_ascii=False) + '\n' + output[-1200:]
 
         def send(text, pause=.15):
             proc.write(text)
@@ -54,6 +54,7 @@ def terminal(exit_method):
 
         try:
             wait_for(lambda: 'fixture-model' in output and (path / 'ready').exists())
+            pump(.5)
             send('中文输入\r')
             assert not [item for item in records() if 'messages' in item], 'IME commit must remain in draft'
             send('\r', .5)
