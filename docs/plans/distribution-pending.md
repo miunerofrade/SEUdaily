@@ -1,8 +1,8 @@
 # SEUdaily 分发进度与后续计划
 
-更新：2026-10-04。
+更新：2026-10-05。
 
-**状态：正式 Node 打包、统一入口、组件边界与本地候选包验收已落实；尚未执行 npm 发布，Windows/Linux 实测及发布流程仍待完成。**
+**状态：正式 Node 打包、统一入口、组件边界与本地候选包验收已落实；尚未执行 npm 发布，GitHub 三系统 × Node 22/24 验收已全部通过，发布流程已准备。**
 
 ## 已按顺序完成
 
@@ -20,7 +20,7 @@ Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、�
 
 按以下顺序推进，不自动发布：
 
-1. Windows/Linux 的实际安装、TTY、进程退出、Python/VPN 和浏览器验收；核对 Node 22/24 支持范围。当前实测只有 macOS arm64。
+1. 已完成 GitHub Windows/Ubuntu/macOS × Node 22.22.0/24.12.0 六组安装、进程退出、Python 和浏览器验收；Windows 使用独立进程的 ConPTY 用例。真实校园 VPN/短信和图形交互仍在本机验收，CI 不使用校园凭据。
 2. 确认包名所有权，选择新的发布版本，统一基础包及四个组件版本。当前五个名称查询返回 404，但尚未注册。
 3. CI 和手动发布候选流程已接入 GitHub Actions；等三系统 × Node 22/24 云端结果通过，复核许可证及包内容，先发组件、再发基础包。Node 22 的 SQLite 警告保留在核心日志。
 4. 验收实际注册表安装、升级和旧数据导入；本地注册表 fixture 不能替代真实发布验收。
@@ -34,3 +34,5 @@ Node 原型实验中的核心+CLI 为 1.11 MiB；正式包还包含启动器、�
 具体命令、目录、包边界和限制见 [分发说明](../distribution.md)。历史结论见 [Bun 第一阶段](../research/bun-phase-one.md)与 [SQLite 打包实验](../research/node-sqlite-packaging.md)。VPN 继续按需下载独立核心，许可记录见 [VPN 许可证说明](../licensing-vpn.md)。
 
 GitHub 工作流、npm 账号和授权准备见 [发布说明](../npm-release.md)。当前没有执行 npm 发布。
+
+2026-10-05 云端最终六组全部通过：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37217534104)。结果清单见 [验收记录](../research/data/github-distribution-ci.json)。Windows 验收修复了共享后端随窗口退出、异步命令强制退出及 VPN 进程存活查询问题；终端测试使用独立 ConPTY 进程，检查真实输入及恢复指令。

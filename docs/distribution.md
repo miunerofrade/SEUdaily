@@ -78,9 +78,9 @@ npm run pack:local
 
 最终回归为 Node 74/74、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。基础包压缩约 296 KiB，CLI 约 186 KiB，两者解压合计约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
 
-此次只实际验证 macOS arm64。发布前仍需：
+本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24 六组全部通过。发布前仍需：
 
-1. 在 Windows/Linux 运行安装与生命周期验收，并核对 Node 22/24 的支持范围。PTY 驱动为 POSIX，Windows 要用真实终端或 ConPTY 验收。
+1. 云端安装、生命周期和默认浏览器验收已完成；Windows ConPTY 和 macOS/Linux PTY 用例均通过。校园 VPN/短信需要本机网络和人工验证，未把校园凭据交给 CI。
 2. 确认五个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-04 查询五个名称均返回 404，仍须在发布时核对及取得所有权。
 3. 复核生成的第三方许可证清单、npm 文件白名单，复核已接入的 CI/发布流程。SQLite 警告保留在核心日志，不全局屏蔽其他警告。
 4. 再次验收实际 npm 注册表安装和升级。当前本地临时注册表验证不能替代实际发布验收。
@@ -88,3 +88,5 @@ npm run pack:local
 跨界面共享历史已存在，但完整的实时变更广播仍未实施；常驻后台 Focus、Bun 独立程序和 Node SEA 继续搁置。没有执行 npm publish，也没有重启用户当前运行的旧后端。
 
 GitHub 已配置三系统 × Node 22/24 自动验收和手动发布候选流程；具体凭据、Environment 审核及 Trusted Publisher 配置见 [npm 发布说明](npm-release.md)。云端结果以对应 Actions run 为准。
+
+最终六组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37217534104)，[结果清单](research/data/github-distribution-ci.json)。
