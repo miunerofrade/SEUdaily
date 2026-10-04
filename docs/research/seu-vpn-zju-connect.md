@@ -117,7 +117,7 @@ zju-connect -protocol atrust -server vpn.seu.edu.cn -port 443 \
 - Web 设置页和资源面板提供连接、状态、断开和额外验证码提交；每 3 秒同步状态。
 - Web 与终端支持 `/vpn connect`、`/vpn status`、`/vpn disconnect`；终端 `/vpn verify` 打开隐私输入框。
 - Python 校园浏览器、课表、培养方案、通知/网页读取、远端校园 FFmpeg 输入，以及 Node Playwright MCP 浏览器配置都消费同一份 VPN 状态。代理变化后重建浏览器上下文。
-- 账号密码只用于专用 CAS 窗口，回调通过核心 stdin 交付；不作为 Agent 内容、命令行参数或普通日志保存。工作进程退出和断开会停止核心，状态文件检测拥有进程是否存活。
+- 普通账号密码登录优先使用 HTTP CAS，短信二次验证通过 HTTPS 发码与提交；图片验证码等其他交互场景保留专用 CAS 窗口。回调通过核心 stdin 交付；账号密码不作为 Agent 内容、命令行参数或普通日志保存。HTTP 登录直连公网认证入口，不依赖待建立的 VPN 代理；临时 Cookie 随认证结束清理。工作进程退出和断开会停止核心，状态文件检测拥有进程是否存活。
 - macOS/NO_PROXY 的系统绕过规则会影响标准 urllib ProxyHandler，因此应用对已连接的校园代理显式发送请求；不依赖本机解析 CVS 域名。
 - CAS 的 HTTP 重定向不能依赖 Playwright 对每一跳执行 route。适配器预读可信认证域的重定向，在请求 VPN 一次性 ticket 之前停止，再交给核心。v1.3.1 严格比较 host，回调统一移除默认 `:443`，与核心一致。
 
@@ -165,3 +165,14 @@ HTTP 代理默认监听 `127.0.0.1:11081`，在面板显示完整地址。断开
 以上只进行认证、配置、DNS、小型连接探测与 HEAD；没有下载课程媒体或读取门户响应正文。VPN 相关 Python 8 项、Node 7 项检查和 TypeScript 类型检查通过。连接检查已从 eHall CONNECT 改为实际 CVS HTTPS HEAD，避免仅凭代理端口和 CONNECT 成功就显示可用。
 
 实现参考：[上游 DNS 查询路径](https://github.com/Mythologyli/zju-connect/blob/v1.3.1/resolve/resolver.go)、[Go 1.24 TLS 兼容说明](https://go.dev/doc/go1.24)、[Go 1.26 新增 TLS 混合密钥组](https://go.dev/doc/go1.26)。临时诊断中的会话参数仅在内存中使用，没有打印或持久化；保留的诊断记录仅含脱敏的阶段信息及门户解析地址。
+
+
+## CAS 短信二次验证（2026-10-04）
+
+对照学校公开脚本 `https://auth.seu.edu.cn/dist/umi.32c0b43a.js`：`casLogin` 返回业务 `code: 502` 表示账号短信二次验证；`POST /auth/casback/sendStage2Code` 的 JSON 为 `{userId: 一卡通账号}`。验证码通过 `getChiperKey` 的 RSA 公钥加密后放入 `casLogin.mobileVerifyCode`，密码同时重新加密。它不是手机号短信登录的 `createMobileVerifyCode`。
+
+VPN 保留当前 CAS Cookie 和回调拦截，发布 `verification_required`，Web 在原面板输入，CLI 使用 `/vpn verify` 或独立 VPN 模式中的输入提示；`/vpn resend` 可重发校园短信。成功后仅把未消费的 ticket 回调交给核心。核心自身额外验证继续走 stdin。
+
+课程、课表与培养方案共享同一 CAS 短信实现，前端通过 `POST /app/auth/sms`（`challengeId`、`operation: send|verify`、可选 `code`）完成验证，随后续接原授权/原任务。短信挑战只保存在工作进程内存，5 分钟后清理；发码间隔 60 秒。后端重启后必须重新登录。成功后的正常业务 Cookie 仍按原机制保存。
+
+短信分支以学校源码和固定模拟测试验证（RSA 加密、错误码重试、过期、保留一次性 ticket）。当前实际账号登录未触发短信，因此未声称真实短信收发完成实测。普通 HTTP 登录及 VPN 连接继续进行真实回归；不下载课程媒体。

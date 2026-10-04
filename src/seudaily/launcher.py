@@ -13,6 +13,9 @@ import time
 from pathlib import Path
 from typing import IO, Iterator
 from urllib.request import urlopen
+from uuid import uuid4
+
+from .backend_leases import lock_file, has_clients
 
 from .runtime_paths import env_value, runtime_root
 from . import __version__
@@ -156,41 +159,98 @@ def _backend_ready() -> bool:
         return False
 
 
+def _backend_identity() -> dict:
+    with urlopen(f"http://127.0.0.1:{BACKEND_PORT}/api", timeout=2) as response:
+        return json.load(response)
+
+
+class _SharedBackendProcess:
+    """A last borrower can stop the recorded server, after verifying its identity."""
+    def __init__(self, pid: int):
+        self.pid = pid
+
+    def poll(self):
+        try:
+            identity = _backend_identity()
+            return None if identity.get("name") == "SEUdaily" and identity.get("processId") == self.pid else 0
+        except (OSError, ValueError):
+            return 0
+
+    def terminate(self):
+        os.kill(self.pid, signal.SIGTERM)
+
+    def kill(self):
+        os.kill(self.pid, signal.SIGKILL)
+
+    def wait(self, timeout=None):
+        deadline = time.monotonic() + (timeout or 5)
+        while self.poll() is None:
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired("shared backend", timeout)
+            time.sleep(0.05)
+        return 0
+
+
 @contextmanager
 def backend_session(root: Path, *, auto_start: bool = True, verbose: bool = False) -> Iterator[None]:
-    """Attach to a live server; stop only a backend owned by this invocation."""
-    if _port_open(BACKEND_PORT):
-        try:
-            with urlopen(f"http://127.0.0.1:{BACKEND_PORT}/api", timeout=2) as response:
-                identity = json.load(response)
-            if identity.get("name") != "SEUdaily" or identity.get("runtime") != "agent" or not _backend_ready():
-                raise RuntimeError("端口 4111 上的服务不是已就绪的 SEUdaily Agent。")
-        except (OSError, ValueError) as error:
-            raise RuntimeError("无法连接已就绪的 SEUdaily 后端。") from error
-        if verbose:
-            print("连接已有 SEUdaily 后端，退出 CLI 时保持服务运行。", file=sys.stderr)
-        yield
-        return
-    if not auto_start:
-        raise RuntimeError("后端未启动；先运行 seudaily start，或去掉 --no-start。")
-    log_dir = runtime_root(root) / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "cli-backend.log"
-    with log_path.open("wb") as log:
-        if sys.stderr.isatty():
-            print("正在启动 SEUdaily 后端…", file=sys.stderr, flush=True)
-        process = _spawn([*_runtime_prefix(), "node", "--import", "tsx", "src/server/main.ts"], root, log)
-        try:
-            deadline = time.monotonic() + 45
-            while not _backend_ready():
-                if process.poll() is not None or time.monotonic() >= deadline:
-                    raise RuntimeError(f"后端启动失败，请检查 {log_path}")
-                time.sleep(0.1)
+    """The last attached interface stops an automatically started backend."""
+    directory = runtime_root(root) / "backend-clients"
+    directory.mkdir(parents=True, exist_ok=True)
+    lease_path = directory / f"{uuid4().hex}.lease"
+    state_path = directory / "managed.json"
+    process = None
+    # Serialize probing and spawning, including simultaneous CLI/Web launches.
+    with lock_file(directory / "guard.lock"):
+        has_clients(directory)
+        if _port_open(BACKEND_PORT):
+            try:
+                identity = _backend_identity()
+                if identity.get("name") != "SEUdaily" or identity.get("runtime") != "agent" or not _backend_ready():
+                    raise RuntimeError("端口 4111 上的服务不是已就绪的 SEUdaily Agent。")
+            except (OSError, ValueError) as error:
+                raise RuntimeError("无法连接已就绪的 SEUdaily 后端。") from error
+            if state_path.exists():
+                managed = json.loads(state_path.read_text())
+                if identity.get("processId") != managed.get("pid"):
+                    state_path.unlink()
             if verbose:
-                print(f"CLI 后端已就绪，日志：{log_path}", file=sys.stderr)
-            yield
-        finally:
-            _stop(process)
+                print("复用已有 SEUdaily 后端。", file=sys.stderr)
+        else:
+            state_path.unlink(missing_ok=True)
+            if not auto_start:
+                raise RuntimeError("后端未启动；先运行 seudaily start，或去掉 --no-start。")
+            log_dir = runtime_root(root) / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / "cli-backend.log"
+            with log_path.open("wb") as log:
+                if sys.stderr.isatty():
+                    print("正在启动 SEUdaily 后端…", file=sys.stderr, flush=True)
+                process = _spawn([*_runtime_prefix(), "node", "--import", "tsx", "src/server/main.ts"], root, log)
+                try:
+                    deadline = time.monotonic() + 45
+                    while not _backend_ready():
+                        if process.poll() is not None or time.monotonic() >= deadline:
+                            raise RuntimeError(f"后端启动失败，请检查 {log_path}")
+                        time.sleep(0.1)
+                    state_path.write_text(json.dumps({"pid": process.pid}))
+                    if verbose:
+                        print(f"后端已就绪，日志：{log_path}", file=sys.stderr)
+                except BaseException:
+                    _stop(process)
+                    raise
+        lease = lock_file(lease_path)
+    try:
+        yield
+    finally:
+        with lock_file(directory / "guard.lock"):
+            lease.close()
+            lease_path.unlink(missing_ok=True)
+            if not has_clients(directory) and state_path.exists():
+                pid = json.loads(state_path.read_text())["pid"]
+                managed_process = process if process is not None and process.pid == pid else _SharedBackendProcess(pid)
+                if managed_process is process or managed_process.poll() is None:
+                    _stop(managed_process)
+                state_path.unlink(missing_ok=True)
 
 
 def _wait_until_ready(processes: list[subprocess.Popen[bytes]], timeout: float = 45) -> None:
@@ -206,46 +266,34 @@ def _wait_until_ready(processes: list[subprocess.Popen[bytes]], timeout: float =
 
 
 def start() -> int:
-    occupied = [str(port) for port in (BACKEND_PORT, WEB_PORT) if _port_open(port)]
-    if occupied:
-        raise RuntimeError(f"端口 {', '.join(occupied)} 已被占用；SEUdaily 可能已经启动。")
+    if _port_open(WEB_PORT):
+        raise RuntimeError(f"Web 端口 {WEB_PORT} 已被占用；SEUdaily Web 可能已经启动。")
 
     root = _project_root()
     npm = _npm_executable()
     log_dir = runtime_root(root) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    backend_path = log_dir / "backend.log"
     web_path = log_dir / "web.log"
 
     print("正在启动 SEUdaily…", flush=True)
-    with backend_path.open("wb") as backend_log, web_path.open("wb") as web_log:
-        processes: list[subprocess.Popen[bytes]] = []
+    # The same probe, identity check and ownership rules serve both interfaces.
+    with backend_session(root, verbose=True), web_path.open("wb") as web_log:
+        process = _spawn([*_runtime_prefix(), npm, "run", "dev:web"], root, web_log)
         try:
-            processes.append(_spawn([*_runtime_prefix(), npm, "start"], root, backend_log))
-            processes.append(_spawn([*_runtime_prefix(), npm, "run", "dev:web"], root, web_log))
-            _wait_until_ready(processes)
+            _wait_until_ready([process])
             print("\nSEUdaily 已启动")
             print(f"  Web:       http://127.0.0.1:{WEB_PORT}")
             print(f"  Agent API: http://127.0.0.1:{BACKEND_PORT}/api")
             print(f"  日志:      {log_dir}")
             print("\n按 Ctrl+C 停止。", flush=True)
-            while all(process.poll() is None for process in processes):
+            while process.poll() is None:
                 time.sleep(0.5)
-            failed = next(process for process in processes if process.poll() is not None)
-            raise RuntimeError(f"服务进程已退出（退出码 {failed.returncode}），请检查日志。")
+            raise RuntimeError(f"Web 服务进程已退出（退出码 {process.returncode}），请检查日志。")
         except KeyboardInterrupt:
-            print("\n正在停止 SEUdaily…", flush=True)
+            print("\n正在停止 SEUdaily Web…", flush=True)
             return 0
         finally:
-            # Signal both services before waiting for either one's shutdown.
-            if os.name != "nt":
-                for process in processes:
-                    try:
-                        os.killpg(process.pid, signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-            for process in processes:
-                _stop(process)
+            _stop(process)
 
 
 def _common_options(parser: argparse.ArgumentParser, *, child: bool = False) -> None:

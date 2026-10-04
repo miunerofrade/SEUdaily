@@ -14,6 +14,7 @@ import socket
 import ssl
 import subprocess
 import threading
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlsplit
@@ -167,12 +168,13 @@ class VpnManager:
         self.configured_port = json.loads(settings.read_text()).get("port", 11081) if settings.exists() else 11081
         self.state["configuredPort"] = self.configured_port
         self.port = 0
+        self.sms_challenge = None
 
     def _publish(self, state: str, message: str):
         with self.lock:
             if self.stop_event.is_set() and state != "disconnected":
                 return
-            self.state.update(state=state, message=message, httpProxy=f"http://127.0.0.1:{self.port}" if self.port else "", ownerPid=os.getpid())
+            self.state.update(state=state, message=message, smsResend=bool(self.sms_challenge), httpProxy=f"http://127.0.0.1:{self.port}" if self.port else "", ownerPid=os.getpid())
             directory = vpn_directory()
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             directory.chmod(0o700)
@@ -185,7 +187,9 @@ class VpnManager:
         with self.lock:
             if self.state["state"] == "connected" and (not self.process or self.process.poll() is not None):
                 self._publish("expired", "VPN 会话已失效，请重新连接")
-            return dict(self.state)
+            state = dict(self.state)
+            state["smsRetryAfter"] = max(0, int(61 - (time.monotonic() - self.sms_challenge.sent_at))) if self.sms_challenge else 0
+            return state
 
     def connect(self, port: int | None = None):
         with self.lock:
@@ -209,6 +213,8 @@ class VpnManager:
 
     def disconnect(self):
         self.stop_event.set()
+        if self.sms_challenge:
+            self.sms_challenge.close()
         with self.lock:
             process = self.process
         if process and process.poll() is None:
@@ -222,17 +228,69 @@ class VpnManager:
         self._publish("disconnected", "已断开")
         return self.status()
 
+    def resend(self):
+        challenge = self.sms_challenge
+        if self.state["state"] != "verification_required" or not challenge:
+            raise ValueError("当前没有待验证的校园短信请求")
+        challenge.send()
+        return self.status()
+
     def verify(self, code: str):
         with self.lock:
             if self.state["state"] != "verification_required" or not self.process or not self.process.stdin:
                 raise ValueError("当前没有待验证的 VPN 请求")
             if not re.fullmatch(r"[A-Za-z0-9]{4,16}", code):
                 raise ValueError("验证码格式无效")
-            self.process.stdin.write(code + "\n"); self.process.stdin.flush()
+            if self.sms_challenge:
+                self.sms_challenge.verify(code)
+            else:
+                self.process.stdin.write(code + "\n"); self.process.stdin.flush()
             self._publish("connecting", "正在验证")
         return self.status()
 
     def _login_cas(self, login_url: str) -> str:
+        from .campus_auth import CampusAuthError, CampusSMSRequired, CampusSession
+
+        url = urljoin(SERVER, login_url)
+        parsed = urlsplit(url)
+        if parsed.hostname != "vpn.seu.edu.cn" or parsed.scheme != "https":
+            raise ValueError("VPN 返回的登录地址无效")
+        self._publish("connecting", "正在通过 HTTP 完成校园认证")
+        def callback_matches(target):
+            parsed = urlsplit(target)
+            return parsed.hostname == "vpn.seu.edu.cn" and parsed.path == "/passport/v1/auth/cas"
+
+        sms_started = False
+        try:
+            # Establishing the VPN must not depend on its own existing proxy.
+            with tempfile.TemporaryDirectory(prefix="seudaily-vpn-cas-") as directory:
+                with CampusSession(Path(directory) / "cookies.json", load_saved_cookies=False,
+                                   use_vpn=False) as session:
+                    try:
+                        return validate_callback(session.capture_auth_redirect(url, callback_matches))
+                    except CampusSMSRequired as error:
+                        sms_started = True
+                        self.sms_challenge = error.challenge
+                        try:
+                            self.sms_challenge.send()
+                            self._publish("verification_required", "请输入校园账号的短信验证码")
+                            while not self.sms_challenge.done.wait(0.25):
+                                if self.stop_event.is_set():
+                                    raise RuntimeError("VPN 登录已取消")
+                            if not self.sms_challenge.callback:
+                                raise RuntimeError("短信验证已失效，请重新连接")
+                            return validate_callback(self.sms_challenge.callback)
+                        finally:
+                            self.sms_challenge.close()
+                            self.sms_challenge = None
+        except CampusAuthError as error:
+            if sms_started:
+                raise
+            if error.status not in {"auth_required", "captcha_required", "credentials_missing"}:
+                raise
+            return self._login_cas_browser(login_url)
+
+    def _login_cas_browser(self, login_url: str) -> str:
         from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
         from .browser_runtime import launch_browser
         url = urljoin(SERVER, login_url)

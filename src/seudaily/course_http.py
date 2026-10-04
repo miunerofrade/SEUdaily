@@ -30,7 +30,7 @@ class CourseHTTPClient:
         return self
 
     def __exit__(self, *_args):
-        self.session.client.close()
+        self.session.__exit__(*_args)
 
     def authenticate(self):
         self.session.ensure_authenticated(ENTRY_URL)

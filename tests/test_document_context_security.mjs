@@ -23,3 +23,14 @@ test('invalid and expired context files are not rewritten or deleted', t=>{
   assert.deepEqual(resolveDocumentContexts([ref]),[]);assert.equal(readFileSync(path,'utf8'),contents);
  }
 });
+
+test('all ten document contexts reach the prompt resolver', t => {
+ const refs = Array.from({length:10}, () => randomUUID());
+ refs.forEach((ref,index) => {
+  storeDocumentContext(ref, `document-${index}`, `content-${index}`);
+  t.after(() => unlinkSync(join(directory, ref+'.json')));
+ });
+ const resolved = resolveDocumentContexts(refs);
+ assert.equal(resolved.length, 10);
+ assert.equal(resolved.at(-1).markdown, 'content-9');
+});

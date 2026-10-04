@@ -70,3 +70,17 @@ test('terminal image paste uploads the file and sends an image reference alongsi
     assert.equal(session.images.length, 0);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('terminal accepts ten mixed attachments and rejects an eleventh', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'seudaily-attachment-limit-'));
+  const session = new Session({ command: 'chat' }, root);
+  session.client.json = async () => ({ ref: 'image', name: 'image.png', mediaType: 'image/png' });
+  session.client.request = async () => ({ json: async () => ({ contextRef: 'document', filename: 'document.pdf' }) });
+  try {
+    const image = join(root, 'image.png'), document = join(root, 'document.pdf');
+    await writeFile(image, 'image'); await writeFile(document, 'document');
+    for (let index = 0; index < 10; index++) await session.attachFile(index % 2 ? document : image);
+    assert.equal(session.images.length + session.documents.length, 10);
+    await assert.rejects(session.attachFile(image), /最多 10/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

@@ -1,3 +1,4 @@
+import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import {
@@ -42,7 +43,7 @@ export const commands: Record<string, string> = {
   notices: "校园通知",
   focus: "关注任务",
   settings: "编辑环境变量和 AGENT.md",
-  vpn: "校园 VPN：connect / disconnect / status / verify",
+  vpn: "校园 VPN：connect / disconnect / status / verify / resend",
   ramdisk: "内存盘：/ramdisk 512 MB；status / unmount / reveal",
   semester: "编辑学期名称、日期及总周数",
   skills: "项目 Skill",
@@ -159,7 +160,20 @@ export class Session extends EventEmitter {
   async openFocus(item: any) {
     if (this.busy) throw new Error('请先等待当前任务完成');
     this.threadId = item.threadId || item.id; this.resource = item.resourceId || 'seudaily-focus-local';
+    this.skills = []; this.documents = []; this.images = [];
+    this.auth.clear(); this.actions.clear(); this.confirmation = null;
+    this.pending = (await this.client.json(this.path('run'))).pending ?? null;
+    this.runToken = ''; this.reasoningExpanded = false;
+    this.usageByRun.clear(); this.usage = {};
     this.focusTarget = item; this.messages = []; this.page = 'chat'; await this.history(); this.changed();
+  }
+  async runCreatedFocus(item: any) {
+    this.form = null;
+    await this.openFocus(item);
+    this.busy = true;
+    this.changed();
+    try { await this.turn(item.description, {}, false, { respectInterval: true }); }
+    finally { this.busy = false; this.changed(); }
   }
   controller: AbortController | null = null;
   operation: AbortController | null = null;
@@ -250,6 +264,19 @@ export class Session extends EventEmitter {
     this.messages.push({ role: "系统", welcome: true,
       text: "输入消息或 / 查看命令。\n粘贴图片或文档文件路径可添加附件，方向键移动，Backspace/Delete 删除。\n/schedule 与 /programs 打开交互表格。" });
     this.changed();
+  }
+  async authorizeCampus(path: string, complete: (result: any) => Promise<void>, resetSession = true): Promise<void> {
+    const response = await this.client.json(path, "POST", { resetSession });
+    const challengeId = response.challengeId ?? response.data?.challengeId;
+    if (challengeId) {
+      this.result(await this.client.json("/app/auth/sms", "POST", { challengeId, operation: "send" }));
+      this.openForm({ title: "校园短信验证（5 分钟内有效）", saveLabel: "验证并继续", fields: [{ key: "code", label: "短信验证码", value: "", secret: true }], save: async values => {
+        this.result(await this.client.json("/app/auth/sms", "POST", { challengeId, operation: "verify", code: values.code }));
+        await this.authorizeCampus(path, complete, false);
+      } });
+      return;
+    }
+    await complete(this.result(response));
   }
   result(result: any) {
     if (
@@ -407,6 +434,7 @@ export class Session extends EventEmitter {
     text: any,
     extra: Record<string, any> = {},
     approval = false,
+    focusOptions = { respectInterval: false },
   ): Promise<number> {
     const titleThreadId = this.threadId, titleResourceId = this.resource;
     if (this.pending && !approval)
@@ -438,7 +466,7 @@ export class Session extends EventEmitter {
     let focusRunId = '';
     try {
       if (this.focusTarget && !approval) {
-        const claim = this.result(await this.client.json(`/app/focus/${encodeURIComponent(this.focusTarget.id)}/run/claim`, 'POST', { force: true, respectInterval: false }));
+        const claim = this.result(await this.client.json(`/app/focus/${encodeURIComponent(this.focusTarget.id)}/run/claim`, 'POST', { force: true, respectInterval: focusOptions.respectInterval }));
         if (!claim.data?.claimed) throw new Error('这项关注正在执行或已暂停');
         focusRunId = claim.data.runId;
       }
@@ -634,7 +662,7 @@ export class Session extends EventEmitter {
     }
     if (name === 'vpn') {
       const action = args[0] ?? 'status';
-      if (!['connect', 'disconnect', 'status', 'verify'].includes(action) || args.length > (action === 'connect' ? 2 : 1)) throw new Error('/vpn connect [端口]；或 disconnect / status / verify');
+      if (!['connect', 'disconnect', 'status', 'verify', 'resend'].includes(action) || args.length > (action === 'connect' ? 2 : 1)) throw new Error('/vpn connect [端口]；或 disconnect / status / verify / resend');
       if (action === 'verify') {
         this.openForm({ title: 'VPN 额外验证', fields: [{ key: 'code', label: '验证码', value: '', secret: true }], save: async values => {
           this.result(await this.client.json('/app/vpn', 'POST', { action: 'verify', code: values.code })); this.show('已提交 VPN 验证');
@@ -855,25 +883,17 @@ export class Session extends EventEmitter {
     if (name === "login") {
       const id = args[0] ?? [...this.auth.keys()].at(-1);
       if (id === "schedule") {
-        this.show("请在校园登录窗口完成验证");
-        const result = this.result(
-          await this.client.json("/app/schedule/authorize", "POST"),
-        );
-        if (result.status !== "completed") throw new Error("登录尚未完成");
-        this.show(result.summary);
+        this.show("正在通过 HTTPS 授权，需要短信时会提示输入");
+        await this.authorizeCampus("/app/schedule/authorize", async result => {
+          if (result.status !== "completed") throw new Error("登录尚未完成");
+          this.show(result.summary);
+        });
       } else if (id && this.auth.has(id)) {
-        const result = this.result(
-          await this.client.json(
-            `/app/auth-resumes/${encodeURIComponent(id)}/execute`,
-            "POST",
-          ),
-        );
-        if (result.status !== "completed") throw new Error("登录尚未完成");
-        this.auth.delete(id);
-        await this.turn(
-          "登录完成，根据续接结果继续原任务，不要重复执行原调用。",
-          { seudailyAuthResumeId: result.resumeId },
-        );
+        await this.authorizeCampus(`/app/auth-resumes/${encodeURIComponent(id)}/execute`, async result => {
+          if (result.status !== "completed") throw new Error("登录尚未完成");
+          this.auth.delete(id);
+          await this.turn("登录完成，根据续接结果继续原任务，不要重复执行原调用。", { seudailyAuthResumeId: result.resumeId });
+        });
       } else throw new Error("/login schedule 或工具返回的登录 ID");
       return;
     }
@@ -910,7 +930,7 @@ export class Session extends EventEmitter {
       return;
     }
     if (name === "attach") {
-      if (args.length !== 1) throw new Error('/attach "图片或文档路径"，最多 4 个附件');
+      if (args.length !== 1) throw new Error('/attach "图片或文档路径"，最多 10 个附件');
       const attachment = await this.attachFile(args[0]);
       this.show('已添加 ' + attachment.name);
       return;
@@ -925,7 +945,7 @@ export class Session extends EventEmitter {
   }
   async attachFile(givenPath: string) {
     if (this.attachmentLoading) throw new Error('正在添加附件，请稍候');
-    if (this.documents.length + this.images.length >= 4) throw new Error('每轮最多 4 个附件，请删除不需要的附件');
+    if (this.documents.length + this.images.length >= MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件，请删除不需要的附件');
     const given = givenPath.replace(/^~(?=$|[\\/])/, homedir());
     const path = isAbsolute(given) ? given : resolve(this.root, given);
     const extension = extname(path).toLowerCase();
@@ -966,7 +986,7 @@ export class Session extends EventEmitter {
     const paths = await pastedFilePaths(text, this.root);
     if (!paths) return null;
     if (this.busy) throw new Error('当前任务正在运行，请完成后再添加附件');
-    if (paths.length + this.documents.length + this.images.length > 4) throw new Error('每轮最多 4 个附件，请删除不需要的附件');
+    if (paths.length + this.documents.length + this.images.length > MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件，请删除不需要的附件');
     const added = [];
     try {
       for (const path of paths) added.push(await this.attachFile(path));

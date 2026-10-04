@@ -122,6 +122,15 @@ button { color: inherit; }
 .composer-add-menu strong { flex:0 0 auto; font-size:15px; font-weight:500; }
 .composer-add-menu small { min-width:0; overflow:hidden; color:#8a8a8a; font-size:14px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
 .composer-add-menu-separator { height:1px; margin:5px 8px; background:#ececec; }
+.slash-menu { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 20; padding: 8px; border: 1px solid #dedede; border-radius: 16px; background: #fff; box-shadow: 0 14px 40px rgba(0,0,0,.1); }
+.slash-menu-heading { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px 9px; font-size: 12px; color: #555; }
+.slash-menu-heading span { color: #999; font-size: 11px; }
+.slash-menu-list { max-height: min(220px, 28vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.slash-menu-list button { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 42px; padding: 9px 10px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
+.slash-menu-list button.selected, .slash-menu-list button:hover { background: #f1f1f1; }
+.slash-menu-list strong { flex-shrink: 0; font-size: 13px; font-weight: 500; }
+.slash-menu-list button span { min-width: 0; font-size: 12px; color: #888; }
+.slash-command-hint { width: min(768px, 100%); margin: 7px auto 0; padding: 0 12px; color: #888; font-size: 11px; line-height: 1.5; }
 .image-input { display:none !important; }
 .composer-images { width:100%; order:-1; display:flex; flex-wrap:wrap; gap:7px; padding:3px 3px 2px; }
 .composer-files { width:100%; order:-1; display:flex; flex-wrap:wrap; gap:7px; padding:3px 3px 2px; }
@@ -449,9 +458,17 @@ button { color: inherit; }
 .inspector-footer { padding: 8px 20px 17px; margin: 0; color: #aaa; font-size: 11px; }
 .disk-state { font-size: 12px; color: #888; font-weight: 400; }
 .disk-control-row { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-top: 16px; }
-.disk-control-row input { min-width: 0; width: 115px; margin-left: auto; padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #333; }
+.disk-control-row input { margin-left: auto; }
 .disk-action { border: 0; background: transparent; color: #333; padding: 6px 0 6px 8px; cursor: pointer; }
 .disk-action:disabled { color: #aaa; cursor: default; }
+.vpn-status { margin: 12px 0; font-size: 14px; line-height: 1.5; text-align: right; }
+.vpn-section .vpn-port-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0; margin-top: 14px; font-size: 13px; }
+.vpn-port-row input, .disk-control-row input { flex: 0 0 115px; width: 115px; min-width: 0; height: 36px; padding: 7px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fff; color: #333; font: inherit; text-align: left; appearance: textfield; }
+.vpn-port-row input::-webkit-inner-spin-button, .vpn-port-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.vpn-port-row input:focus-visible, .disk-control-row input:focus-visible { outline: 2px solid #999; outline-offset: 2px; }
+.vpn-port-row input:disabled, .disk-control-row input:disabled { background: #fff; color: #888; opacity: 1; cursor: not-allowed; }
+.vpn-license { margin: 10px 0 0; color: #999; font-size: 11px; line-height: 1.6; }
+.vpn-license a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .disk-details { font-size: 12px; margin: 16px 0 0; }
 .disk-details > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
 .disk-details dt { color: #888; flex-shrink: 0; }
@@ -479,3 +496,10 @@ button { color: inherit; }
 .message-versions button:disabled { opacity:.3; cursor:default; }
 
 .focus-permission-notice { padding:12px; border-radius:8px; background:#fff8e6; color:#67501c; font-size:13px; line-height:1.6; }
+
+.campus-sms-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; background: #0003; }
+.campus-sms-dialog { width: min(420px, 100%); padding: 28px; border: 1px solid #e7e7e7; border-radius: 20px; background: #fff; box-shadow: 0 12px 40px #0002; }
+.campus-sms-dialog h2 { margin: 0 0 16px; font-size: 20px; }
+.campus-sms-dialog label { display: flex; flex-direction: column; gap: 10px; }
+.campus-sms-dialog input { width: 100%; height: 40px; padding: 8px 12px; border: 1px solid #d8d8d8; border-radius: 8px; background: #fff; color: inherit; text-align: left; font: inherit; }
+.campus-sms-actions { display: flex; justify-content: flex-end; gap: 16px; margin-top: 22px; }

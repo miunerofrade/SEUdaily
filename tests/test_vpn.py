@@ -38,6 +38,19 @@ def test_callback_is_bound_to_seu_vpn():
         vpn.validate_callback(callback.replace('CAS-auth', 'local'))
 
 
+def test_vpn_http_captcha_uses_existing_browser_flow(monkeypatch):
+    from seudaily.campus_auth import CampusAuthError, CampusSession
+    manager = vpn.VpnManager()
+    monkeypatch.setattr(manager, '_publish', lambda *_args: None)
+    def captcha(*_args):
+        raise CampusAuthError('captcha_required', '验证码')
+    monkeypatch.setattr(CampusSession, 'capture_auth_redirect', captcha)
+    browser = MagicMock(return_value='manual-callback')
+    monkeypatch.setattr(manager, '_login_cas_browser', browser)
+    assert manager._login_cas('/login') == 'manual-callback'
+    browser.assert_called_once_with('/login')
+
+
 def test_manager_disconnect_owns_core_and_revokes_proxy(tmp_path, monkeypatch):
     monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
     manager = vpn.VpnManager()

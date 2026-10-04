@@ -1,3 +1,4 @@
+import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
 import { mkdirSync, lstatSync, realpathSync, openSync, closeSync, fstatSync, readFileSync, writeFileSync, ftruncateSync, writeSync, unlinkSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ export function storeDocumentContext(ref: string, name: string, markdown: string
 export function resolveDocumentContexts(refs: unknown) {
   if (!Array.isArray(refs)) return [];
   const resolved: Array<{ name: string; markdown: string }> = [];
-  for (const value of refs.slice(0, 4)) {
+  for (const value of refs.slice(0, MAX_ATTACHMENTS)) {
     if (typeof value !== 'string') continue;
     let fd: number | undefined;
     try {

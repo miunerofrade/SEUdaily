@@ -60,7 +60,7 @@ uv run seudaily
 uv run seudaily start
 ```
 
-Web 默认地址为 `http://127.0.0.1:4173`，Agent API 为 `http://localhost:4111/api`。按 `Ctrl+C` 停止；服务日志位于 `.seudaily/logs/`。
+Web 默认地址为 `http://127.0.0.1:4173`，Agent API 为 `http://localhost:4111/api`。两端启动时先检查并复用已有的 SEUdaily 后端；没有后端时自动启动。自动启动的后端在最后一个界面退出后关闭，手动启动的后端保持运行。按 `Ctrl+C` 停止；服务日志位于 `.seudaily/logs/`。
 
 单次运行与其他命令：
 
@@ -101,7 +101,7 @@ uv run --frozen pytest -q
 
 Web 与终端的 Skill 选择只作用于下一次发送，发送后自动清除。解析附件作为用户消息中的资料保存，不加入系统指令。
 
-终端输入框支持粘贴本地附件路径：复制或拖入文件，终端传入路径后会显示 `[图片：文件名]` 或 `[文档：文件名]`，再输入提示词并按 Enter 发送，无需附件命令。附件作为完整编辑单元，左右方向键跨过附件，Backspace/Delete 删除对应附件。支持 PNG/JPEG/WebP/GIF（每张不超过 10 MB）以及 PDF/DOCX/XLSX/PPTX（每个不超过 50 MB），每轮最多 4 个附件。普通文字按原样粘贴；未知格式明确提示不支持。这里识别的是终端实际传入的文件路径，尚未读取系统剪贴板的图片二进制。
+终端输入框支持粘贴本地附件路径：复制或拖入文件，终端传入路径后会显示 `[图片：文件名]` 或 `[文档：文件名]`，再输入提示词并按 Enter 发送，无需附件命令。附件作为完整编辑单元，左右方向键跨过附件，Backspace/Delete 删除对应附件。支持 PNG/JPEG/WebP/GIF（每张不超过 10 MB）以及 PDF/DOCX/XLSX/PPTX（每个不超过 50 MB），Web 与终端每轮均最多 10 个附件（图片与文档合计）。普通文字按原样粘贴；未知格式明确提示不支持。这里识别的是终端实际传入的文件路径，尚未读取系统剪贴板的图片二进制。
 
 `/ramdisk 768M` 或 `/ramdisk 1.5 GB` 启用自定义内存盘，支持 64 MB–64 GB；`/ramdisk status` 查看状态，`/ramdisk unmount` 卸载，`/ramdisk reveal` 打开目录。Web 在资源面板显示实时使用量和任务数，每 5 秒刷新；有处理任务时不能卸载。
 
@@ -115,7 +115,7 @@ Web 与终端的 Skill 选择只作用于下一次发送，发送后自动清除
 
 ## 校园 VPN
 
-只运行 VPN 代理：`uv run seudaily --vpn 11081`（已安装命令时使用 `seudaily --vpn 11081`）。自动读取项目 `.env` 和环境变量中的 `SEUDAILY_USERNAME`、`SEUDAILY_PASSWORD`，缺少任一项立即报错，不下载核心或打开登录窗口。此模式不启动聊天、Agent 后端或 Web 前端；连接期间保持终端运行，验证码在登录窗口完成，按 Ctrl+C 断开并停止核心。端口范围为 1024–65535；已有 VPN 连接时需先断开，避免多个核心互相覆盖共享状态。也可用 `npm run cli -- --vpn 11081`。
+只运行 VPN 代理：`uv run seudaily --vpn 11081`（已安装命令时使用 `seudaily --vpn 11081`）。自动读取项目 `.env` 和环境变量中的 `SEUDAILY_USERNAME`、`SEUDAILY_PASSWORD`，缺少任一项立即报错，不下载核心或打开登录窗口。此模式不启动聊天、Agent 后端或 Web 前端；连接期间保持终端运行，短信验证码按终端提示输入，其他交互验证保留登录窗口，按 Ctrl+C 断开并停止核心。端口范围为 1024–65535；已有 VPN 连接时需先断开，避免多个核心互相覆盖共享状态。也可用 `npm run cli -- --vpn 11081`。
 
 Web 设置页或右侧资源面板可以连接校园 VPN；终端和 Web 支持 `/vpn connect`、`/vpn status`、`/vpn disconnect`。终端 `/vpn verify` 安全填写额外验证码，Web 在面板中填写。
 

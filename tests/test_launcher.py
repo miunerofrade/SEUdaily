@@ -125,3 +125,127 @@ def test_backend_cleanup_does_not_replace_successful_cli_exit(monkeypatch, tmp_p
         with launcher.backend_session(tmp_path):
             raise SystemExit(0)
     assert result.value.code == 0
+
+
+def test_existing_backend_is_reused_and_never_stopped(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+    response = Mock()
+    response.__enter__ = Mock(return_value=response)
+    response.__exit__ = Mock(return_value=False)
+    response.read.return_value = b'{"name":"SEUdaily","runtime":"agent"}'
+    monkeypatch.setattr(launcher, '_port_open', lambda port: True)
+    monkeypatch.setattr(launcher, '_backend_ready', lambda: True)
+    monkeypatch.setattr(launcher, 'urlopen', lambda *args, **kwargs: response)
+    spawn, stop = Mock(), Mock()
+    monkeypatch.setattr(launcher, '_spawn', spawn)
+    monkeypatch.setattr(launcher, '_stop', stop)
+    with launcher.backend_session(tmp_path):
+        pass
+    spawn.assert_not_called()
+    stop.assert_not_called()
+
+
+def test_web_starts_only_frontend_and_uses_shared_backend_session(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import Mock
+    events = []
+    @contextmanager
+    def backend(root, **kwargs):
+        events.append('backend-enter')
+        try:
+            yield
+        finally:
+            events.append('backend-exit')
+    process = Mock()
+    process.poll.side_effect = [None]
+    monkeypatch.setattr(launcher, '_port_open', lambda port: False)
+    monkeypatch.setattr(launcher, '_project_root', lambda: tmp_path)
+    monkeypatch.setattr(launcher, 'runtime_root', lambda root: tmp_path)
+    monkeypatch.setattr(launcher, '_npm_executable', lambda: 'npm')
+    monkeypatch.setattr(launcher, '_runtime_prefix', lambda: [])
+    monkeypatch.setattr(launcher, 'backend_session', backend)
+    spawn = Mock(return_value=process)
+    stop = Mock(side_effect=lambda p: events.append('web-stop'))
+    monkeypatch.setattr(launcher, '_spawn', spawn)
+    monkeypatch.setattr(launcher, '_stop', stop)
+    monkeypatch.setattr(launcher, '_wait_until_ready', lambda processes: None)
+    monkeypatch.setattr(launcher.time, 'sleep', Mock(side_effect=KeyboardInterrupt))
+    assert launcher.start() == 0
+    assert spawn.call_count == 1
+    assert spawn.call_args.args[0] == ['npm', 'run', 'dev:web']
+    assert events == ['backend-enter', 'web-stop', 'backend-exit']
+
+@pytest.mark.parametrize('owner_exits_first', [True, False])
+def test_shared_backend_stops_only_after_last_interface(monkeypatch, tmp_path, owner_exits_first):
+    from unittest.mock import Mock
+    process = Mock(pid=43210)
+    monkeypatch.setattr(launcher, '_port_open', Mock(side_effect=[False, True]))
+    monkeypatch.setattr(launcher, '_backend_ready', lambda: True)
+    monkeypatch.setattr(launcher, '_runtime_prefix', lambda: [])
+    monkeypatch.setattr(launcher, 'runtime_root', lambda _: tmp_path)
+    monkeypatch.setattr(launcher, '_spawn', lambda *args: process)
+    monkeypatch.setattr(launcher, '_backend_identity', lambda: {'name':'SEUdaily','runtime':'agent','processId':43210})
+    stop = Mock()
+    monkeypatch.setattr(launcher, '_stop', stop)
+    owner = launcher.backend_session(tmp_path)
+    borrower = launcher.backend_session(tmp_path)
+    owner.__enter__(); borrower.__enter__()
+    first, last = (owner, borrower) if owner_exits_first else (borrower, owner)
+    first.__exit__(None, None, None)
+    stop.assert_not_called()
+    last.__exit__(None, None, None)
+    assert stop.call_count == 1
+    assert stop.call_args.args[0].pid == process.pid
+    assert not (tmp_path / 'backend-clients' / 'managed.json').exists()
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX live process test')
+def test_shared_backend_survives_owner_exit_across_processes(monkeypatch, tmp_path):
+    import multiprocessing
+    import socket
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setattr(launcher, 'BACKEND_PORT', port)
+    monkeypatch.setattr(launcher, 'runtime_root', lambda _: tmp_path)
+    monkeypatch.setattr(launcher, '_runtime_prefix', lambda: [])
+    spawn = launcher._spawn
+    code = f'''import os,json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class Handler(BaseHTTPRequestHandler):
+ def do_GET(self):
+  self.send_response(200); self.end_headers()
+  self.wfile.write(json.dumps(dict(name='SEUdaily',runtime='agent',processId=os.getpid())).encode())
+ def log_message(self,*args): pass
+HTTPServer(('127.0.0.1',{port}),Handler).serve_forever()
+'''
+    monkeypatch.setattr(launcher, '_spawn', lambda command, root, log: spawn([sys.executable, '-c', code], root, log))
+    ctx = multiprocessing.get_context('fork')
+    def interface(pipe):
+        with launcher.backend_session(tmp_path):
+            pipe.send('ready')
+            pipe.recv()
+        pipe.send('done')
+    processes = []
+    try:
+        for _ in range(2):
+            parent, child = ctx.Pipe()
+            process = ctx.Process(target=interface, args=(child,))
+            process.start(); child.close()
+            processes.append((process, parent))
+            assert parent.poll(10) and parent.recv() == 'ready'
+        owner, owner_pipe = processes[0]
+        owner_pipe.send('exit')
+        assert owner_pipe.poll(10) and owner_pipe.recv() == 'done'
+        owner.join(5); assert owner.exitcode == 0
+        assert launcher._backend_ready()
+        borrower, borrower_pipe = processes[1]
+        borrower_pipe.send('exit')
+        assert borrower_pipe.poll(10) and borrower_pipe.recv() == 'done'
+        borrower.join(5); assert borrower.exitcode == 0
+        assert not launcher._port_open(port)
+    finally:
+        for process, pipe in processes:
+            if process.is_alive(): process.terminate()
+            process.join(5); pipe.close()
+        if launcher._port_open(port):
+            launcher._stop(launcher._SharedBackendProcess(launcher._backend_identity()['processId']))

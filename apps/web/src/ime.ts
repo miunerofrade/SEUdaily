@@ -10,6 +10,6 @@ export function useImeComposition() {
   return {
     onCompositionStart: () => { composing.current = true; },
     onCompositionEnd: () => { composing.current = false; },
-    isComposing: (event: KeyboardEvent<HTMLTextAreaElement>) => isImeComposing(event.nativeEvent, composing.current),
+    isComposing: (event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => isImeComposing(event.nativeEvent, composing.current),
   };
 }
