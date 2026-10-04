@@ -30,7 +30,16 @@ test('unified commands and aliases reject removed/conflicting arguments', () => 
 });
 
 test('packed installation runs without source/node_modules, installs only selected components and shares core', { timeout: 240_000 }, async t => {
-  const temporary = await mkdtemp(join(tmpdir(), 'seudaily-package-')); t.after(() => rm(temporary, { recursive: true, force: true }));
+  const temporary = await mkdtemp(join(tmpdir(), 'seudaily-package-'));
+  const launchers = [];
+  let registry, api;
+  t.after(async () => {
+    for (const child of launchers) child.kill('SIGTERM');
+    if (api) await fetch(api + '/app/runtime/stop', { method: 'POST', signal: AbortSignal.timeout(3000) }).catch(() => {});
+    await delay(500);
+    if (registry) { registry.closeAllConnections(); await new Promise(resolve => registry.close(resolve)); }
+    await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  });
   const install = join(temporary, 'install'), data = join(temporary, 'data'), cache = join(temporary, 'cache');
   const packages = new Map(), counts = new Map();
   for (const name of ['host', 'cli', 'web', 'python']) {
@@ -44,7 +53,7 @@ test('packed installation runs without source/node_modules, installs only select
   }
   let registryPort;
   let rejectCli = true;
-  const registry = createServer((request, response) => {
+  registry = createServer((request, response) => {
     const name = decodeURIComponent(request.url.split('/')[1]);
     if (name === 'seudaily-cli' && rejectCli) { response.writeHead(404); response.end('{}'); return; }
     const record = packages.get(name);
@@ -55,8 +64,7 @@ test('packed installation runs without source/node_modules, installs only select
     response.end(JSON.stringify({ name, 'dist-tags': { latest: '1.1.0' }, versions: { '1.1.0': { name, version: '1.1.0', dist: { tarball: `http://127.0.0.1:${registryPort}/${name}/-/package.tgz`, integrity: record.integrity } } } }));
   });
   await new Promise(r => registry.listen(0, '127.0.0.1', r)); registryPort = registry.address().port;
-  t.after(() => new Promise(r => registry.close(r)));
-  const port = await freePort(), api = `http://127.0.0.1:${port}`;
+  const port = await freePort(); api = `http://127.0.0.1:${port}`;
   const host = join(install, 'node_modules', 'seudaily', 'bin', 'seudaily.mjs');
   assert.ok(!existsSync(join(install, 'node_modules', 'seudaily', 'node_modules')));
   assert.ok(!existsSync(join(install, 'node_modules', 'seudaily', 'src')));
@@ -69,12 +77,6 @@ test('packed installation runs without source/node_modules, installs only select
   rejectCli = false;
   assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli', 'ready.json')));
   assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli.lock')));
-  const launchers = [];
-  t.after(async () => {
-    for (const child of launchers) child.kill('SIGTERM');
-    await fetch(api + '/app/runtime/stop', { method: 'POST' }).catch(() => {});
-    await delay(500);
-  });
   const launchWeb = () => {
     const child = spawn(node, [host, 'web', '--data-dir', data, '--port', String(port)], { cwd: temporary, env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.logs = ''; child.stdout.on('data', b => child.logs += b); child.stderr.on('data', b => child.logs += b); launchers.push(child); return child;
@@ -93,7 +95,7 @@ test('packed installation runs without source/node_modules, installs only select
   assert.match((await command(['sessions'])).stdout, /暂无会话/);
   assert.ok(counts.has('seudaily-cli')); assert.ok(counts.has('seudaily-web'));
   assert.ok(!counts.has('seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
-  first.kill('SIGTERM'); await eventually(async () => { assert.notEqual(first.exitCode, null); });
+  first.kill('SIGTERM'); await eventually(async () => { assert.ok(first.exitCode !== null || first.signalCode !== null); });
   const surviving = await eventually(async () => { const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 1); return value; }, exitTimeout); assert.equal(surviving.processId, identity.processId);
   await assert.rejects(exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary }));
   second.kill('SIGTERM');
