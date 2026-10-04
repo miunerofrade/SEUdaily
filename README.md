@@ -26,7 +26,7 @@ cp .env.example .env
 
 在 `.env` 中按需配置 `DEEPSEEK_API_KEY`、校园账号、语音转写与搜索服务密钥，完整字段见 [.env.example](.env.example)。
 
-浏览器默认：Windows 使用 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Node 与 Python 使用同一版本、共享一份浏览器缓存，运行统一安装入口：
+普通课表、培养方案和课程资料查询使用 HTTP，可跳过浏览器安装。需要 VPN 登录、交互验证或通用网页操作时再安装。浏览器默认：Windows 使用 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Node 与 Python 使用同一版本、共享一份浏览器缓存，运行统一安装入口：
 
 ```bash
 npm run install:browser
@@ -63,7 +63,7 @@ uv run pytest
 
 ## 校园登录
 
-课表和个人培养方案使用纯 HTTP 统一认证及业务接口，普通登录不启动浏览器。先复用已保存的 Cookie；失效时尝试用学校 SSO 会话换取业务 Cookie，SSO 也失效时使用已保存的账号密码重新认证。接口请求发现登录失效后最多重认证并重试一次；验证码或二次验证返回人工登录入口。学校控制会话有效期，程序不假设 Cookie 永久有效。课表仍保留接口结构变更时的旧页面解析入口；课程点播、通用浏览器工具和 VPN 登录仍使用浏览器。
+课表和个人培养方案使用纯 HTTP 统一认证及业务接口，普通登录不启动浏览器。先复用已保存的 Cookie；失效时尝试用学校 SSO 会话换取业务 Cookie，SSO 也失效时使用已保存的账号密码重新认证。接口请求发现登录失效后最多重认证并重试一次；验证码或二次验证返回人工登录入口。学校控制会话有效期，程序不假设 Cookie 永久有效。课程点播的普通登录、课程搜索、课次定位、播放链接和官方字幕也使用 HTTP；课件优先调用学校 PDF 导出接口，权限拒绝会直接报告。课表仍保留接口结构变更时的旧页面解析入口；通用网页操作、VPN 登录及需验证码或二次验证的显式授权仍使用浏览器。浏览器按需启动，普通校园查询不启动浏览器。对照测试和剩余依赖见 [课程 HTTP 记录](docs/research/seu-course-http.md)。
 
 ## 校园 VPN
 

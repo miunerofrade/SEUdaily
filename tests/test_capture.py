@@ -8,6 +8,31 @@ from seudaily.service import CourseService
 from seudaily.summary import AISummarizer
 
 
+def test_local_asr_is_deferred_without_loading_optional_dependencies(tmp_path):
+    from seudaily.service import transcribe_local
+
+    with pytest.raises(RuntimeError, match="本地 ASR 暂未支持"):
+        transcribe_local(media_path="unused.wav", model_path="unused", output_dir=str(tmp_path), task_name="test")
+
+
+def test_cloud_transcription_loads_its_worker_lazily(monkeypatch, tmp_path):
+    from seudaily.asr import cloud
+    from seudaily.service import transcribe_cloud
+
+    class FakeWorker:
+        def __init__(self, config, output_dir):
+            self.config = config
+            self.output_dir = output_dir
+
+        def transcribe_and_export(self, task_name):
+            assert self.temp_audio_path == str((tmp_path / "audio.wav").resolve())
+            yield {"txt_path": str(tmp_path / "transcript.txt"), "done": True}
+
+    monkeypatch.setattr(cloud, "CloudASRWorker", FakeWorker)
+    result = transcribe_cloud(audio_path=str(tmp_path / "audio.wav"), output_dir=str(tmp_path), task_name="test")
+    assert result["transcriptPath"] == str(tmp_path / "transcript.txt")
+
+
 def test_sanitize_filename_removes_windows_reserved_characters():
     assert sanitize_filename(' 课程: 第一讲 / 导论 ') == "课程- 第一讲 - 导论"
 
@@ -89,7 +114,7 @@ def test_course_not_found_hint_mentions_other_semesters_and_manual_target():
     assert "source=manual" in hint
 
 
-def test_batch_capture_uses_two_workers_only_for_subtitle_only_work(monkeypatch):
+def test_batch_capture_serializes_all_shared_browser_work(monkeypatch):
     service = CourseService()
     monkeypatch.setattr(
         service,
@@ -116,7 +141,7 @@ def test_batch_capture_uses_two_workers_only_for_subtitle_only_work(monkeypatch)
         keep_media=False,
     )
 
-    assert subtitle_result["effectiveConcurrency"] == 2
+    assert subtitle_result["effectiveConcurrency"] == 1
     assert heavy_result["effectiveConcurrency"] == 1
 
 

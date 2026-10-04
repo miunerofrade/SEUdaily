@@ -6,7 +6,7 @@
 
 课表和个人培养方案使用 `src/seudaily/campus_auth.py` 的短期 HTTP 客户端。Web 与 CLI 调用同一个 Python 实现，不另起 Playwright 驱动或浏览器。既有 Playwright Cookie 文件保持兼容；两项服务继续共享 `.seudaily/ehall-cookies.json`。
 
-课程点播与通用网页操作仍依赖浏览器。VPN 的 CAS 回调截获也仍保持原实现，本次未调整。
+课程点播的普通登录、查询和资源取得也已迁移为 HTTP，详见 [课程接口与对照验证](seu-course-http.md)。通用网页操作和 VPN 的 CAS 回调截获仍保持浏览器实现。
 
 ## 认证流程
 

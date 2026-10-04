@@ -1,4 +1,7 @@
 import time
+import os
+import tempfile
+from .cancellation import TaskCancelledError
 import re
 import json
 import shutil
@@ -6,6 +9,43 @@ import threading
 from pathlib import Path
 
 _HEAVY_PROCESSING_LOCK = threading.Lock()
+
+def _check_cancelled(event):
+    if event.is_set():
+        raise TaskCancelledError("任务已取消")
+
+
+def _valid_artifact(path):
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _write_text_atomic(path, text):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _copy_atomic(source, destination, event):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as target:
+            temporary = Path(target.name)
+            with open(source, "rb") as media:
+                while chunk := media.read(1024 * 1024):
+                    _check_cancelled(event)
+                    target.write(chunk)
+        _check_cancelled(event)
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
 
 def sanitize_filename(name):
     if not name: return ""
@@ -22,15 +62,17 @@ def format_ms_to_srt(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms_rem:03d}"
 
 def process_official_json(json_data: dict, task_dir: Path, task_name: str):
-    txt_path = task_dir / f"{task_name}_transcript.txt" 
+    txt_path = task_dir / f"{task_name}_transcript.txt"
     data_dict = json_data.get("data")
     if not data_dict: raise ValueError("JSON 中未找到 'data' 字段")
     assembly_list = data_dict.get("afterAssemblyList", [])
     if not assembly_list: raise ValueError("字幕列表为空")
     full_text = [item.get("res", "").strip() for item in assembly_list if item.get("res", "").strip()]
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n\n".join(full_text))
+    if not full_text:
+        raise ValueError("字幕文本为空")
+    _write_text_atomic(txt_path, "\n\n".join(full_text))
     return str(txt_path)
+
 
 def fetch_dates_only(page):
     try:
