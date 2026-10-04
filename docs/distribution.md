@@ -24,9 +24,9 @@ npm 发布后，基础包安装提供 `seudaily` 命令。现在不能把正式�
 | 包 | 内容 | 何时使用 |
 | --- | --- | --- |
 | `seudaily` | Node 启动器、内置 CLI、公共核心、内置 Skill、可选组件清单 | 安装即可使用终端 |
-| `seudaily-web` | React 静态页面及资源 | web |
-| `seudaily-python` | Python wheel、固定版本且带 hash 的基础/媒体依赖清单 | 校园、文档、VPN 等工具 |
-| `seudaily-browser` | 合并后的 MCP 服务与固定 Playwright core 依赖 | 通用浏览器工具 |
+| `@miunerofrade/seudaily-web` | React 静态页面及资源 | web |
+| `@miunerofrade/seudaily-python` | Python wheel、固定版本且带 hash 的基础/媒体依赖清单 | 校园、文档、VPN 等工具 |
+| `@miunerofrade/seudaily-browser` | 合并后的 MCP 服务与固定 Playwright core 依赖 | 通用浏览器工具 |
 
 构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。内置 CLI 也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
 

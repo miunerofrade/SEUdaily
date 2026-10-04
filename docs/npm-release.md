@@ -17,7 +17,7 @@ Actions → `npm release candidate` → Run workflow，选择 main，版本必�
 ## 需要维护者完成的 npm 配置
 
 1. 本机 `npm whoami` 已确认账号 `miunerofrade`，邮箱已验证；2026-10-05 已确认 2FA 为 `auth-and-writes`，首次发布时维护者按 npm 提示完成验证；账号配置已就绪。不得向对话提供密码、验证码或 token。
-2. 当前候选统一版本为 **1.1.0**；四个名称是 `seudaily`、`seudaily-web`、`seudaily-python`、`seudaily-browser`。2026-10-05 注册表均返回 404，但名称尚未取得所有权，发布前要再次核对。默认不改为带 scope 的名称。
+2. 当前候选统一版本为 **1.1.0**；四个名称是 `seudaily`、`@miunerofrade/seudaily-web`、`@miunerofrade/seudaily-python`、`@miunerofrade/seudaily-browser`。2026-10-05 注册表均返回 404，但名称尚未取得所有权，发布前要再次核对。主包保留公共名称，三个带后缀的组件使用维护者个人 scope。
 3. **首次发布推荐使用已经登录的本机**，在明确授权并确认最新 CI/候选文件后，依次发布 `build/release/packages/` 中的三个可选组件和主包；通过 npm 的交互流程完成 2FA。首次本地发布不带 `--provenance`（来源证明由后续 GitHub 发布生成）。这一步不要求提前创建 GitHub npm token。候选生成和本次准备均不执行发布。
 4. 包创建后，在四个包的 npm Settings → Trusted Publisher 配置 GitHub owner **miunerofrade**、repository **SEUdaily**、workflow filename **npm-release.yml**、environment **npm**，允许直接 `npm publish`。配置后 GitHub 使用 OIDC，不需要长期 token。官方说明：[Trusted Publisher](https://docs.npmjs.com/trusted-publishers/)。
 5. 如果首次也必须由 GitHub 发布，则另需将具备这四个名称发布权限、能满足 2FA 策略的 npm granular token 保存为 GitHub **npm Environment Secret `NPM_TOKEN`**；不提交到仓库、不发进对话。后续配置 Trusted Publisher 后移除它。这是替代方案，不是本机首次发布的必备条件。

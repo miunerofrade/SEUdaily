@@ -71,19 +71,19 @@ test('packed installation runs without source/node_modules, installs only select
       assert.ok(packed.files.every(file => !/node_modules|\.env|agent\.db|components\/|src\//.test(file.path)));
       assert.ok(packed.files.some(file => file.path === 'dist/cli/index.mjs'));
       await npm(['install', '--prefix', install, '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', join(temporary, packed.filename)]);
-    } else packages.set(`seudaily-${name}`, { bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` });
+    } else packages.set(packed.name, { bytes, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` });
   }
   let registryPort;
   let rejectWeb = true;
   registry = createServer((request, response) => {
     const name = decodeURIComponent(request.url.split('/')[1]);
-    if (name === 'seudaily-web' && rejectWeb) { response.writeHead(404); response.end('{}'); return; }
+    if (name === '@miunerofrade/seudaily-web' && rejectWeb) { response.writeHead(404); response.end('{}'); return; }
     const record = packages.get(name);
     if (!record) { response.writeHead(404); response.end('{}'); return; }
     counts.set(name, (counts.get(name) ?? 0) + 1);
     if (request.url.endsWith('.tgz')) { response.end(record.bytes); return; }
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ name, 'dist-tags': { latest: '1.1.0' }, versions: { '1.1.0': { name, version: '1.1.0', dist: { tarball: `http://127.0.0.1:${registryPort}/${name}/-/package.tgz`, integrity: record.integrity } } } }));
+    response.end(JSON.stringify({ name, 'dist-tags': { latest: '1.1.0' }, versions: { '1.1.0': { name, version: '1.1.0', dist: { tarball: `http://127.0.0.1:${registryPort}/${encodeURIComponent(name)}/-/package.tgz`, integrity: record.integrity } } } }));
   });
   await new Promise(r => registry.listen(0, '127.0.0.1', r)); registryPort = registry.address().port;
   const port = await freePort(); api = `http://127.0.0.1:${port}`;
@@ -120,8 +120,8 @@ test('packed installation runs without source/node_modules, installs only select
   assert.equal((await fetch(api + '/.env')).status, 404);
   assert.equal((await fetch(api + '/app/not-found')).status, 404);
   assert.match((await command(['sessions'])).stdout, /暂无会话/);
-  assert.ok(!counts.has('seudaily-cli')); assert.ok(counts.has('seudaily-web'));
-  assert.ok(!counts.has('seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
+  assert.ok(!counts.has('seudaily-cli')); assert.ok(counts.has('@miunerofrade/seudaily-web'));
+  assert.ok(!counts.has('@miunerofrade/seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
   first.kill('SIGTERM'); await eventually(async () => { assert.ok(first.exitCode !== null || first.signalCode !== null); });
   const surviving = await eventually(async () => { const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 1); return value; }, exitTimeout); assert.equal(surviving.processId, identity.processId);
   await assert.rejects(exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary }));
@@ -129,7 +129,7 @@ test('packed installation runs without source/node_modules, installs only select
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); }, exitTimeout);
   await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
   // Restarting the built-in CLI neither downloads CLI nor requests Web again.
-  const before = counts.get('seudaily-web'); assert.match((await command(['sessions'])).stdout, /暂无会话/); assert.equal(counts.get('seudaily-web'), before);
+  const before = counts.get('@miunerofrade/seudaily-web'); assert.match((await command(['sessions'])).stdout, /暂无会话/); assert.equal(counts.get('@miunerofrade/seudaily-web'), before);
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
   const manual = spawn(node, [join(dirname(dirname(host)), 'dist/core.mjs')], { cwd: temporary, env: { ...env, SEUDAILY_INSTALL_ROOT: dirname(dirname(host)), SEUDAILY_PROJECT_ROOT: data, SEUDAILY_PORT: String(port), SEUDAILY_MANAGED: '0' }, stdio: 'ignore' });
   launchers.push(manual);

@@ -9,7 +9,7 @@ if (!process.env.npm_execpath) throw new Error('请通过 npm run release:publis
 const index = JSON.parse(await readFile(join(root, 'build/release/packages/index.json'), 'utf8'));
 // Check every version before the first mutation; network/auth errors must not be treated as absence.
 for (const item of index) {
-  const response = await fetch(`https://registry.npmjs.org/${item.name}/${item.version}`);
+  const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(item.name)}/${item.version}`);
   if (response.status !== 404) throw new Error(response.ok ? `${item.name}@${item.version} 已存在，请更新版本。` : `npm 检查失败：${response.status}`);
 }
 for (const item of index) execFileSync(process.execPath, [process.env.npm_execpath, 'publish', join(root, 'build/release/packages', item.filename), '--access', 'public', '--provenance'], { cwd: root, stdio: 'inherit' });

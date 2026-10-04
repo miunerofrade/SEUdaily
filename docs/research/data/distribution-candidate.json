@@ -19,30 +19,30 @@
     {
       "component": "host",
       "filename": "seudaily-1.1.0.tgz",
-      "size": 492505,
-      "unpackedSize": 1711442,
-      "integrity": "sha512-97e3q+B7ykFMpez3PI6aGCui3h7YUBky/82/nODNvG0LmMPNP5uE8WqNVENngNzfvU9+8oLEsJ2UkPRL16DAsw=="
+      "size": 491942,
+      "unpackedSize": 1710814,
+      "integrity": "sha512-T22MIG84wf5ixKkBjkUHwmp5Y5KE6W3SV4ahkGVPgKVNWTLwTbkYzF+4ZYsYCRyBPwlhLAt0sAPMFczDwmwMOQ=="
     },
     {
       "component": "web",
-      "filename": "seudaily-web-1.1.0.tgz",
-      "size": 1084254,
-      "unpackedSize": 2120674,
-      "integrity": "sha512-X+grwIPAqzCDwFoBHBM8birhgEB2E3H4k+itehHIn90JbdP3iL12GHn1TvxSo4QNtK2gbNiAjmA+TXuOPNnx2w=="
+      "filename": "miunerofrade-seudaily-web-1.1.0.tgz",
+      "size": 1084264,
+      "unpackedSize": 2120702,
+      "integrity": "sha512-LrkERSpFPf7zHHWuG2eohK/HPLx3zRcsnHyCCGXIDYIZAdjLfn0QTajHSx5cn580yQag3BDX4ISqUgZbev2GiA=="
     },
     {
       "component": "python",
-      "filename": "seudaily-python-1.1.0.tgz",
-      "size": 239027,
-      "unpackedSize": 362892,
-      "integrity": "sha512-7gqcj5zGiN+CZRaNYDmh7mrhNgEJNvsS4yVQZ8TUCEJjxMQ6S0J4BqpO0NUCJ3HcDLzHgKxDUkt9K9pEAdhHsg=="
+      "filename": "miunerofrade-seudaily-python-1.1.0.tgz",
+      "size": 238521,
+      "unpackedSize": 362411,
+      "integrity": "sha512-Kx1rg16tjMq9Lhk/9/9h4S9m35vQl3Xp2PEHaTLxZRkWaZz+4/RYy7RCRM12JTb0MkWn8E5l/xGukBZF/hwy1Q=="
     },
     {
       "component": "browser",
-      "filename": "seudaily-browser-1.1.0.tgz",
-      "size": 38677,
-      "unpackedSize": 128780,
-      "integrity": "sha512-Qc4VHLmeXg3Z2G+SOwgRu+w2rlJ9r701DLXI5kAfowxgKL2NBZ7I6GN5Br2HUZ0VqdTP2zlI+tpsfPuf1lUW5w=="
+      "filename": "miunerofrade-seudaily-browser-1.1.0.tgz",
+      "size": 38680,
+      "unpackedSize": 128808,
+      "integrity": "sha512-EUUstFzKAU1L8vI43xvODjLsIP/sOgyNLs2qjr6GKtPRf75Flb71nxM35MY2JhARBB6LWKgF0xtRPsewr1C5yg=="
     }
   ],
   "fixtureValidation": {
@@ -111,39 +111,39 @@
   "releasePackages": [
     {
       "component": "web",
-      "name": "seudaily-web",
+      "name": "@miunerofrade/seudaily-web",
       "version": "1.1.0",
-      "filename": "seudaily-web-1.1.0.tgz",
-      "integrity": "sha512-icBBhv2u98451v/r7aNV3GOOQc21w4FWMKRc/469gh5nVtmhEQn+4Y4faNev5hEBPjLM4+/yfqTr2qKssTSRow==",
-      "size": 1084395,
-      "unpackedSize": 2121019
+      "filename": "miunerofrade-seudaily-web-1.1.0.tgz",
+      "integrity": "sha512-Mj4qFD8PSSiMtjFN8KbPbb7UBTR18oQN9WKHGRqqOk6X/cj7KZ88qwfhWqPkld1y1dZwlkvcE2D0KvHTq3aIyg==",
+      "size": 1084399,
+      "unpackedSize": 2121047
     },
     {
       "component": "python",
-      "name": "seudaily-python",
+      "name": "@miunerofrade/seudaily-python",
       "version": "1.1.0",
-      "filename": "seudaily-python-1.1.0.tgz",
-      "integrity": "sha512-j5xSuXhldNq9AKi7wUS4I8CLGBBPTqc5c2AFb0IDsZOcctKzzycGLim0KMnBMYy9HsHTk7IdzEpOIF46DK9mPw==",
-      "size": 239163,
-      "unpackedSize": 363237
+      "filename": "miunerofrade-seudaily-python-1.1.0.tgz",
+      "integrity": "sha512-TMtWXo9LY3weWghCmWkUVS8mZPM+qQNmiXGMknY0Gu/BUidAJi1ew74pz5DIlE0Xr/hEiGaxNIVbq18tKhJBJw==",
+      "size": 238665,
+      "unpackedSize": 362756
     },
     {
       "component": "browser",
-      "name": "seudaily-browser",
+      "name": "@miunerofrade/seudaily-browser",
       "version": "1.1.0",
-      "filename": "seudaily-browser-1.1.0.tgz",
-      "integrity": "sha512-ZFS2KptCsWLhfeo7xfQUqhEFtQ3qk1Cr04bIVp5f6Puo6hspd3/T1/RUVFtnvIyZt4ju//DE4kxuPba3RKI/dA==",
-      "size": 38776,
-      "unpackedSize": 129125
+      "filename": "miunerofrade-seudaily-browser-1.1.0.tgz",
+      "integrity": "sha512-cT1MGqO6mm4LsyoKLR6elGBmd6NEHUpRh+AWQ1W2+MwpHzVpCvMwpgS7htEENdFLya5ILZw/d+rb7A3f2PrYBA==",
+      "size": 38781,
+      "unpackedSize": 129153
     },
     {
       "component": "host",
       "name": "seudaily",
       "version": "1.1.0",
       "filename": "seudaily-1.1.0.tgz",
-      "integrity": "sha512-R1N5JeLbodOq4VBnMnkrfZob8LON9vmnGLSQulYLzbUZjQU51/ZmkvTHhBvMkEQl+OJgEF9kEl9Dfp6r6S+iUA==",
-      "size": 491890,
-      "unpackedSize": 1709538
+      "integrity": "sha512-2QNzfTffysLw7jrxLkrv4Jdv7FlMT+8Kz+RXpUfAlLosJSgrbpyNdAyWOka3L09LRbEabguiyRPku9VIylkZEg==",
+      "size": 491313,
+      "unpackedSize": 1708910
     }
   ],
   "cliBundled": true,

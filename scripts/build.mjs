@@ -20,7 +20,7 @@ const cli = await build({ ...common, metafile: true, entryPoints: [resolve(root,
 await writeFile(resolve(cliDirectory, 'THIRD_PARTY_NOTICES.txt'), await thirdPartyNotices(Object.keys(cli.metafile.inputs)));
 for (const name of ['web', 'python', 'browser']) {
   const directory = resolve(output, 'components', name); await mkdir(directory, { recursive: true });
-  const packageName = `seudaily-${name}`; components[name] = packageName;
+  const packageName = `@miunerofrade/seudaily-${name}`; components[name] = packageName;
   const descriptions = { web: 'Optional Web interface for SEUdaily.', python: 'Optional Python campus, document and VPN tools for SEUdaily.', browser: 'Optional browser automation service for SEUdaily.' };
   await writeFile(resolve(directory, 'README.md'), `# ${packageName}\n\n${descriptions[name]}\n\nThis component is installed automatically by [SEUdaily](https://www.npmjs.com/package/seudaily) when needed. Install the main application with \`npm install -g seudaily\`; run \`seudaily\` for the terminal UI or \`seudaily web\` for the Web interface.\n\n[Source and documentation](https://github.com/miunerofrade/SEUdaily). Licensed under MIT.\n`);
   await writeFile(resolve(directory, 'package.json'), JSON.stringify({ name: packageName, version, description: descriptions[name], private: true, type: 'module', license: 'MIT',
