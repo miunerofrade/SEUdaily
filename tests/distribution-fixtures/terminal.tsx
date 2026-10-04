@@ -10,7 +10,7 @@ import { prepareTerminalInput, terminalKeyboard } from '../../src/terminal/keybo
 export async function run() {
   const root = process.env.SEUDAILY_PROJECT_ROOT!;
   const record = (value: any) => appendFileSync(join(root, 'requests.jsonl'), JSON.stringify(value) + '\n');
-  if (process.platform === 'win32') process.stdin.on('data', bytes => record({ input: String(bytes), at: Date.now() }));
+  const observeInput = (bytes: unknown) => record({ input: String(bytes), at: Date.now() });
   const session = new Session({ command: 'chat' }, root);
   session.client.json = async (path: string, _method?: string, body?: any) => {
     if (path === '/app/agent-info') return { model: 'fixture-model', effort: 'high' };
@@ -42,6 +42,7 @@ export async function run() {
   }) as typeof process.stdout.write;
   const initialRaw = process.stdin.isRaw ?? false;
   const restore = prepareTerminalInput(process.stdin);
+  if (process.platform === 'win32') process.stdin.on('data', observeInput);
   try {
     const instance = render(<App session={session} />, { alternateScreen: true, exitOnCtrlC: false, maxFps: 60, kittyKeyboard: terminalKeyboard() });
     writeFileSync(join(root, 'ready'), JSON.stringify({ rss: process.memoryUsage().rss }));
@@ -49,6 +50,7 @@ export async function run() {
     writeFileSync(join(root, 'clean-exit'), 'true');
   } finally {
     restore();
+    process.stdin.off('data', observeInput);
     writeFileSync(join(root, 'input-restored'), String((process.stdin.isRaw ?? false) === initialRaw));
     process.stdout.write = originalWrite;
   }

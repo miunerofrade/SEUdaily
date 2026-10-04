@@ -2,11 +2,14 @@
 Only pywinpty is added to the CI test environment; it is not a product dependency.
 """
 import base64
+import argparse
 import json
 import os
 from pathlib import Path
 import select
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 from winpty import PtyProcess
@@ -92,6 +95,19 @@ def terminal(exit_method):
 
 
 if __name__ == '__main__':
-    report = {'platform': 'win32', 'conpty': [terminal('ctrl-d'), terminal('held-ctrl-c')]}
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--case', choices=['ctrl-d', 'held-ctrl-c'])
+    args = parser.parse_args()
+    if args.case:
+        print(json.dumps(terminal(args.case), ensure_ascii=False))
+        sys.exit(0)
+    # A fresh process gives each ConPTY its own native handle/thread lifecycle.
+    runs = []
+    for case in ['ctrl-d', 'held-ctrl-c']:
+        result = subprocess.run([sys.executable, __file__, '--case', case], capture_output=True, text=True, encoding='utf-8', timeout=60)
+        if result.returncode:
+            raise RuntimeError(result.stderr + '\n' + result.stdout)
+        runs.append(json.loads(result.stdout.strip().splitlines()[-1]))
+    report = {'platform': 'win32', 'conpty': runs}
     (OUTPUT / 'conpty-result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(report, ensure_ascii=False))
