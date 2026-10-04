@@ -44,7 +44,8 @@ async function connect() {
   if (identity) { verify(identity); await request('/app/health'); return identity; }
   await mkdir(join(dataRoot, '.seudaily', 'logs'), { recursive: true, mode: 0o700 });
   const log = await open(join(dataRoot, '.seudaily', 'logs', 'core.log'), 'a', 0o600);
-  const child = spawn(process.execPath, [join(installRoot, 'dist', 'core.mjs')], { cwd: dataRoot, stdio: ['ignore', log.fd, log.fd], detached: process.platform !== 'win32', windowsHide: true, env: { ...process.env, SEUDAILY_MANAGED: '1' } });
+  // Windows also needs an independent process group/console so one interface exiting cannot kill the shared core.
+  const child = spawn(process.execPath, [join(installRoot, 'dist', 'core.mjs')], { cwd: dataRoot, stdio: ['ignore', log.fd, log.fd], detached: true, windowsHide: true, env: { ...process.env, SEUDAILY_MANAGED: '1' } });
   let spawnError: Error | undefined;
   child.once('error', error => { spawnError = error; }); child.unref(); await log.close();
   for (let attempt = 0; attempt < 100; attempt++) {
