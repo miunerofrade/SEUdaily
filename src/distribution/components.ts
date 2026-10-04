@@ -45,10 +45,10 @@ export async function ensureComponent(name: Component): Promise<string> {
   if (typeof packageName !== 'string' || !/^(?:@[a-z0-9-]+\/)?[a-z0-9-]+$/.test(packageName)) throw new Error('组件清单无效');
   const target = componentRoot(name);
   const installed = join(target, 'node_modules', packageName);
-  if (existsSync(join(target, 'ready.json'))) return installed;
+  if (existsSync(join(target, 'ready.json')) && existsSync(join(installed, 'package.json'))) return installed;
   const release = await acquireLock(`${target}.lock`, 15 * 60_000);
   try {
-    if (existsSync(join(target, 'ready.json'))) return installed;
+    if (existsSync(join(target, 'ready.json')) && existsSync(join(installed, 'package.json'))) return installed;
     const temporary = `${target}.install-${process.pid}`;
     await rm(temporary, { recursive: true, force: true });
     await mkdir(temporary, { recursive: true });

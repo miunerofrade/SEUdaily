@@ -100,6 +100,11 @@ test('packed installation runs without source/node_modules, installs only select
   assert.equal(counts.size, 0);
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
   await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
+  // Pre-release caches used an unscoped component name at this same version.
+  const legacyWeb = join(cache, 'components', '1.1.0', 'web');
+  await mkdir(join(legacyWeb, 'node_modules', 'seudaily-web'), { recursive: true });
+  await writeFile(join(legacyWeb, 'ready.json'), JSON.stringify({ version: '1.1.0' }));
+  await writeFile(join(legacyWeb, 'node_modules', 'seudaily-web', 'package.json'), JSON.stringify({ name: 'seudaily-web', version: '1.1.0' }));
   await assert.rejects(command(['web']));
   rejectWeb = false;
   assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli', 'ready.json')));
