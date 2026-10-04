@@ -141,11 +141,12 @@
       "name": "seudaily",
       "version": "1.1.0",
       "filename": "seudaily-1.1.0.tgz",
-      "integrity": "sha512-2QNzfTffysLw7jrxLkrv4Jdv7FlMT+8Kz+RXpUfAlLosJSgrbpyNdAyWOka3L09LRbEabguiyRPku9VIylkZEg==",
-      "size": 491313,
-      "unpackedSize": 1708910
+      "integrity": "sha512-aMDpQOoZ0Kjitrx4gDH4qIb26uPYATDbY4xIJNb86pMoKFoLem63UOkpFKeCCl2iMWx3eCwXF10qzSp86WZ/HA==",
+      "size": 491320,
+      "unpackedSize": 1709010
     }
   ],
   "cliBundled": true,
-  "cliRegistryRequired": false
+  "cliRegistryRequired": false,
+  "npmPublished": true
 }

@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-05",
+  "version": "1.1.0",
+  "unauthenticatedRegistryInstallation": true,
+  "bundledCli": true,
+  "automaticScopedWebInstallation": true,
+  "sharedBackend": true
+}

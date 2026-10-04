@@ -1,6 +1,6 @@
 # 分发实现与发布状态
 
-2026-10-04：Node 合并 JS、内置 SQLite、统一启动器和组件边界已落地；已在 macOS arm64 验收本地 npm 打包文件，尚未向 npm 发布。根包及组件仍为 `private: true`。
+2026-10-05：Node 合并 JS、内置 SQLite、统一启动器和组件边界已落地；已在 macOS arm64 验收本地 npm 打包文件，已按维护者授权向 npm 发布 1.1.0。根包及组件仍为 `private: true`。
 
 ## 构建和使用
 
@@ -17,7 +17,7 @@ node bin/seudaily.mjs --help
 
 `uv run seudaily` 作为源码兼容入口，转交同一个 Node 启动器并默认保留仓库数据。`start`、`exec`、`--prompt`、`--cwd`、`--no-start` 不再作为公共命令接受。新的动作是 `chat`、`web`、`ask`、`vpn`、`status`、`stop`、`sessions`、`skills`、`completion`、`import-data`；`-c/--chat`、`-w/--web`、`--vpn PORT` 是别名。
 
-npm 发布后，基础包安装提供 `seudaily` 命令。现在不能把正式注册表中尚未发布的组件当作已经可下载；CLI 始终使用包内 `dist/cli/`，本地可选组件优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
+npm 发布后，基础包安装提供 `seudaily` 命令。三个可选组件已公开发布到维护者个人命名空间；CLI 始终使用包内 `dist/cli/`，本地可选组件优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
 
 ## 包边界
 
@@ -77,15 +77,17 @@ npm run pack:local
 
 最终回归为 Node 75/75、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。默认包（已含 CLI）压缩约 480 KiB，解压约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
 
-本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24、Python 3.11/3.12/3.13 九组全部通过。发布前仍需：
+本地验收使用 macOS arm64；2026-10-05 GitHub 三系统 × Node 22/24、Python 3.11/3.12/3.13 九组全部通过。当前验收与后续维护：
 
 1. 云端安装、生命周期和默认浏览器验收已完成；Windows ConPTY 和 macOS/Linux PTY 用例均通过。校园 VPN/短信需要本机网络和人工验证，未把校园凭据交给 CI。
-2. 确认四个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-05 查询四个名称均返回 404，仍须在发布时核对及取得所有权。
+2. 四个包的 1.1.0 已公开发布，维护者为 miunerofrade；三个组件使用 @miunerofrade scope，主包为 seudaily。后续升级统一版本，组件先发布，主包后发布。
 3. 复核生成的第三方许可证清单、npm 文件白名单，复核已接入的 CI/发布流程。SQLite 警告保留在核心日志，不全局屏蔽其他警告。
-4. 再次验收实际 npm 注册表安装和升级。当前本地临时注册表验证不能替代实际发布验收。
+4. 已在无 npm 登录配置的临时环境验证真实注册表安装、内置 CLI、scoped Web 自动安装和共享后端。旧数据导入继续由固定回归覆盖。
 
-跨界面共享历史已存在，但完整的实时变更广播仍未实施；常驻后台 Focus、Bun 独立程序和 Node SEA 继续搁置。没有执行 npm publish，也没有重启用户当前运行的旧后端。
+跨界面共享历史已存在，但完整的实时变更广播仍未实施；常驻后台 Focus、Bun 独立程序和 Node SEA 继续搁置。已完成 npm 1.1.0 发布，也没有重启用户当前运行的旧后端。
 
 GitHub 已配置三系统 × Node 22/24 自动验收和手动发布候选流程；具体凭据、Environment 审核及 Trusted Publisher 配置见 [npm 发布说明](npm-release.md)。云端结果以对应 Actions run 为准。
 
-最终九组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37222669721)，[结果清单](research/data/github-distribution-ci.json)。
+最终九组云端通过记录：[Actions run](https://github.com/miunerofrade/SEUdaily/actions/runs/37224641743)，[结果清单](research/data/github-distribution-ci.json)。
+
+实际发布与安装记录：[包完整性](research/data/npm-release.json)、[公开安装验收](research/data/npm-public-installation.json)。
