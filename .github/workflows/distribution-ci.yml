@@ -46,7 +46,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Node regression and isolated npm installation
-        run: node --import tsx --test tests/*.mjs
+        timeout-minutes: 8
+        run: node --import tsx --test --test-timeout=240000 tests/*.mjs
       - name: Python regression
         run: uv run pytest -q
       - name: Build fixed terminal/browser fixtures
