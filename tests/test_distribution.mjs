@@ -100,7 +100,7 @@ test('packed installation runs without source/node_modules, installs only select
   await assert.rejects(exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary }));
   second.kill('SIGTERM');
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); }, exitTimeout);
-  assert.ok(!existsSync(join(data, '.seudaily', 'core.lock')));
+  await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
   // Same installation/data/cache can restart, without downloading the CLI again.
   const before = counts.get('seudaily-cli'); assert.match((await command(['sessions'])).stdout, /暂无会话/); assert.equal(counts.get('seudaily-cli'), before);
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
