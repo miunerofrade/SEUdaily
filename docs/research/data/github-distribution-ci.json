@@ -80,6 +80,6 @@
     }
   ],
   "cliBundled": true,
-  "publishedPackageCount": 4,
-  "npmPublished": false
+  "npmPublished": false,
+  "releasePackageCount": 4
 }
