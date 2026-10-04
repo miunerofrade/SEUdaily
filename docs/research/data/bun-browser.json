@@ -1,0 +1,33 @@
+{
+  "platform": "Darwin-arm64",
+  "engines": {
+    "node": {
+      "tools": true,
+      "navigate": true,
+      "click": true,
+      "snapshot": true,
+      "close": true
+    },
+    "node-bundle": {
+      "tools": true,
+      "navigate": true,
+      "click": true,
+      "snapshot": true,
+      "close": true
+    },
+    "bun": {
+      "tools": true,
+      "navigate": true,
+      "click": true,
+      "snapshot": true,
+      "close": true
+    },
+    "compiled": {
+      "tools": true,
+      "navigate": true,
+      "click": true,
+      "snapshot": true,
+      "close": true
+    }
+  }
+}

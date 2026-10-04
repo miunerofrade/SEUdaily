@@ -703,6 +703,8 @@ def extract_slides(
     if not math.isfinite(interval_sec) or interval_sec <= 0:
         raise ValueError("intervalSec 必须为有限正数")
     try:
+        from .optional_runtime import ensure_media_dependencies
+        ensure_media_dependencies()
         from .ppt import PPTExtractor
     except ModuleNotFoundError as error:
         raise RuntimeError("未安装 PPT 可选依赖；请运行 uv sync --frozen --extra ppt") from error

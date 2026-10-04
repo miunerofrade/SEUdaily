@@ -363,7 +363,7 @@ export function App({ session, copy = copySelection }: {
     let active = true;
     const timer = setTimeout(() => {
       if (input.startsWith("/attach "))
-        void attachmentSuggestions(input, session.root).then((values) => {
+        void attachmentSuggestions(input, session.options.cwd ?? session.root).then((values) => {
           if (active) setPathSuggestions({ input, values });
         });
     }, 80);
@@ -371,7 +371,7 @@ export function App({ session, copy = copySelection }: {
       active = false;
       clearTimeout(timer);
     };
-  }, [input, session.root]);
+  }, [input, session.root, session.options.cwd]);
   const suggestions = input.startsWith("/attach ")
     ? pathSuggestions.input === input
       ? pathSuggestions.values

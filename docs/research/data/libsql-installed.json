@@ -1,0 +1,80 @@
+{
+  "platform": "Darwin-arm64",
+  "engines": {
+    "node-bundle": {
+      "runs": [
+        {
+          "first_screen_ms": 567.67,
+          "rss_bytes": 121585664,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 281.96,
+          "rss_bytes": 120061952,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 310.37,
+          "rss_bytes": 119259136,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 295.14,
+          "rss_bytes": 119193600,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 304.58,
+          "rss_bytes": 115261440,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "median_after_first_ms": 299.86
+    }
+  }
+}

@@ -13,29 +13,45 @@
   },
   "type": "module",
   "scripts": {
-    "start": "tsx src/server/main.ts",
+    "start": "node bin/seudaily.mjs",
     "dev": "tsx watch src/server/main.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
-    "dev:all": "concurrently -k -n agent,web -c blue,green \"npm:start\" \"npm:dev:web\"",
+    "dev:all": "concurrently -k -n agent,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json",
     "install:browser": "node scripts/install-browser.mjs",
     "test:python": "uv run pytest",
-    "cli": "tsx src/terminal/main.tsx"
+    "cli": "node bin/seudaily.mjs",
+    "build": "node scripts/build.mjs",
+    "test:agent": "node --import tsx --test tests/test_agent_runtime.mjs tests/test_agent_http.mjs tests/test_terminal_attachments.mjs tests/test_sqlite.mjs",
+    "test:distribution": "node --import tsx --test tests/test_distribution.mjs",
+    "dev:api": "tsx src/server/main.ts",
+    "pack:local": "node scripts/pack.mjs",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:publish": "node scripts/publish-release.mjs"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "concurrently": "^9.2.1",
+    "esbuild": "0.25.12",
+    "fflate": "0.8.2",
+    "tsx": "4.23.15",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.7",
     "@hono/node-server": "1.19.17",
     "@inkjs/ui": "2.0.0",
-    "@libsql/client": "0.18.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@playwright/mcp": "0.0.81",
-    "playwright": "1.63.0",
     "dotenv": "16.6.1",
     "highlight.js": "^11.12.0",
     "hono": "4.13.12",
     "ink": "7.1.1",
     "katex": "^0.16.47",
     "lucide-react": "^0.544.0",
+    "playwright": "1.63.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
@@ -46,16 +62,6 @@
     "yaml": "2.9.0",
     "zod": "^4.1.0"
   },
-  "devDependencies": {
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.1.9",
-    "@vitejs/plugin-react": "^5.0.3",
-    "concurrently": "^9.2.1",
-    "tsx": "4.23.15",
-    "typescript": "^5.9.0",
-    "vite": "^7.1.7"
-  },
   "engines": {
     "node": "^22.22.0 || >=24.12.0",
     "npm": ">=10"
@@ -63,5 +69,18 @@
   "overrides": {
     "playwright": "$playwright",
     "playwright-core": "$playwright"
-  }
+  },
+  "bin": {
+    "seudaily": "bin/seudaily.mjs"
+  },
+  "license": "MIT",
+  "files": [
+    "bin/",
+    "dist/launcher.mjs",
+    "dist/core.mjs",
+    "dist/components.json",
+    "dist/skills/",
+    "docs/licensing-vpn.md",
+    "dist/THIRD_PARTY_NOTICES.txt"
+  ]
 }

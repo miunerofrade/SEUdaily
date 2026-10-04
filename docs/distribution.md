@@ -1,0 +1,90 @@
+# 分发实现与发布状态
+
+2026-10-04：Node 合并 JS、内置 SQLite、统一启动器和组件边界已落地；已在 macOS arm64 验收本地 npm 打包文件，尚未向 npm 发布。根包及组件仍为 `private: true`。
+
+## 构建和使用
+
+开发者构建需要当前锁文件对应的 npm 依赖和 uv；使用构建后的普通聊天只需要兼容 Node，不需要系统 Python、uv 或浏览器。
+
+```sh
+npm ci
+npm run build
+node bin/seudaily.mjs --data-dir "$PWD"
+node bin/seudaily.mjs web --data-dir "$PWD"
+node bin/seudaily.mjs ask "你好" --data-dir "$PWD"
+node bin/seudaily.mjs --help
+```
+
+`uv run seudaily` 作为源码兼容入口，转交同一个 Node 启动器并默认保留仓库数据。`start`、`exec`、`--prompt`、`--cwd`、`--no-start` 不再作为公共命令接受。新的动作是 `chat`、`web`、`ask`、`vpn`、`status`、`stop`、`sessions`、`skills`、`completion`、`import-data`；`-c/--chat`、`-w/--web`、`--vpn PORT` 是别名。
+
+npm 发布后，基础包安装提供 `seudaily` 命令。现在不能把正式注册表中尚未发布的组件当作已经可下载；本地构建优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
+
+## 包边界
+
+| 包 | 内容 | 何时使用 |
+| --- | --- | --- |
+| `seudaily` | Node 启动器、公共核心、内置 Skill、组件清单 | 基础入口 |
+| `seudaily-cli` | 合并后的 Ink 终端界面 | chat、ask、sessions、skills |
+| `seudaily-web` | React 静态页面及资源 | web |
+| `seudaily-python` | Python wheel、固定版本且带 hash 的基础/媒体依赖清单 | 校园、文档、VPN 等工具 |
+| `seudaily-browser` | 合并后的 MCP 服务与固定 Playwright core 依赖 | 通用浏览器工具 |
+
+构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。CLI 组件也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
+
+公共核心与终端通过 HTTP/SSE 通信。Web 静态页面由核心同端口托管，不启动 Vite。启动器检查后端名称、协议、版本和数据目录；数据目录锁在加载数据库前取得。多个界面共用一个核心，连接每 10 秒续租，正常退出立即释放；崩溃租约约 30 秒失效。自动核心在最后一个界面退出后停止，独立开发后端不由租约回收。Web 启动器关闭的入口是终端 Ctrl+C，关闭浏览器标签本身不等于结束启动器。
+
+组件按当前应用版本安装至私有缓存，用目录锁避免重复安装，npm 校验包 integrity，禁用安装脚本；下载/安装完成后原子发布目录。失败目录清理后可重试。Python 环境先安装锁定 wheel 和 hash 清单，再写就绪标记，不把半成品交给 worker。uv 0.11.1 的下载 URL 和 SHA256 已固定，保留 MIT/Apache 许可证，不修改全局 uv、Python 或 Shell 配置。
+
+Python 与 Node Playwright 同为 1.63.0，共享浏览器缓存。浏览器引擎直到实际浏览器操作时才准备；Windows 默认已有 Edge。官方 PDF 导出成功时不安装视频提取依赖；确实落到视频幻灯片提取时才准备媒体 extras。FFmpeg 与 Linux 浏览器系统库仍是外部系统依赖。本地 ASR 尚不可用。
+
+VPN 核心继续独立按需下载；源代码/AGPL 说明见 [VPN 许可证记录](licensing-vpn.md)。
+
+## 数据和缓存
+
+| 平台 | 默认用户数据目录 | 默认组件缓存目录 |
+| --- | --- | --- |
+| macOS | `~/Library/Application Support/SEUdaily` | `~/Library/Caches/SEUdaily` |
+| Windows | `%LOCALAPPDATA%/SEUdaily` | `%LOCALAPPDATA%/SEUdaily/cache` |
+| Linux | `$XDG_DATA_HOME/seudaily`，默认 `~/.local/share/seudaily` | `$XDG_CACHE_HOME/seudaily`，默认 `~/.cache/seudaily` |
+
+用户数据目录内保存 `.env`、`AGENT.md`、`.agent/skills/`、`.seudaily/`、`exports/`；数据库仍为 `.seudaily/agent.db`。安装升级不写这些文件。`--data-dir` 或 `SEUDAILY_DATA_DIR` 选择数据目录；`SEUDAILY_CACHE_DIR` 选择缓存目录，`--port` 同时改变服务端口、CLI 地址和本地 Host/Origin 校验。
+
+新默认目录不会自动读取旧仓库中的凭据或历史。停止旧后端后，用显式导入保留原件；目标必须为空：
+
+```sh
+node bin/seudaily.mjs import-data /absolute/old/repository
+```
+
+历史数据库 schema 不变；旧 Mastra 数据只读导入也已改为 SQLite，不依赖 Python。用户可以继续通过 `--data-dir /absolute/old/repository` 使用原目录，不要求迁移。
+
+额外部署配置：`SEUDAILY_COMPONENT_DIR` 可指向本地构建组件目录；`SEUDAILY_UV_BINARY` 可显式指定现有 uv；`PLAYWRIGHT_BROWSERS_PATH` 可复用已有对应版本引擎。默认仍为私有安装。修改已有后端的端口/数据目录需要先停止它，不会把另一服务当成可复用后端。
+
+## 验收与发布门槛
+
+```sh
+npm run typecheck
+npm run build
+npm run test:agent
+npm run test:distribution
+node --import tsx --test tests/*.mjs
+uv run pytest -q
+node scripts/build-fixtures.mjs
+python3 scripts/validate-terminal.py --python
+python3 scripts/validate-terminal.py --browser-only
+npm run pack:local
+```
+
+固定用例包括原 Agent/HTTP/附件回归、事务隔离、注册表下载失败重试、纯打包安装、同时打开两个 Web 与 CLI、同一核心复用、最后退出/重启、Host/Origin 校验、空 Focus 列表不安装 Python，以及旧数据复制不覆盖原件。PTY 固定用例继续覆盖中文输入、附件、流式输出、取消、退出和终端恢复；浏览器只访问本机 fixture。
+
+最终回归为 Node 74/74、Python 256/256，类型检查和生产构建通过；实际安装新 Python wheel 后导入也通过。基础包压缩约 296 KiB，CLI 约 186 KiB，两者解压合计约 1.63 MiB；这些数字不包含按需的 Python 依赖、浏览器和 VPN 核心。包大小、integrity 和固定用例结果见 [候选包验证记录](research/data/distribution-candidate.json)。
+
+此次只实际验证 macOS arm64。发布前仍需：
+
+1. 在 Windows/Linux 运行安装与生命周期验收，并核对 Node 22/24 的支持范围。PTY 驱动为 POSIX，Windows 要用真实终端或 ConPTY 验收。
+2. 确认五个 npm 包名的可用性/所有权，选择未发布的新版本并统一组件清单；组件先发布，基础包后发布。2026-10-04 查询五个名称均返回 404，仍须在发布时核对及取得所有权。
+3. 复核生成的第三方许可证清单、npm 文件白名单，复核已接入的 CI/发布流程。SQLite 警告保留在核心日志，不全局屏蔽其他警告。
+4. 再次验收实际 npm 注册表安装和升级。当前本地临时注册表验证不能替代实际发布验收。
+
+跨界面共享历史已存在，但完整的实时变更广播仍未实施；常驻后台 Focus、Bun 独立程序和 Node SEA 继续搁置。没有执行 npm publish，也没有重启用户当前运行的旧后端。
+
+GitHub 已配置三系统 × Node 22/24 自动验收和手动发布候选流程；具体凭据、Environment 审核及 Trusted Publisher 配置见 [npm 发布说明](npm-release.md)。云端结果以对应 Actions run 为准。

@@ -1,0 +1,118 @@
+{
+  "date": "2026-10-04",
+  "platform": "macOS arm64",
+  "node": "22.23.3",
+  "checks": {
+    "node": {
+      "passed": 74,
+      "failed": 0
+    },
+    "python": {
+      "passed": 256,
+      "failed": 0
+    },
+    "typecheck": true,
+    "productionBuild": true,
+    "freshOptionalPythonInstallation": true
+  },
+  "packages": [
+    {
+      "component": "host",
+      "filename": "seudaily-1.1.0.tgz",
+      "size": 303190,
+      "unpackedSize": 1097486,
+      "integrity": "sha512-xsIX2Lc9qge+AmT6aqezCDXsRqzt1Sg5yk1839QqluB8Z3U6Xevk/XIotWFIm1Tw2SrMJ3g7XVFYCIeCoOxO8Q=="
+    },
+    {
+      "component": "cli",
+      "filename": "seudaily-cli-1.1.0.tgz",
+      "size": 190716,
+      "unpackedSize": 612743,
+      "integrity": "sha512-vgHCgA5bQzp96HrVKIkEhkRgHlfw3NOBPAygL6PqnWWX/WT6VEkJ5SM8Cj3yGSxkzyGDIsYyvHpOUNFqwjoOGA=="
+    },
+    {
+      "component": "web",
+      "filename": "seudaily-web-1.1.0.tgz",
+      "size": 1083950,
+      "unpackedSize": 2120226,
+      "integrity": "sha512-fYUl3HDXp1/AdXVE8CNXoJuVZmDLbewkOPDA+nyWzw60X65exAZoqAlTjECqLEVuha3Qdqfy9Y/9WUAORHWlLA=="
+    },
+    {
+      "component": "python",
+      "filename": "seudaily-python-1.1.0.tgz",
+      "size": 206004,
+      "unpackedSize": 288949,
+      "integrity": "sha512-SenJVagyG6ovMcXAH485EaPXeozhjqJy5M+LsAqBaQ6nXpjzDN7/KphtuVXaac2TKxnyzNoBdLH37gt48XbhIQ=="
+    },
+    {
+      "component": "browser",
+      "filename": "seudaily-browser-1.1.0.tgz",
+      "size": 38438,
+      "unpackedSize": 128302,
+      "integrity": "sha512-kRWmkY9HQIa4WusBxZfHJTMtA2rYm048IIqBU1Zp83Mf2A8Ugds4tIEjIv/N9v34JFy83D1+dUiLjBmSATA1tA=="
+    }
+  ],
+  "fixtureValidation": {
+    "core": {
+      "checks": {
+        "databaseRollback": true,
+        "historyRestart": true,
+        "approvalOnce": true,
+        "http": true,
+        "sseChinese": true,
+        "cancel": true
+      },
+      "elapsed_ms": 219.24
+    },
+    "terminal": [
+      {
+        "first_screen_ms": 315.16,
+        "rss_bytes": 119750656,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "ctrl-d",
+          "terminalRestored": true
+        }
+      }
+    ],
+    "held_exit": {
+      "first_screen_ms": 319.33,
+      "rss_bytes": 119357440,
+      "checks": {
+        "chineseCommit": true,
+        "imagePaste": true,
+        "backspace": true,
+        "stream": true,
+        "resize": true,
+        "cancel": true,
+        "exit": "held-ctrl-c",
+        "terminalRestored": true
+      }
+    },
+    "median_first_screen_ms": 315.16,
+    "python": {
+      "checks": {
+        "pythonHealth": true,
+        "unicodeError": true,
+        "recovery": true,
+        "cancelled": true
+      },
+      "elapsed_ms": 955.21
+    }
+  },
+  "browserValidation": {
+    "browser": {
+      "tools": true,
+      "navigate": true,
+      "click": true,
+      "snapshot": true,
+      "close": true
+    }
+  },
+  "published": false
+}

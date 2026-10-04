@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { diskSize } from '../shared/disk-size.js';
 import { z } from "zod";
 import { registerApiRoute } from "../server/routes.js";
@@ -11,7 +12,7 @@ import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
 import { agentStore } from "./storage.js";
 import { agentRuntime } from "./application.js";
-import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, type FocusAgentItem } from "./focus-runtime.js";
+import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, startFocusRuntime, type FocusAgentItem } from "./focus-runtime.js";
 import { isFullAccessEnabled, isFullAccessExtraEnabled, setFullAccessEnabled, setFullAccessExtraEnabled } from "./permission-state.js";
 import { storeDocumentContext } from "./document-context.js";
 import { activateActionRequest, claimActionRequest, completeActionRequest, failActionRequest } from "./action-request-store.js";
@@ -442,6 +443,7 @@ export const appRoutes = [
         if (proposal.kind === "create_focus") {
           const id = `focus-${randomUUID()}`;
           result = await runPythonTool<ToolResult>("upsert-focus", { item: { ...payload, id, threadId: id, resourceId: FOCUS_RESOURCE_ID, enabled: true } });
+          if (result.status === "completed") startFocusRuntime();
         } else result = await runPythonTool<ToolResult>("apply-agent-schedule-change", payload);
         if (result.status === "failed" || result.status === "cancelled") {
           const error = new Error(result.summary || "本地操作执行失败");
@@ -472,6 +474,7 @@ export const appRoutes = [
     method: "GET",
     requiresAuth: false,
     handler: async (c: any) => {
+      if (!existsSync(resolve(projectRoot, ".seudaily", "focus.json"))) return c.json({ status: "completed", data: { items: [] } });
       const result = await runPythonTool<ToolResult>("list-focus", {});
       return c.json({ ...resultResponse(result), data: await fullResultData(result) });
     },
@@ -490,6 +493,7 @@ export const appRoutes = [
         resourceId: typeof body.resourceId === "string" && body.resourceId ? body.resourceId : FOCUS_RESOURCE_ID,
       };
       const result = await runPythonTool<ToolResult>("upsert-focus", { item });
+      if (result.status === 'completed') startFocusRuntime();
       const data = await fullResultData(result) as { item?: FocusAgentItem };
       return c.json({ ...resultResponse(result), data });
     },

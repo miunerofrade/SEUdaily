@@ -14,7 +14,7 @@ SEUdaily 是面向东南大学学习与校园事务的本地助手，提供终�
 
 ## 安装
 
-当前从源码运行，尚未提供 npm 安装包。需要：
+npm 发布包正在准备，尚未公开发布。当前从源码构建，需要：
 
 - Node.js **22.22+（22.x）或 24.12+**、npm **10+**。
 - Python **3.13+** 和 [uv](https://docs.astral.sh/uv/)。
@@ -26,11 +26,12 @@ cd SEUdaily
 npm ci
 uv sync --frozen
 cp .env.example .env
+npm run build
 ```
 
 在 `.env` 中按需填写 `DEEPSEEK_API_KEY`、`SEUDAILY_USERNAME`、`SEUDAILY_PASSWORD`、`SEUDAILY_ASR_API_KEY` 和 `TAVILY_API_KEY`；其他配置见 [.env.example](.env.example)。锁文件用于复现依赖，请保留 `npm ci` 和 `uv sync --frozen` 的安装方式。
 
-普通课表、培养方案和课程资料查询使用 HTTP，可跳过浏览器安装。需要 VPN 登录、交互验证或通用网页操作时再安装浏览器。Windows 默认使用已安装的 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Node 与 Python 的 Playwright 固定为同一正式版本，共享同一份浏览器缓存。统一安装入口会检查两端版本及浏览器构建是否一致，再只安装所选引擎：
+普通课表、培养方案和课程资料查询使用 HTTP，可跳过浏览器安装。VPN 的普通登录使用 HTTP；需要浏览器兜底或通用网页操作时再安装浏览器。Windows 默认使用已安装的 Microsoft Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Node 与 Python 的 Playwright 固定为同一正式版本，共享同一份浏览器缓存。统一安装入口会检查两端版本及浏览器构建是否一致，再只安装所选引擎：
 
 ```bash
 npm run install:browser
@@ -48,7 +49,13 @@ uv sync --frozen --extra ppt
 
 ## 使用
 
-直接启动终端助手：
+构建完成后可直接使用 Node 启动，无需 `uv run`：
+
+```bash
+node bin/seudaily.mjs --data-dir "$PWD"
+```
+
+源码兼容入口也使用同一个启动器，默认保留仓库数据：
 
 ```bash
 uv run seudaily
@@ -57,35 +64,36 @@ uv run seudaily
 启动 Web 工作台与后端：
 
 ```bash
-uv run seudaily start
+uv run seudaily web
 ```
 
-Web 默认地址为 `http://127.0.0.1:4173`，Agent API 为 `http://localhost:4111/api`。两端启动时先检查并复用已有的 SEUdaily 后端；没有后端时自动启动。自动启动的后端在最后一个界面退出后关闭，手动启动的后端保持运行。按 `Ctrl+C` 停止；服务日志位于 `.seudaily/logs/`。
+Web 与 Agent API 共用 `http://127.0.0.1:4111`，不再需要启动 Vite。两端启动时先检查并复用已有的 SEUdaily 后端；没有后端时自动启动。自动启动的后端在最后一个界面退出后关闭，手动启动的后端保持运行。按 `Ctrl+C` 停止；服务日志位于 `.seudaily/logs/`。
 
 单次运行与其他命令：
 
 ```bash
-uv run seudaily exec "查看今天的课程"
+uv run seudaily ask "查看今天的课程"
 uv run seudaily --help
 ```
 
 ## 数据与权限
 
-会话、配置和缓存主要保存在 `.seudaily/`，课程产物保存在 `exports/`，门户 Cookie 保存在本地。服务端数据库是会话历史的主存储，浏览器仅保存容量受限的缓存。账号、密钥与 Cookie 不应提交到 Git。
+源码兼容入口继续使用仓库目录；npm 入口默认使用系统用户数据目录，可通过 `--data-dir` 选择。会话和工具状态保存在数据目录的 `.seudaily/`，组件使用独立缓存，课程产物保存在 `exports/`，门户 Cookie 保存在本地。服务端数据库是会话历史的主存储，浏览器仅保存容量受限的缓存。账号、密钥与 Cookie 不应提交到 Git。
 
 Agent 可通过工具访问工作区并执行命令。应用的权限设置控制工具授权，原生命令沙盒限制文件访问和网络：macOS 使用系统沙盒，Linux 使用 bubblewrap，Windows 可通过 WSL2 运行沙盒。运行环境缺少沙盒时的主机回退隔离能力较弱，应根据实际使用场景选择权限。
 
 ## 开发
 
-`main` 统一维护 CLI、Web 与公共核心，`cli` 已合入，旧 `dev` 停止维护。两种界面的构建和安装边界将在分发阶段拆分，具体见 [分发计划](docs/plans/distribution-pending.md)。
+`main` 统一维护 CLI、Web 与公共核心，`cli` 已合入，旧 `dev` 停止维护。CLI、Web、公共核心、Python 与浏览器组件已经分开构建，实施状态见 [分发说明](docs/distribution.md)。
 
 ```bash
 npm run typecheck
-npm run build:web
+npm run build
+npm run test:distribution
 uv run --frozen pytest -q
 ```
 
-后端与前端独立开发可使用 `npm run dev` 和 `npm run dev:web`。Node 回归测试使用内置 test runner 与 `tsx`；依赖本地模型配置的测试应使用隔离环境。真实门户验证需要有效登录状态，不能由离线测试替代。
+后端与前端独立开发可使用 `npm run dev` 和 `npm run dev:web`；开发 Vite 页面仍使用 4173 端口。Node 回归测试使用内置 test runner 与 `tsx`；依赖本地模型配置的测试应使用隔离环境。真实门户验证需要有效登录状态，不能由离线测试替代。
 
 | 目录 | 职责 |
 | --- | --- |

@@ -17,11 +17,9 @@ import { Client, RESOURCE, clean } from "./client.js";
 import { diskSize, settingsForm, semesterForm, focusForm, type Form } from "./management.js";
 import { imageMediaTypes, pastedFilePaths } from './attachments.js';
 export interface Options {
-  vpn?: number;
   command: string;
   cwd?: string;
   resume?: string;
-  prompt?: string;
   message?: string;
   skill?: string[];
   timeout?: number;
@@ -947,7 +945,7 @@ export class Session extends EventEmitter {
     if (this.attachmentLoading) throw new Error('正在添加附件，请稍候');
     if (this.documents.length + this.images.length >= MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件，请删除不需要的附件');
     const given = givenPath.replace(/^~(?=$|[\\/])/, homedir());
-    const path = isAbsolute(given) ? given : resolve(this.root, given);
+    const path = isAbsolute(given) ? given : resolve(this.options.cwd ?? this.root, given);
     const extension = extname(path).toLowerCase();
     const mediaType = imageMediaTypes[extension];
     if (!mediaType && !['.pdf', '.docx', '.xlsx', '.pptx'].includes(extension))
@@ -983,7 +981,7 @@ export class Session extends EventEmitter {
     this.changed();
   }
   async attachPastedFiles(text: string) {
-    const paths = await pastedFilePaths(text, this.root);
+    const paths = await pastedFilePaths(text, this.options.cwd ?? this.root);
     if (!paths) return null;
     if (this.busy) throw new Error('当前任务正在运行，请完成后再添加附件');
     if (paths.length + this.documents.length + this.images.length > MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件，请删除不需要的附件');

@@ -1,8 +1,7 @@
-import { createClient, type Client, type InStatement } from '@libsql/client';
+import { LocalClient, type InStatement } from './sqlite.js';
+import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { RunState, StoredMessage, Thread } from './types.js';
 import { conversationPath, branchKey, withParents } from '../shared/conversation-tree.js';
 export type Summary = {
@@ -10,16 +9,22 @@ export type Summary = {
     value: Record<string, any>;
     updatedAt: string;
 };
-const exec = promisify(execFile);
-const snapshotScript = `import sqlite3,json,sys\nfrom pathlib import Path\nc=sqlite3.connect(Path(sys.argv[1]).resolve().as_uri()+'?mode=ro',uri=True)\nc.row_factory=sqlite3.Row\ntables={r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")}\nresult={}\nfor name in ['mastra_threads','mastra_messages','mastra_observational_memory']:\n if name in tables: result[name]=[dict(r) for r in c.execute('SELECT * FROM '+name+(' ORDER BY createdAt,rowid' if name != 'mastra_observational_memory' else ' ORDER BY rowid'))]\nprint(json.dumps(result))\nc.close()`;
+function legacySnapshot(path: string): Record<string, any[]> {
+    const database = new DatabaseSync(resolve(path), { readOnly: true });
+    try {
+        const tables = new Set(database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+        return Object.fromEntries(['mastra_threads', 'mastra_messages', 'mastra_observational_memory'].filter(name => tables.has(name))
+            .map(name => [name, database.prepare(`SELECT * FROM ${name} ORDER BY ${name === 'mastra_observational_memory' ? 'rowid' : 'createdAt,rowid'}`).all()]));
+    } finally { database.close(); }
+}
 export class AgentStore {
-    readonly client: Client;
+    readonly client: LocalClient;
     readonly ready: Promise<void>;
     constructor(path: string, private legacyPath?: string) {
         if (path !== ':memory:') {
             mkdirSync(dirname(resolve(path)), { recursive: true });
         }
-        this.client = createClient({ url: path === ':memory:' ? 'file::memory:' : `file:${resolve(path)}` });
+        this.client = new LocalClient(path === ':memory:' ? path : resolve(path));
         if (path !== ':memory:')
             chmodSync(resolve(path), 0o600);
         this.ready = this.initialize();
@@ -37,8 +42,7 @@ export class AgentStore {
         if (this.legacyPath && existsSync(this.legacyPath)) {
             const migrated = await this.client.execute("SELECT value FROM metadata WHERE key='mastra-import-v1'");
             if (!migrated.rows.length) {
-                const { stdout } = await exec('uv', ['run', '--frozen', 'python', '-c', snapshotScript, resolve(this.legacyPath)], { maxBuffer: 128 * 1024 * 1024 });
-                const snapshot = JSON.parse(stdout);
+                const snapshot = legacySnapshot(this.legacyPath);
                 const threadResources = new Map((snapshot.mastra_threads ?? []).map((thread: any) => [thread.id, thread.resourceId]));
                 const tx = await this.client.transaction('write');
                 try {

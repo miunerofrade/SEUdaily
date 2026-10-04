@@ -1,0 +1,59 @@
+{
+  "platform": "Darwin-arm64",
+  "engines": {
+    "node-bundle": {
+      "core": {
+        "checks": {
+          "databaseRollback": true,
+          "historyRestart": true,
+          "approvalOnce": true,
+          "http": true,
+          "sseChinese": true,
+          "cancel": true
+        },
+        "elapsed_ms": 182.34
+      },
+      "terminal": [
+        {
+          "first_screen_ms": 308.95,
+          "rss_bytes": 113410048,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "held_exit": {
+        "first_screen_ms": 294.44,
+        "rss_bytes": 114376704,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "held-ctrl-c",
+          "terminalRestored": true
+        }
+      },
+      "python": {
+        "checks": {
+          "pythonHealth": true,
+          "unicodeError": true,
+          "recovery": true,
+          "cancelled": true
+        },
+        "elapsed_ms": 3842.43
+      },
+      "median_first_screen_ms": 308.95,
+      "median_rss_bytes": 113410048
+    }
+  }
+}

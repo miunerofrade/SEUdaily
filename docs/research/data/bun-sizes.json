@@ -1,0 +1,26 @@
+{
+  "bun-core": {
+    "bytes": 70895730,
+    "gzip_bytes": 29601179
+  },
+  "cli": {
+    "bytes": 511058,
+    "gzip_bytes": 175691
+  },
+  "node-core": {
+    "bytes": 792075,
+    "gzip_bytes": 243706
+  },
+  "libsql": {
+    "bytes": 7837712,
+    "gzip_bytes": 3614052
+  },
+  "browser-entry": {
+    "bytes": 110295,
+    "gzip_bytes": 31200
+  },
+  "optional-playwright": {
+    "bytes": 13453369,
+    "files": 114
+  }
+}

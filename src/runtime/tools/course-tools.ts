@@ -401,7 +401,12 @@ export const getCurrentDateTool = createTool({
   description:
     "Get the current date and weekday in Asia/Shanghai for resolving relative requests such as today or tomorrow. Use this instead of terminal commands or reading local files. This tool does not read the timetable.",
   inputSchema: z.object({}),
-  execute: async (context, options) => runPythonTool("get-current-date", context, options?.abortSignal),
+  execute: async () => {
+    const now = new Date();
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const weekday = new Date(`${date}T00:00:00+08:00`).getUTCDay();
+    return { status: 'completed', date, weekday: ((weekday + 1) % 7) || 7, timezone: 'Asia/Shanghai', timestamp: now.toISOString() };
+  },
 });
 
 export const auditTrainingPlanTool = createTool({

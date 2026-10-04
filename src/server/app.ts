@@ -1,3 +1,4 @@
+import { identity, installLifecycle } from './lifecycle.js';
 import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
 import { Hono } from 'hono';
 import { DEFAULT_REASONING_EFFORT } from '../agent/provider.js';
@@ -21,7 +22,8 @@ app.use('*', guardLocalRequests);
 app.use('*', cors({ origin: localOrigins }));
 app.use('*', bodyLimit({ maxSize: 52 * 1024 * 1024 }));
 app.onError((error, c) => c.json({ error: redactText(error.message) }, ((error as any).status ?? (error instanceof z.ZodError ? 400 : 500)) as any));
-app.get('/api', c => c.json({ name: 'SEUdaily', runtime: 'agent', processId: process.pid }));
+app.get('/api', c => c.json(identity()));
+const installStaticPages = installLifecycle(app);
 app.get('/api/agents', async (c) => { await agentStore.ready; return c.json({ 'seudaily-agent': { id: 'seudaily-agent', name: 'SEUdaily' } }); });
 app.get('/app/health', async (c) => { await agentStore.ready; return c.json({ status: 'ready' }); });
 app.get('/app/agent-info', c => c.json({ model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash', effort: DEFAULT_REASONING_EFFORT }));
@@ -142,3 +144,5 @@ app.post('/api/agents/seudaily-agent/stream', async (c) => {
         }
     });
 });
+
+installStaticPages();

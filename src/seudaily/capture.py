@@ -491,6 +491,8 @@ def execute_video_task(page, target_url, asr_worker, export_base_dir, stop_event
                             yield f"[{get_time()}] 初始化 PPT 视觉抽帧队列..."
                             try:
                                 try:
+                                    from .optional_runtime import ensure_media_dependencies
+                                    ensure_media_dependencies()
                                     from .ppt import PPTExtractor
                                 except ImportError as exc:
                                     raise RuntimeError(

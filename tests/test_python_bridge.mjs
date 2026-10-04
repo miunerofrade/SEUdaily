@@ -37,7 +37,10 @@ function fixture(t) {
   });
   vm.runInContext(compiled + '\nglobalThis.bridge = workerClient;', context);
   t.after(() => { for (const child of children) { child.stdout.destroy(); child.stderr.destroy(); } });
-  return { bridge: context.bridge, sent, killed: () => killed,
+  return { bridge: context.bridge, sent, async dispatched(count) {
+      for (let i = 0; i < 20 && sent.filter(message => message.action).length < count; i++) await new Promise(resolve => setImmediate(resolve));
+      assert.equal(sent.filter(message => message.action).length, count);
+    }, killed: () => killed,
     reply(request, result) { requestChildren.get(request.requestId).stdout.write(JSON.stringify({ requestId: request.requestId, type: 'result', result }) + '\n'); },
     exitWithoutClose(code) { const child = children.at(-1); child.exitCode = code; child.emit('exit', code); return child; },
     spawnCount: () => children.length,
@@ -49,6 +52,7 @@ test('cancelling one request preserves queued work past the old five-second kill
   const first = f.bridge.call('capture', {}, controller.signal);
   const rejected = assert.rejects(first, { name: 'AbortError' });
   const second = f.bridge.call('get-schedule', {});
+  await f.dispatched(2);
   controller.abort();
   await rejected;
   t.mock.timers.tick(6000);
@@ -63,8 +67,10 @@ test('a tool timeout cancels only its own request and releases its listeners', a
   const f = fixture(t);
   const first = f.bridge.call('capture', {});
   const rejected = assert.rejects(first, /timed out/);
+  await f.dispatched(1);
   t.mock.timers.tick(29 * 60 * 1000);
   const second = f.bridge.call('health', {});
+  await f.dispatched(2);
   t.mock.timers.tick(60 * 1000 + 6000);
   await rejected;
   assert.equal(f.killed(), 0);
@@ -77,6 +83,7 @@ test('application shutdown cancels all outstanding requests before closing worke
   const f = fixture(t);
   const first = assert.rejects(f.bridge.call('capture', {}), /shutting down/);
   const second = assert.rejects(f.bridge.call('save-schedule-customizations', {}), /shutting down/);
+  await f.dispatched(2);
   await f.bridge.close();
   await Promise.all([first, second]);
   assert.equal(f.sent.filter(message => message.type === 'cancel').length, 2);
@@ -88,6 +95,7 @@ test('a broken worker input rejects pending requests instead of crashing the ser
   const f = fixture(t);
   const first = assert.rejects(f.bridge.call('capture', {}), /worker input closed/);
   const second = assert.rejects(f.bridge.call('health', {}), /worker input closed/);
+  await f.dispatched(2);
   f.breakInput();
   await Promise.all([first, second]);
   t.mock.timers.tick(31 * 60 * 1000);
@@ -99,9 +107,10 @@ test('restarting after exit rejects old requests before delayed close and preser
   const f = fixture(t);
   let firstError;
   const first = f.bridge.call('capture', {}).catch(error => { firstError = error; });
+  await f.dispatched(1);
   const oldChild = f.exitWithoutClose(1);
   const second = f.bridge.call('health', {});
-  await Promise.resolve();
+  await f.dispatched(2);
   assert.match(firstError?.message ?? '', /no longer running.*exit code 1/);
   await first;
   assert.equal(f.spawnCount(), 2);
@@ -109,6 +118,7 @@ test('restarting after exit rejects old requests before delayed close and preser
   f.reply(f.sent[1], { status: 'completed', marker: 'replacement worker' });
   assert.equal((await second).marker, 'replacement worker');
   const third = f.bridge.call('get-schedule', {});
+  await f.dispatched(3);
   assert.equal(f.spawnCount(), 2);
   f.reply(f.sent[2], { status: 'completed' });
   assert.equal((await third).status, 'completed');

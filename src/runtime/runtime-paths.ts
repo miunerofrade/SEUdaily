@@ -42,7 +42,7 @@ export const projectRoot = configuredRoot
   ? resolve(configuredRoot)
   : discoverProjectRoot(moduleDirectory);
 
-if (!hasProjectMarkers(projectRoot)) {
+if (!envValue("SEUDAILY_INSTALL_ROOT") && !hasProjectMarkers(projectRoot)) {
   throw new Error(
     `SEUDAILY_PROJECT_ROOT does not point to a SEUdaily project: ${projectRoot}`,
   );
@@ -150,5 +150,5 @@ export const agentInstructionsPath = resolve(projectRoot, 'AGENT.md');
 export const taskRuntimeRoot = resolve(runtimeRoot, "tasks");
 export const sandboxWorkspaceRoot = resolve(runtimeRoot, "sandbox-workspace");
 
-mkdirSync(taskRuntimeRoot, { recursive: true });
+mkdirSync(taskRuntimeRoot, { recursive: true, mode: 0o700 });
 mkdirSync(sandboxWorkspaceRoot, { recursive: true });

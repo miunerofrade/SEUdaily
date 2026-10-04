@@ -21,12 +21,20 @@ class PythonWorkerClient {
   private pending = new Map<string, PendingRequest<unknown>>();
   private stderrTail = "";
 
-  private ensureWorker(): ChildProcessWithoutNullStreams {
+  private starting?: Promise<ChildProcessWithoutNullStreams>;
+  private ensureWorker(): Promise<ChildProcessWithoutNullStreams> {
+    return this.starting ??= this.startWorker().finally(() => { this.starting = undefined; });
+  }
+
+  private async startWorker(): Promise<ChildProcessWithoutNullStreams> {
     if (this.child && this.child.exitCode === null && !this.child.killed) return this.child;
     // exitCode can change before close; settle the old generation before replacing it.
     if (this.child) this.failAll(new Error(`SEUdaily worker is no longer running (exit code ${this.child.exitCode}); restarting`));
 
-    const child = spawn("uv", ["run", "seudaily-worker"], {
+    const managed = !!process.env.SEUDAILY_INSTALL_ROOT;
+    const command = managed ? await (await import("../../distribution/components.js")).ensurePython() : "uv";
+    const args = managed ? ["-m", "seudaily.worker"] : ["run", "seudaily-worker"];
+    const child = spawn(command, args, {
       cwd: projectRoot,
       env: {
         ...process.env,
@@ -102,6 +110,7 @@ class PythonWorkerClient {
   }
 
   async close(): Promise<void> {
+    await this.starting?.catch(() => {});
     const child = this.child;
     if (!child) return;
     for (const requestId of this.pending.keys()) {
@@ -117,13 +126,13 @@ class PythonWorkerClient {
     clearTimeout(fallback);
   }
 
-  call<T>(action: string, payload: Record<string, unknown>, abortSignal?: AbortSignal): Promise<T> {
+  async call<T>(action: string, payload: Record<string, unknown>, abortSignal?: AbortSignal): Promise<T> {
     if (abortSignal?.aborted) {
       const error = new Error(`Python tool cancelled: ${action}`);
       error.name = "AbortError";
       return Promise.reject(error);
     }
-    const child = this.ensureWorker();
+    const child = await this.ensureWorker();
     const requestId = randomUUID();
     const taskId = `task-${randomUUID()}`;
 

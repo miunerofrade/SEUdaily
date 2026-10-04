@@ -1,7 +1,8 @@
 import type { Context } from 'hono';
 
-export const localOrigins = ['http://127.0.0.1:4173', 'http://localhost:4173', 'http://127.0.0.1:4111', 'http://localhost:4111'];
-const localHosts = new Set(['127.0.0.1:4111', 'localhost:4111']);
+const port = Number(process.env.SEUDAILY_PORT ?? 4111);
+export const localOrigins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...(!process.env.SEUDAILY_INSTALL_ROOT ? ['http://127.0.0.1:4173', 'http://localhost:4173'] : [])];
+const localHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
 export function isLocalRequest(host: string | undefined, origin: string | undefined): boolean {
   return !!host && localHosts.has(host.toLowerCase()) && (origin === undefined || localOrigins.includes(origin));

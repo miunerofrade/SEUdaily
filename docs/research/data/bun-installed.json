@@ -1,0 +1,155 @@
+{
+  "platform": "Darwin-arm64",
+  "engines": {
+    "node-bundle": {
+      "runs": [
+        {
+          "first_screen_ms": 3234.69,
+          "rss_bytes": 118128640,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 154.04,
+          "rss_bytes": 117735424,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 152.34,
+          "rss_bytes": 116604928,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 152.91,
+          "rss_bytes": 116817920,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 153.36,
+          "rss_bytes": 120373248,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "median_after_first_ms": 153.135
+    },
+    "compiled": {
+      "runs": [
+        {
+          "first_screen_ms": 579.86,
+          "rss_bytes": 133496832,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 113.47,
+          "rss_bytes": 131629056,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 110.42,
+          "rss_bytes": 131039232,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 107.93,
+          "rss_bytes": 130203648,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 109.21,
+          "rss_bytes": 132677632,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "median_after_first_ms": 109.815
+    }
+  }
+}

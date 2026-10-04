@@ -1,5 +1,5 @@
 /** HTTP boundary shared by interactive and one-shot terminal entry points. */
-export const API = "http://127.0.0.1:4111";
+export const API = process.env.SEUDAILY_API_URL ?? "http://127.0.0.1:4111";
 export const RESOURCE = "seudaily-web-local";
 export const clean = (value: unknown): string =>
   String(value ?? "")

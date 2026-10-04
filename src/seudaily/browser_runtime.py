@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import atexit
 import sys
+import os
+import subprocess
+from pathlib import Path
 import threading
 from contextlib import contextmanager, suppress
 from typing import Any, Iterator
@@ -26,6 +29,10 @@ def selected_browser() -> str:
 
 def launch_browser(playwright: Playwright, *, visible: bool) -> Browser:
     backend = selected_browser()
+    if os.environ.get("SEUDAILY_INSTALL_ROOT") and backend != "msedge":
+        executable = Path(getattr(playwright, backend).executable_path)
+        if not executable.exists():
+            subprocess.run([sys.executable, "-m", "playwright", "install", backend], check=True, timeout=600)
     options: dict[str, Any] = {"headless": not visible}
     if backend in {"msedge", "chromium"}:
         options["args"] = ["--disable-blink-features=AutomationControlled", "--mute-audio"]

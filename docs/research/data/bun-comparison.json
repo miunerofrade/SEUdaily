@@ -1,0 +1,333 @@
+{
+  "platform": "Darwin-arm64",
+  "engines": {
+    "node": {
+      "core": {
+        "checks": {
+          "databaseRollback": true,
+          "historyRestart": true,
+          "approvalOnce": true,
+          "http": true,
+          "sseChinese": true,
+          "cancel": true
+        },
+        "elapsed_ms": 275.18
+      },
+      "terminal": [
+        {
+          "first_screen_ms": 530.49,
+          "rss_bytes": 171474944,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 381.95,
+          "rss_bytes": 169541632,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 380.62,
+          "rss_bytes": 172343296,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "held_exit": {
+        "first_screen_ms": 383.47,
+        "rss_bytes": 173490176,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "held-ctrl-c",
+          "terminalRestored": true
+        }
+      },
+      "python": {
+        "checks": {
+          "pythonHealth": true,
+          "unicodeError": true,
+          "recovery": true,
+          "cancelled": true
+        },
+        "elapsed_ms": 656.16
+      },
+      "median_first_screen_ms": 381.95,
+      "median_rss_bytes": 171474944
+    },
+    "node-bundle": {
+      "core": {
+        "checks": {
+          "databaseRollback": true,
+          "historyRestart": true,
+          "approvalOnce": true,
+          "http": true,
+          "sseChinese": true,
+          "cancel": true
+        },
+        "elapsed_ms": 276.01
+      },
+      "terminal": [
+        {
+          "first_screen_ms": 302.2,
+          "rss_bytes": 119291904,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 335.85,
+          "rss_bytes": 116932608,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 613.36,
+          "rss_bytes": 120963072,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "held_exit": {
+        "first_screen_ms": 615.91,
+        "rss_bytes": 118571008,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "held-ctrl-c",
+          "terminalRestored": true
+        }
+      },
+      "python": {
+        "checks": {
+          "pythonHealth": true,
+          "unicodeError": true,
+          "recovery": true,
+          "cancelled": true
+        },
+        "elapsed_ms": 766.96
+      },
+      "median_first_screen_ms": 335.85,
+      "median_rss_bytes": 119291904
+    },
+    "bun": {
+      "core": {
+        "checks": {
+          "databaseRollback": true,
+          "historyRestart": true,
+          "approvalOnce": true,
+          "http": true,
+          "sseChinese": true,
+          "cancel": true
+        },
+        "elapsed_ms": 116.64
+      },
+      "terminal": [
+        {
+          "first_screen_ms": 164.89,
+          "rss_bytes": 143245312,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 154.57,
+          "rss_bytes": 144769024,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 138.01,
+          "rss_bytes": 145817600,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "held_exit": {
+        "first_screen_ms": 150.16,
+        "rss_bytes": 142966784,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "held-ctrl-c",
+          "terminalRestored": true
+        }
+      },
+      "python": {
+        "checks": {
+          "pythonHealth": true,
+          "unicodeError": true,
+          "recovery": true,
+          "cancelled": true
+        },
+        "elapsed_ms": 512.19
+      },
+      "median_first_screen_ms": 154.57,
+      "median_rss_bytes": 144769024
+    },
+    "compiled": {
+      "core": {
+        "checks": {
+          "databaseRollback": true,
+          "historyRestart": true,
+          "approvalOnce": true,
+          "http": true,
+          "sseChinese": true,
+          "cancel": true
+        },
+        "elapsed_ms": 654.67
+      },
+      "terminal": [
+        {
+          "first_screen_ms": 556.96,
+          "rss_bytes": 128794624,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 586.8,
+          "rss_bytes": 132546560,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        },
+        {
+          "first_screen_ms": 589.57,
+          "rss_bytes": 132595712,
+          "checks": {
+            "chineseCommit": true,
+            "imagePaste": true,
+            "backspace": true,
+            "stream": true,
+            "resize": true,
+            "cancel": true,
+            "exit": "ctrl-d",
+            "terminalRestored": true
+          }
+        }
+      ],
+      "held_exit": {
+        "first_screen_ms": 592.5,
+        "rss_bytes": 134381568,
+        "checks": {
+          "chineseCommit": true,
+          "imagePaste": true,
+          "backspace": true,
+          "stream": true,
+          "resize": true,
+          "cancel": true,
+          "exit": "held-ctrl-c",
+          "terminalRestored": true
+        }
+      },
+      "python": {
+        "checks": {
+          "pythonHealth": true,
+          "unicodeError": true,
+          "recovery": true,
+          "cancelled": true
+        },
+        "elapsed_ms": 973.9
+      },
+      "median_first_screen_ms": 586.8,
+      "median_rss_bytes": 132546560
+    }
+  }
+}

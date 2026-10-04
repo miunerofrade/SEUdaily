@@ -1,0 +1,78 @@
+name: Distribution CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+        node: ['22.22.0', '24.12.0']
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/seudaily-browsers
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.11.1'
+          python-version: '3.13'
+          enable-cache: true
+      - run: npm ci
+      - run: uv sync --frozen
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Node regression and isolated npm installation
+        run: node --import tsx --test tests/*.mjs
+      - name: Python regression
+        run: uv run pytest -q
+      - name: Build fixed terminal/browser fixtures
+        run: node scripts/build-fixtures.mjs
+      - name: POSIX terminal input, cancellation and exit
+        if: runner.os != 'Windows'
+        run: uv run python scripts/validate-terminal.py --python
+      - name: Install Windows terminal test driver
+        if: runner.os == 'Windows'
+        run: uv pip install --python .venv/Scripts/python.exe pywinpty==3.0.5
+      - name: Windows ConPTY input, attachment and exit
+        if: runner.os == 'Windows'
+        run: .venv/Scripts/python.exe scripts/validate-windows-terminal.py
+      - name: Linux browser system libraries
+        if: runner.os == 'Linux'
+        run: node node_modules/playwright-core/cli.js install-deps firefox
+      - name: Fresh optional Python and browser components
+        run: node --import tsx scripts/validate-optional.mjs
+      - name: Pack candidates without publishing
+        run: npm run pack:local
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: distribution-${{ matrix.os }}-node-${{ matrix.node }}
+          path: |
+            build/packages/
+            build/validation/*result.json
+          retention-days: 14
+          if-no-files-found: warn

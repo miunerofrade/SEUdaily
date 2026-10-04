@@ -93,6 +93,8 @@ def capture_lessons(client, course, lessons, worker, export_dir, stop_event, *,
                         status["failure"] = "ASR 转写失败，请检查服务配置。"
                 if slides_missing:
                     try:
+                        from .optional_runtime import ensure_media_dependencies
+                        ensure_media_dependencies()
                         from .ppt import PPTExtractor
                     except ImportError as exc:
                         raise RuntimeError("未安装 PPT 可选依赖；请运行 uv sync --extra ppt") from exc

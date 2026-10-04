@@ -41,7 +41,7 @@ test("remote extraction blocks private IPv6 and campus aliases without rejecting
   }
 });
 
-test("an already cancelled Python tool does not start or cancel the shared worker", async () => {
+test("an already cancelled Python tool does not start or cancel the shared worker", { skip: process.platform === 'win32' ? 'POSIX executable shim; Windows uses the real worker installation smoke test' : false }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "seudaily-worker-test-"));
   const previousPath = process.env.PATH;
   try {

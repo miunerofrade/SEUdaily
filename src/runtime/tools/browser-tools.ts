@@ -30,8 +30,10 @@ async function connect() {
     mkdirSync(outputDir, { recursive: true });
     const configPath = resolve(outputDir, 'playwright-config.json');
     writeFileSync(configPath, JSON.stringify(playwrightBrowserConfig(process.platform, envValue('SEUDAILY_BROWSER'), clientProxy)));
+    const managed = !!process.env.SEUDAILY_INSTALL_ROOT;
+    const entry = managed ? await (await import('../../distribution/browser-engine.js')).browserComponent() : resolve(projectRoot, 'node_modules', '@playwright', 'mcp', 'cli.js');
     const connection = new Client({ name: 'seudaily-playwright', version: '1.1.0' });
-    const transport = new StdioClientTransport({ command: process.execPath, cwd: projectRoot, stderr: 'pipe', args: [resolve(projectRoot, 'node_modules', '@playwright', 'mcp', 'cli.js'), '--config', configPath, '--headless', '--isolated', '--block-service-workers', '--codegen', 'none', '--image-responses', 'omit', '--snapshot-mode', 'full', '--output-dir', outputDir] });
+    const transport = new StdioClientTransport({ command: process.execPath, cwd: projectRoot, stderr: 'pipe', args: managed ? [entry, configPath] : [entry, '--config', configPath, '--headless', '--isolated', '--block-service-workers', '--codegen', 'none', '--image-responses', 'omit', '--snapshot-mode', 'full', '--output-dir', outputDir] });
     transport.stderr?.on('data', () => { });
     connection.onclose = () => { if (client === connection) {
         client = undefined;
