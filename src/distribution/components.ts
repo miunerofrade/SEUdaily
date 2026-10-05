@@ -18,7 +18,7 @@ export const cacheRoot = () => resolve(process.env.SEUDAILY_CACHE_DIR ?? default
 const modulePath = fileURLToPath(import.meta.url);
 const installRoot = () => process.env.SEUDAILY_INSTALL_ROOT ?? resolve(dirname(modulePath), modulePath.endsWith('.ts') ? '../..' : '..');
 const componentRoot = (name: Component) => join(cacheRoot(), 'components', VERSION, name);
-async function npmCommand() {
+export async function npmCommand() {
   if (process.env.npm_execpath?.endsWith('.js')) return { command: process.execPath, args: [process.env.npm_execpath] };
   if (process.platform !== 'win32') return { command: 'npm', args: [] };
   for (const directory of (process.env.PATH ?? '').split(';')) {

@@ -37,6 +37,10 @@ async function main() {
         maxFps: 60,
         kittyKeyboard: terminalKeyboard(),
       });
+      if (process.env.SEUDAILY_INSTALL_ROOT && !options.quiet) {
+        void import('../distribution/update.js').then(({updateNotice})=>updateNotice(process.env.SEUDAILY_INSTALL_ROOT!,root))
+          .then(notice=>{if(notice)session.show(notice);}).catch(()=>{});
+      }
       await instance.waitUntilExit();
       await session.cancel();
     } finally {

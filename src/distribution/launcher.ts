@@ -74,6 +74,24 @@ async function importData(source: string) {
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 if (options.command === 'import-data') { await importData(options.argument!); }
+else if (options.command === 'update') {
+  const {prepareUpdate} = await import('./update.js');
+  const update = await prepareUpdate(installRoot);
+  if (!update.install) console.log('已是最新版本：' + update.version.current);
+  else {
+    const identity = await probe();
+    if (identity) {
+      if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.dataRoot !== dataRoot) throw new Error('端口上的服务不属于当前 SEUdaily 数据目录');
+      await request('/app/runtime/stop', 'POST');
+      for (let attempt=0; attempt<100; attempt++) {
+        if (!await probe()) break;
+        if (attempt===99) throw new Error('后端仍在停止，请稍后再执行更新');
+        await delay(200);
+      }
+    }
+    await update.install();
+  }
+}
 else if (options.command === 'status' || options.command === 'stop') {
   const identity = await probe();
   if (!identity) console.log('未运行');

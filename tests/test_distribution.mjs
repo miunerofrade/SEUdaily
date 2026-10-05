@@ -13,6 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { parseCommand } from '../src/distribution/arguments.ts';
 import { ensureUv } from '../src/distribution/components.ts';
 import { VERSION } from '../src/distribution/config.ts';
+import { newerVersion, prepareUpdate } from '../src/distribution/update.ts';
 const exec = promisify(execFile), root = resolve(import.meta.dirname, '..');
 const node = process.execPath;
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -46,6 +47,7 @@ test('existing uv is reused without downloading; explicit invalid uv reports an 
 test('unified commands and aliases reject removed/conflicting arguments', () => {
   assert.equal(VERSION, version);
   assert.equal(parseCommand(['settings']).command, 'settings');
+  assert.equal(parseCommand(['update']).command, 'update');
   for (const alias of [[], ['chat'], ['--chat'], ['-c']]) assert.equal(parseCommand(alias).command, 'chat');
   for (const alias of [['web'], ['--web'], ['-w']]) assert.equal(parseCommand(alias).command, 'web');
   assert.equal(parseCommand(['vpn', '12081']).vpn, 12081);
@@ -170,4 +172,30 @@ test('explicit data import preserves originals and refuses overwrites or a runni
   assert.deepEqual(await readFile(join(source, '.seudaily', 'agent.db')), before);
   assert.deepEqual(await readFile(join(target, '.seudaily', 'agent.db')), before);
   await assert.rejects(command());
+});
+
+test('update finds a newer version and updates the existing global installation', async () => {
+  const temporary = await mkdtemp(join(tmpdir(), 'seudaily-update-'));
+  const previousFetch = globalThis.fetch, previousNpm = process.env.npm_execpath;
+  try {
+    const install = join(temporary, 'node_modules', 'seudaily');
+    await mkdir(install, { recursive: true });
+    await writeFile(join(install, 'package.json'), JSON.stringify({ name: 'seudaily', version: VERSION }));
+    const cli = join(temporary, 'npm-cli.js'), output = join(temporary, 'installed.json');
+    await writeFile(cli, `const fs=require('node:fs');const args=process.argv.slice(2);if(args[0]==='root')console.log(${JSON.stringify(dirname(install))});else fs.writeFileSync(${JSON.stringify(output)},JSON.stringify(args));`);
+    process.env.npm_execpath = cli;
+    globalThis.fetch = async () => new Response(JSON.stringify({version:'99.0.0'}), { status: 200 });
+    assert.equal(newerVersion('1.2.0','1.1.2'),true);
+    assert.equal(newerVersion('1.1.1','1.1.2'),false);
+    const update = await prepareUpdate(install);
+    await update.install();
+    const args = JSON.parse(await readFile(output,'utf8'));
+    assert.equal(args[0],'install');
+    assert.ok(args.includes('--global'));
+    assert.ok(args.includes('seudaily@99.0.0'));
+  } finally {
+    globalThis.fetch = previousFetch;
+    if(previousNpm===undefined)delete process.env.npm_execpath;else process.env.npm_execpath=previousNpm;
+    await rm(temporary,{recursive:true,force:true});
+  }
 });

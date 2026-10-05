@@ -9,6 +9,7 @@ export const HELP = `SEUdaily ${VERSION}
   ask "问题"           单次提问；--stdin 读取管道，--json 输出 JSONL
   vpn PORT             独立校园 VPN；--vpn PORT，使用已保存的账号密码
   status / stop        查看状态 / 停止本地后端
+  update               检查并安装最新版本
   sessions / skills    会话 / Skill 列表
   completion SHELL     bash、zsh、fish、powershell 补全
   import-data PATH     从旧仓库复制数据，保留原件；目标须为空
@@ -38,7 +39,7 @@ export function parseCommand(args: string[]) {
   if (modes.length > 1) throw new Error('请只选择一种运行模式');
   const command = positionals.shift() ?? modes[0] ?? 'chat';
   if (modes.length && modes[0] !== command) throw new Error('运行模式与子命令冲突');
-  if (!['chat', 'web', 'settings', 'ask', 'vpn', 'status', 'stop', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
+  if (!['chat', 'web', 'settings', 'ask', 'vpn', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
   const argument = command === 'vpn' ? values.vpn ?? positionals.shift() : positionals.shift();
   if (positionals.length || argument && !['ask', 'vpn', 'completion', 'import-data'].includes(command)) throw new Error('额外的位置参数');
   const port = Number(values.port ?? process.env.SEUDAILY_PORT ?? 4111), timeout = Number(values.timeout ?? 300);
@@ -53,7 +54,7 @@ export function parseCommand(args: string[]) {
   return { values, command: String(command), argument, port, timeout, vpn };
 }
 export function completion(shell: string) {
-  const words = 'chat web settings ask vpn status stop sessions skills completion import-data --chat --web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
+  const words = 'chat web settings ask vpn status stop update sessions skills completion import-data --chat --web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
   if (shell === 'bash') return `complete -W '${words}' seudaily`;
   if (shell === 'zsh') return `#compdef seudaily\n_arguments '*:command:(${words})'`;
   if (shell === 'fish') return `complete -c seudaily -f -a '${words}'`;
