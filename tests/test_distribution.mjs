@@ -12,6 +12,7 @@ import { join, resolve, dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseCommand } from '../src/distribution/arguments.ts';
 import { ensureUv } from '../src/distribution/components.ts';
+import { VERSION } from '../src/distribution/config.ts';
 const exec = promisify(execFile), root = resolve(import.meta.dirname, '..');
 const node = process.execPath;
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
@@ -43,6 +44,7 @@ test('existing uv is reused without downloading; explicit invalid uv reports an 
 });
 
 test('unified commands and aliases reject removed/conflicting arguments', () => {
+  assert.equal(VERSION, version);
   for (const alias of [[], ['chat'], ['--chat'], ['-c']]) assert.equal(parseCommand(alias).command, 'chat');
   for (const alias of [['web'], ['--web'], ['-w']]) assert.equal(parseCommand(alias).command, 'web');
   assert.equal(parseCommand(['vpn', '12081']).vpn, 12081);
@@ -116,8 +118,9 @@ test('packed installation runs without source/node_modules, installs only select
   };
   const first = launchWeb(), second = launchWeb();
   const identity = await eventually(async () => {
+    for (const child of [first, second]) if (child.exitCode !== null) throw new Error(`Web launcher exited: ${child.logs}`);
     const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 2); assert.equal(value.web, true); assert.match(first.logs, /按 Ctrl\+C/); assert.match(second.logs, /按 Ctrl\+C/); return value;
-  });
+  }, process.platform === 'win32' ? 45_000 : 10_000);
   assert.equal(identity.dataRoot, data); assert.equal(identity.managed, true);
   assert.match(await (await fetch(api)).text(), /<html/);
   assert.deepEqual((await (await fetch(api + '/app/focus')).json()).data.items, []);

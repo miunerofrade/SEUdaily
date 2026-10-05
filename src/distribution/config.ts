@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-export const VERSION = process.env.SEUDAILY_BUILD_VERSION ?? '1.1.0';
+import metadata from '../../package.json' with { type: 'json' };
+export const VERSION = process.env.SEUDAILY_BUILD_VERSION ?? metadata.version;
 export const PROTOCOL = 1;
 export function defaultDataRoot(platform = process.platform, environment = process.env): string {
   if (platform === 'win32') return resolve(environment.LOCALAPPDATA ?? resolve(homedir(), 'AppData', 'Local'), 'SEUdaily');
