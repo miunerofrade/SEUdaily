@@ -528,3 +528,52 @@ def test_public_notices_bypass_campus_and_environment_proxies(tmp_path, monkeypa
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.fixture
+def notice_access_server():
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    calls = []
+    payload = b"%PDF-" + b"fixture" * 2000
+    gate = '<div class="wp_error_msg"><span>提示：您当前ip并非校内地址，该信息仅允许校内地址访问</span></div>'.encode()
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            calls.append(self.path)
+            proxied = self.path.startswith('http://')
+            denied = self.path == '/forbidden'
+            self.send_response(403 if denied else 200)
+            self.send_header('Content-Type', 'text/html' if not proxied else 'application/pdf')
+            self.end_headers()
+            self.wfile.write(payload if proxied else (b'Forbidden' if denied else gate))
+        def log_message(self, *_args):
+            pass
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f'http://127.0.0.1:{server.server_port}', calls, payload
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@pytest.mark.parametrize('path', ['/restricted', '/forbidden'])
+def test_notice_retries_campus_restriction_once_through_vpn(notice_access_server, monkeypatch, path):
+    from urllib.request import Request
+    endpoint, calls, expected = notice_access_server
+    monkeypatch.setattr(jwc_module, 'campus_proxy', lambda: endpoint)
+    with jwc_module.public_opener().open(Request(endpoint + path), timeout=2) as response:
+        assert response.read(5) == expected[:5]
+        assert response.read() == expected[5:]
+    assert calls == [path, endpoint + path]
+
+
+def test_restricted_notice_without_vpn_has_clear_error(notice_access_server, monkeypatch):
+    from urllib.request import Request
+    endpoint, calls, _ = notice_access_server
+    monkeypatch.setattr(jwc_module, 'campus_proxy', lambda: None)
+    with pytest.raises(PermissionError, match='仅限校园网或校园 VPN'):
+        jwc_module.public_opener().open(Request(endpoint + '/restricted'), timeout=2)
+    assert calls == ['/restricted']

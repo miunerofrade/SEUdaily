@@ -18,16 +18,83 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
+from .vpn import CampusProxyHandler, campus_proxy
+
+
+_CAMPUS_ACCESS_NOTICE = re.compile(
+    r"(?:当前\s*ip并非校内地址|仅允许校内地址访问|仅限(?:校园网|校内)(?:用户|地址)?访问|"
+    r"(?:请|需要|必须)[^。\n]{0,30}(?:校园网|VPN)[^。\n]{0,20}访问)", re.I,
+)
+
+
+class _NoticeResponse:
+    """Preserve the inspected prefix when streaming an attachment."""
+    def __init__(self, response, prefix):
+        self.response = response
+        self.prefix = prefix
+
+    def __getattr__(self, name):
+        return getattr(self.response, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.response.__exit__(*args)
+
+    def read(self, size=-1):
+        if size < 0:
+            prefix, self.prefix = self.prefix, b""
+            return prefix + self.response.read()
+        prefix, self.prefix = self.prefix[:size], self.prefix[size:]
+        return prefix + self.response.read(size - len(prefix))
+
+
+class _NoticeOpener:
+    def __init__(self, handlers):
+        self.handlers = handlers
+
+    def _open(self, request, timeout, proxy=None):
+        proxy_handler = CampusProxyHandler({"http": proxy, "https": proxy}) if proxy else ProxyHandler({})
+        # Search requests share their cookie jar across direct and VPN requests.
+        handlers = [HTTPCookieProcessor(h.cookiejar) if isinstance(h, HTTPCookieProcessor) else h for h in self.handlers]
+        opener = build_opener(proxy_handler, *handlers)
+        # urllib mutates requests for proxy transport; each attempt gets a fresh copy.
+        fresh = Request(request.full_url, data=request.data, headers=dict(request.header_items()), method=request.get_method())
+        response = opener.open(fresh, timeout=timeout)
+        try:
+            prefix = response.read(8192)
+            text = prefix.decode("utf-8", errors="replace")
+            gate = re.search(r'<div[^>]*class=[\'"]wp_error_msg[\'"][^>]*>(.*?)</div>', text, re.S)
+            if gate and _CAMPUS_ACCESS_NOTICE.search(unescape(re.sub(r"<[^>]*>", " ", gate[1]))):
+                raise PermissionError("该通知仅限校园网或校园 VPN 访问")
+            return _NoticeResponse(response, prefix)
+        except BaseException:
+            response.close()
+            raise
+
+    def open(self, request, timeout):
+        try:
+            return self._open(request, timeout)
+        except (HTTPError, URLError, TimeoutError, OSError) as error:
+            if isinstance(error, HTTPError) and error.code != 403:
+                raise
+            proxy = campus_proxy()
+            if proxy:
+                if isinstance(error, HTTPError):
+                    error.close()
+                return self._open(request, timeout, proxy)
+            raise
 
 
 def public_opener(*handlers):
-    """Public notice sites use direct HTTP, independently of the campus VPN."""
-    return build_opener(ProxyHandler({}), *handlers)
+    """Try public access first; use a connected VPN only for restricted/failed access."""
+    return _NoticeOpener(handlers)
 
 
 _ARTICLE_PATH = re.compile(
