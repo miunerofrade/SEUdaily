@@ -1,40 +1,66 @@
 {
   "date": "2026-10-05",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "npmPublished": true,
+  "trustedPublisher": true,
+  "workflow": "https://github.com/miunerofrade/SEUdaily/actions/runs/37266910707",
   "packages": [
     {
       "name": "@miunerofrade/seudaily-web",
-      "version": "1.1.0",
-      "integrity": "sha512-Mj4qFD8PSSiMtjFN8KbPbb7UBTR18oQN9WKHGRqqOk6X/cj7KZ88qwfhWqPkld1y1dZwlkvcE2D0KvHTq3aIyg==",
-      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-web/-/seudaily-web-1.1.0.tgz",
+      "version": "1.1.1",
+      "integrity": "sha512-vHuwwQy2SpjlrxVWkS5kR+iT9xD6YZxzzfhDeCnQ0Vj7V4NpxJyF+fAoimt6UyteXB99/MMwiCudMQ5+J/0XoA==",
+      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-web/-/seudaily-web-1.1.1.tgz",
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-web@1.1.1",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      },
       "maintainers": [
         "miunerofrade"
       ]
     },
     {
       "name": "@miunerofrade/seudaily-python",
-      "version": "1.1.0",
-      "integrity": "sha512-TMtWXo9LY3weWghCmWkUVS8mZPM+qQNmiXGMknY0Gu/BUidAJi1ew74pz5DIlE0Xr/hEiGaxNIVbq18tKhJBJw==",
-      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-python/-/seudaily-python-1.1.0.tgz",
+      "version": "1.1.1",
+      "integrity": "sha512-TIbu1J/8ZBcWfucl4dehZoaMj6gZax4YwFLPhvtkduUFu7Xd+pR1Y4bOZAuSo8QoiQXHyjwxzN8WbdJygh8z0g==",
+      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-python/-/seudaily-python-1.1.1.tgz",
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-python@1.1.1",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      },
       "maintainers": [
         "miunerofrade"
       ]
     },
     {
       "name": "@miunerofrade/seudaily-browser",
-      "version": "1.1.0",
-      "integrity": "sha512-cT1MGqO6mm4LsyoKLR6elGBmd6NEHUpRh+AWQ1W2+MwpHzVpCvMwpgS7htEENdFLya5ILZw/d+rb7A3f2PrYBA==",
-      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-browser/-/seudaily-browser-1.1.0.tgz",
+      "version": "1.1.1",
+      "integrity": "sha512-qJ/wlBBANHdEE1X4DX9IbRSZzy9RjqbHpG6c8p56jgHEmmRA9zPOoloOvKYCnITZypw8twpIaEU3kI211r7kng==",
+      "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-browser/-/seudaily-browser-1.1.1.tgz",
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-browser@1.1.1",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      },
       "maintainers": [
         "miunerofrade"
       ]
     },
     {
       "name": "seudaily",
-      "version": "1.1.0",
-      "integrity": "sha512-aMDpQOoZ0Kjitrx4gDH4qIb26uPYATDbY4xIJNb86pMoKFoLem63UOkpFKeCCl2iMWx3eCwXF10qzSp86WZ/HA==",
-      "tarball": "https://registry.npmjs.org/seudaily/-/seudaily-1.1.0.tgz",
+      "version": "1.1.1",
+      "integrity": "sha512-r1Yg4rBYziLAo7brnZN2FICdRhhO4bix28gn20d44t6mAQCqlqexeXXD4OnNcBLDoifDFR2eeKwUKUgpvQkMqQ==",
+      "tarball": "https://registry.npmjs.org/seudaily/-/seudaily-1.1.1.tgz",
+      "attestations": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/seudaily@1.1.1",
+        "provenance": {
+          "predicateType": "https://slsa.dev/provenance/v1"
+        }
+      },
       "maintainers": [
         "miunerofrade"
       ]
