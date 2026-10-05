@@ -1,5 +1,5 @@
 export const slashCommands = [
-  { command: '/vpn', description: '查看 VPN 状态' },
+  { command: '/vpn', description: '连接 VPN，使用已保存端口' },
   { command: '/vpn status', description: '刷新连接状态' },
   { command: '/vpn connect', description: '连接 VPN，可追加代理端口' },
   { command: '/vpn disconnect', description: '断开 VPN' },
@@ -18,7 +18,7 @@ export function matchSlashCommands(draft: string) {
 
 export function slashCommandHint(draft: string) {
   if (!draft.startsWith('/')) return '';
-  if (/^\/vpn(?:\s|$)/i.test(draft)) return 'VPN 命令 · /vpn connect [端口] · status · disconnect';
+  if (/^\/vpn(?:\s|$)/i.test(draft)) return 'VPN 命令 · /vpn 连接 · /vpn status 状态 · /vpn disconnect 断开';
   if (/^\/ramdisk(?:\s|$)/i.test(draft)) return '内存盘命令 · /ramdisk [容量] · status · unmount · reveal';
   return matchSlashCommands(draft).length ? '选择命令 · ↑↓ 切换 · Tab / Enter 补全' : '未识别的命令，将作为普通消息发送';
 }

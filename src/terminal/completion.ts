@@ -27,6 +27,8 @@ export function commandSuggestions(input: string, skills: string[]): string[] {
       >
     )[match[1].slice(1)] ?? match[1].slice(1);
   const options: Record<string, string[]> = {
+    vpn: ['connect', 'disconnect', 'status', 'verify', 'resend'],
+    ramdisk: ['status', 'unmount', 'reveal'],
     skill: [...skills, "off"],
     "copy-on-select": ["on", "off"],
     mode: ["normal", "full", "extra"],
@@ -42,6 +44,7 @@ export function commandSuggestions(input: string, skills: string[]): string[] {
     ],
     programs: ["--sync", "--plan", "--page", "--limit", "--filter", "--help"],
   };
+  if (['vpn', 'ramdisk'].includes(command) && /\s/.test(match[2])) return [];
   const prefix = input.slice(0, input.lastIndexOf(" ") + 1),
     word = input.slice(prefix.length);
   return (options[command] ?? [])

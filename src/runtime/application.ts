@@ -25,6 +25,6 @@ export const agentRuntime = new AgentRuntime({
             closeWorkspace = module.closeWorkspace;
             workspace = await module.getWorkspaceTools();
         }
-        return { getCurrentDateTool, readTaskResultTool, listSkillsTool, readSkillTool, searchCapabilitiesTool, invokeCapabilityTool, ...namespaceTools(namespaces), ...await browserNamespaceTools(namespaces), ...workspace };
+        return { getCurrentDateTool, readTaskResultTool, listSkillsTool, readSkillTool, searchCapabilitiesTool, invokeCapabilityTool, ...namespaceTools(namespaces), ...await browserNamespaceTools(namespaces, context.threadId), ...workspace };
     },
 });

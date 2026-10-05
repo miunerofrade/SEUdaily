@@ -38,6 +38,7 @@ export class AgentStore {
             'CREATE TABLE IF NOT EXISTS summaries (threadId TEXT PRIMARY KEY, throughSequence INTEGER NOT NULL, value TEXT NOT NULL, updatedAt TEXT NOT NULL)',
             'CREATE TABLE IF NOT EXISTS legacy_memory (id TEXT PRIMARY KEY, threadId TEXT, resourceId TEXT, content TEXT NOT NULL)',
             'CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+            'CREATE TABLE IF NOT EXISTS message_queue (sequence INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,threadId TEXT NOT NULL,resourceId TEXT NOT NULL,state TEXT NOT NULL,payload TEXT NOT NULL,error TEXT NOT NULL)',
         ], 'write');
         if (this.legacyPath && existsSync(this.legacyPath)) {
             const migrated = await this.client.execute("SELECT value FROM metadata WHERE key='mastra-import-v1'");
@@ -72,6 +73,7 @@ export class AgentStore {
         }
         // A crash during execution never authorizes replay of that execution.
         await this.client.execute("UPDATE runs SET status='interrupted' WHERE status='running'");
+        await this.client.execute("UPDATE message_queue SET state='failed',error='服务中断，取回编辑后可重新发送' WHERE state='running'");
     }
     async getThreadById({ threadId, resourceId }: {
         threadId: string;
@@ -219,7 +221,7 @@ export class AgentStore {
         const thread = await this.getThreadById({ threadId, resourceId });
         if (!thread)
             return;
-        const statements: InStatement[] = ['messages', 'runs', 'legacy_memory'].map(table => ({
+        const statements: InStatement[] = ['messages', 'runs', 'legacy_memory', 'message_queue'].map(table => ({
             sql: `DELETE FROM ${table} WHERE threadId=?`, args: [threadId],
         }));
         const prefix = `${threadId}:branch:`;

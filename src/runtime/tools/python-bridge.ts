@@ -1,8 +1,12 @@
+import { terminateProcessTree } from '../process-tree.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, relative } from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 
-import { projectRoot } from "../runtime-paths.js";
+import { envValue, projectRoot } from "../runtime-paths.js";
 import type { ToolResult } from "./tool-result.js";
 
 type WorkerMessage<T> =
@@ -16,8 +20,11 @@ type PendingRequest<T> = {
   cleanup?: () => void;
 };
 
-class PythonWorkerClient {
+export class PythonWorkerClient {
+  constructor(private launch?: {command:string;args:string[];cwd:string;env?:NodeJS.ProcessEnv}) {}
   private child?: ChildProcessWithoutNullStreams;
+  private closing?: Promise<void>;
+  get hasWorker() { return Boolean(this.child); }
   private pending = new Map<string, PendingRequest<unknown>>();
   private stderrTail = "";
 
@@ -32,12 +39,13 @@ class PythonWorkerClient {
     if (this.child) this.failAll(new Error(`SEUdaily worker is no longer running (exit code ${this.child.exitCode}); restarting`));
 
     const managed = !!process.env.SEUDAILY_INSTALL_ROOT;
-    const command = managed ? await (await import("../../distribution/components.js")).ensurePython() : "uv";
-    const args = managed ? ["-m", "seudaily.worker"] : ["run", "seudaily-worker"];
+    const command = this.launch?.command ?? (managed ? await (await import("../../distribution/components.js")).ensurePython() : "uv");
+    const args = this.launch?.args ?? (managed ? ["-m", "seudaily.worker"] : ["run", "seudaily-worker"]);
     const child = spawn(command, args, {
-      cwd: projectRoot,
+      cwd: this.launch?.cwd ?? projectRoot,
       env: {
         ...process.env,
+        ...this.launch?.env,
         SEUDAILY_PROJECT_ROOT: projectRoot,
         PYTHONUTF8: "1",
         PYTHONIOENCODING: "utf-8",
@@ -96,17 +104,21 @@ class PythonWorkerClient {
     for (const requestId of this.pending.keys()) this.takeRequest(requestId)?.reject(error);
   }
 
-  private terminateWorkerTree(): void {
+  private async terminateWorkerTree(): Promise<void> {
     const child = this.child;
     if (!child?.pid) return;
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-        windowsHide: true,
-        stdio: "ignore",
-      });
-    } else {
-      try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-    }
+    await terminateProcessTree(child.pid);
+  }
+
+  async terminate(): Promise<void> {
+    return this.closing ??= (async () => {
+      await this.starting?.catch(() => {});
+      const child = this.child;
+      if (!child || child.exitCode !== null) return;
+      const ended = new Promise<void>(resolve => child.once("close", () => resolve()));
+      await this.terminateWorkerTree();
+      await ended;
+    })();
   }
 
   async close(): Promise<void> {
@@ -121,12 +133,12 @@ class PythonWorkerClient {
     this.failAll(new Error('SEUdaily worker is shutting down'));
     const ended = new Promise<void>(resolve => child.once('close', () => resolve()));
     child.stdin.end();
-    const fallback = setTimeout(() => this.terminateWorkerTree(), 10_000);
+    const fallback = setTimeout(() => void this.terminateWorkerTree().catch(error => this.failAll(error)), 10_000);
     await ended;
     clearTimeout(fallback);
   }
 
-  async call<T>(action: string, payload: Record<string, unknown>, abortSignal?: AbortSignal): Promise<T> {
+  async call<T>(action: string, payload: Record<string, unknown>, abortSignal?: AbortSignal, isolated = false): Promise<T> {
     if (abortSignal?.aborted) {
       const error = new Error(`Python tool cancelled: ${action}`);
       error.name = "AbortError";
@@ -149,7 +161,8 @@ class PythonWorkerClient {
         if (!child.stdin.destroyed && child.stdin.writable) {
           child.stdin.write(`${JSON.stringify({ requestId, type: "cancel" })}\n`, () => {});
         }
-        reject(error);
+        if (isolated) void this.terminate().then(() => reject(error), reject);
+        else reject(error);
       };
       const abort = () => {
         const error = new Error(`Python tool cancelled: ${action}`);
@@ -171,13 +184,53 @@ class PythonWorkerClient {
 }
 
 const workerClient = new PythonWorkerClient();
+// Agent requests get a worker of their own. Killing a cancelled task must not
+// kill the service worker that owns the VPN or another conversation's work.
+const taskWorkers = new Map<AbortSignal, PythonWorkerClient>();
+const taskScratch = new Map<AbortSignal,string>();
+const serviceAction = (action: string) => action.startsWith('vpn-') || /^(health|ramdisk-status|mount-ramdisk|unmount-ramdisk|reveal-ramdisk)$/.test(action);
+export async function releasePythonTask(signal: AbortSignal) {
+  const worker = taskWorkers.get(signal);
+  if (!worker) return;
+  taskWorkers.delete(signal);
+  try { await worker.close(); } finally {
+    const scratch = taskScratch.get(signal); taskScratch.delete(signal);
+    if (scratch) await rm(scratch,{recursive:true,force:true});
+  }
+}
 
 export async function runPythonTool<T = ToolResult>(
   action: string,
   payload: Record<string, unknown>,
   abortSignal?: AbortSignal,
 ): Promise<T> {
-  return workerClient.call<T>(action, payload, abortSignal);
+  if (action === 'unmount-ramdisk' && taskScratch.size) {
+    const disk: any = await workerClient.call('ramdisk-status', {}, abortSignal);
+    if (disk?.path && [...taskScratch.values()].some(path => {
+      const child = relative(disk.path, path);
+      return child !== '..' && !child.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(child);
+    }))
+      throw new Error('内存盘正在处理任务，请等待任务完成或取消后再卸载');
+  }
+  if (!abortSignal || serviceAction(action)) return workerClient.call<T>(action, payload, abortSignal);
+  abortSignal.throwIfAborted();
+  let worker = taskWorkers.get(abortSignal);
+  if (!worker) {
+    const disk: any = workerClient.hasWorker ? await workerClient.call('ramdisk-status', {}, abortSignal) : undefined;
+    let shared = disk?.path;
+    if (!shared && process.platform !== 'win32' && /^(1|true|yes|on)$/i.test(envValue('SEUDAILY_RAMDISK_ENABLED', 'false') ?? '')) {
+      const mounted: any = await workerClient.call('mount-ramdisk', {size:envValue('SEUDAILY_RAMDISK_SIZE','1G')}, abortSignal);
+      shared = mounted.data?.path;
+    }
+    const command = !!process.env.SEUDAILY_INSTALL_ROOT ? await (await import('../../distribution/components.js')).ensurePython() : 'uv';
+    abortSignal.throwIfAborted();
+    const scratch = await mkdtemp(join(shared || tmpdir(), 'seudaily-task-'));
+    if (abortSignal.aborted) { await rm(scratch,{recursive:true,force:true}); abortSignal.throwIfAborted(); }
+    worker = new PythonWorkerClient({command,args:!!process.env.SEUDAILY_INSTALL_ROOT ? ['-m','seudaily.worker'] : ['run','seudaily-worker'],cwd:projectRoot,env:{TMPDIR:scratch,TMP:scratch,TEMP:scratch,SEUDAILY_TASK_WORKSPACE:scratch}});
+    taskScratch.set(abortSignal,scratch);
+    taskWorkers.set(abortSignal, worker);
+  }
+  return worker.call<T>(action, payload, abortSignal, true);
 }
 
-export async function closePythonWorker() { await workerClient.close(); }
+export async function closePythonWorker() { await Promise.all([workerClient.close(), ...[...taskWorkers.values()].map(worker => worker.terminate())]); taskWorkers.clear(); await Promise.all([...taskScratch.values()].map(path=>rm(path,{recursive:true,force:true})));taskScratch.clear(); }

@@ -70,7 +70,12 @@ export class DeepSeekProvider implements ModelProvider {
         });
         if (!response.ok) {
             const detail = await response.text();
-            throw new ModelError(`模型请求失败（${response.status}）`, response.status, /context.*(?:length|window)|maximum.*tokens|too many tokens/i.test(detail));
+            const message = response.status === 401
+                ? '模型认证失败（401）：请在 /settings 中填写有效的 DeepSeek API 密钥'
+                : response.status === 400 && /model.*(?:invalid|unknown|unsupported|not|exist)|(?:invalid|unknown|unsupported).*model/i.test(detail)
+                  ? '模型名称无效或不受支持（400）：请在 /settings 检查 DEEPSEEK_MODEL，填写当前 API 支持的模型名'
+                : `模型请求失败（${response.status}）`;
+            throw new ModelError(message, response.status, /context.*(?:length|window)|maximum.*tokens|too many tokens/i.test(detail));
         }
         return response;
     }

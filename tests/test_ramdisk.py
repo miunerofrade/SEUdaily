@@ -181,3 +181,15 @@ def test_installed_wheel_uses_downloaded_installer_and_uac(monkeypatch, tmp_path
     monkeypatch.setattr(ramdisk.ctypes, 'windll', SimpleNamespace(shell32=SimpleNamespace(ShellExecuteW=execute)), raising=False)
     assert ramdisk.check_and_install_imdisk() == (False, '请完成 ImDisk 安装后重试')
     assert calls == [(None, 'runas', 'cmd.exe', f'/c "{installer}"', str(installer.parent), 1)]
+
+
+def test_task_owned_scratch_uses_parent_directory_without_mounting(monkeypatch, tmp_path):
+    monkeypatch.setenv("SEUDAILY_TASK_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(ramdisk.RamDisk, "mount", lambda _: pytest.fail("task must not mount its own RAM disk"))
+    workspace = ramdisk.TemporaryWorkspace(use_ram=True)
+    path = workspace.open()
+    assert path.parent == tmp_path
+    (path / "partial-download").write_text("fixture")
+    workspace.close()
+    assert not path.exists()
+    assert tmp_path.exists()

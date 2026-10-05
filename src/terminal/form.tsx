@@ -1,3 +1,4 @@
+import { enterKey } from './keyboard.js';
 import React,{useState,useRef} from 'react';
 import {Box,Text,useInput,usePaste,useApp} from 'ink';
 import type {Form} from './management.js';
@@ -21,7 +22,7 @@ export function ManagementForm({form,width,height,onClose}:{form:Form;width:numb
  if(key.ctrl||key.super||f.choices)return;
  const text=key.return&&key.meta&&f.multiline?'\n':committedInput(value);if(text)setValues(v=>({...v,[f.key]:v[f.key]+text}));
  };
- useInput(input);usePaste(text=>{const f=form.fields[ref.current.index];if(f&&!f.choices&&!ref.current.saving)setValues(v=>({...v,[f.key]:v[f.key]+text}));});
+ useInput((value,key)=>input(value,enterKey(value,key)));usePaste(text=>{const f=form.fields[ref.current.index];if(f&&!f.choices&&!ref.current.saving)setValues(v=>({...v,[f.key]:v[f.key]+text}));});
  const capacity=Math.max(1,Math.floor((height-8)/3)),top=Math.max(0,Math.min(index-1,form.fields.length-capacity));
  return <Box width={width} height={height} flexDirection="column" paddingX={2}>
  <Text bold color="#80cbc4">{form.title}</Text><Text color="#8993a4">Tab / ↑↓ 选字段 · ←→ 选项 · Ctrl+U 清空 · Alt+Enter 换行 · Ctrl+S 保存 · Esc 返回</Text>

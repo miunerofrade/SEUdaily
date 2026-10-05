@@ -1,4 +1,5 @@
 import { cancelComponentPreparation } from '../distribution/components.js';
+import { stopMessageQueue } from './message-queue.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runtimeRoot } from '../runtime/runtime-paths.js';
@@ -26,15 +27,15 @@ async function shutdown(code = 0) {
     if (stopping)
         return;
     stopping = true;
+    const queueStopped = stopMessageQueue();
     stopClientReaper();
     cancelComponentPreparation();
     stopFocusRuntime();
-    await agentRuntime.shutdown();
     server.close();
     const deadline = setTimeout(() => process.exit(code), 15_000);
     deadline.unref();
     closeApplicationWorkspace();
-    await Promise.allSettled([closePythonWorker(), closeBrowserTools()]);
+    await Promise.allSettled([agentRuntime.shutdown(), closePythonWorker(), closeBrowserTools(), queueStopped]);
     agentStore.close();
     clearTimeout(deadline);
     process.exit(code);

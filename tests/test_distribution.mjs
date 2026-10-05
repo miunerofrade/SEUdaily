@@ -45,6 +45,7 @@ test('existing uv is reused without downloading; explicit invalid uv reports an 
 
 test('unified commands and aliases reject removed/conflicting arguments', () => {
   assert.equal(VERSION, version);
+  assert.equal(parseCommand(['settings']).command, 'settings');
   for (const alias of [[], ['chat'], ['--chat'], ['-c']]) assert.equal(parseCommand(alias).command, 'chat');
   for (const alias of [['web'], ['--web'], ['-w']]) assert.equal(parseCommand(alias).command, 'web');
   assert.equal(parseCommand(['vpn', '12081']).vpn, 12081);

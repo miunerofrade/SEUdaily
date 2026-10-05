@@ -49,8 +49,8 @@ function pruneTickets() {
   for (const [id, ticket] of tickets) if (ticket.expiresAt <= now) tickets.delete(id);
 }
 
-async function browserCapabilities(): Promise<Capability[]> {
-  const tools = await getPlaywrightBrowserTools();
+async function browserCapabilities(scope?: string): Promise<Capability[]> {
+  const tools = await getPlaywrightBrowserTools(scope);
   return Object.entries(tools).map(([name, tool]) => ({
     namespace: "browser" as const,
     tool: tool as AnyTool,
@@ -59,8 +59,8 @@ async function browserCapabilities(): Promise<Capability[]> {
   }));
 }
 
-async function allCapabilities(includeBrowser: boolean) {
-  return includeBrowser ? [...staticCapabilities, ...await browserCapabilities()] : staticCapabilities;
+async function allCapabilities(includeBrowser: boolean, scope?: string) {
+  return includeBrowser ? [...staticCapabilities, ...await browserCapabilities(scope)] : staticCapabilities;
 }
 
 function normalizedWords(value: string) {
@@ -104,7 +104,7 @@ async function ticketFor(id: string, runToken: string, options: any) {
   if (!ticket) {
     const saved = options?.requestContext?.get?.("seudailyCapabilityTickets")?.find((entry: any) => entry.id === id);
     if (saved && saved.expiresAt > Date.now()) {
-      const capability = (await allCapabilities(saved.namespace === "browser")).find(item => item.tool.id === saved.name && item.namespace === saved.namespace);
+      const capability = (await allCapabilities(saved.namespace === "browser", requestValue(options, "seudailyThreadId"))).find(item => item.tool.id === saved.name && item.namespace === saved.namespace);
       if (capability) ticket = { id, runToken, capability, expiresAt: saved.expiresAt };
     }
   }
@@ -120,7 +120,7 @@ export const searchCapabilitiesTool = createTool({
     const runToken = requestValue(options, "seudailyRunToken");
     if (!runToken) throw new Error("当前运行缺少 Broker 绑定令牌");
     const includeBrowser = namespace === "browser" || /browser|playwright|浏览器|点击|输入|页面交互/i.test(query);
-    const capabilities = (await allCapabilities(includeBrowser))
+    const capabilities = (await allCapabilities(includeBrowser, requestValue(options, "seudailyThreadId")))
       .filter((item) => !namespace || item.namespace === namespace)
       .map((item) => ({ item, score: capabilityScore(item, query) }))
       .filter((item) => item.score > 0 || Boolean(namespace))
@@ -166,6 +166,6 @@ export function namespaceTools(namespaces: Iterable<ToolNamespace>) {
   return Object.fromEntries(staticCapabilities.filter((item) => selected.has(item.namespace)).map((item) => [item.tool.id, item.tool]));
 }
 
-export async function browserNamespaceTools(namespaces: Iterable<ToolNamespace>) {
+export async function browserNamespaceTools(namespaces: Iterable<ToolNamespace>, scope?: string) {
   return new Set(namespaces).has("browser") ? getPlaywrightBrowserTools() : {};
 }

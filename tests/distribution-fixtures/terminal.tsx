@@ -12,7 +12,15 @@ export async function run() {
   const record = (value: any) => appendFileSync(join(root, 'requests.jsonl'), JSON.stringify(value) + '\n');
   const observeInput = (bytes: unknown) => record({ input: String(bytes), at: Date.now() });
   const session = new Session({ command: 'chat' }, root);
+  let queue: any[] = [];
   session.client.json = async (path: string, _method?: string, body?: any) => {
+    if (path.includes('/queue')) {
+      if (_method === 'POST') { queue.push({id:String(queue.length+1),state:'pending',...body}); record({queued:body}); return {id:queue.at(-1).id}; }
+      if (_method === 'DELETE') { const item = queue.pop(); record({taken:item.text}); return item; }
+      return {active:session.busy,items:queue};
+    }
+    if (path.includes('/cancel?')) { queue = queue.map(item=>({...item,state:'paused'})); return {cancelled:true,active:false}; }
+    if (path === '/app/vpn') { record({ vpn: body, method: _method }); return { state: 'connected', message: 'fixture VPN 已连接' }; }
     if (path === '/app/agent-info') return { model: 'fixture-model', effort: 'high' };
     if (path === '/app/skills') return { skills: [] };
     if (path === '/app/images') { record({ image: body.name, uploaded: true }); return { ref: 'fixture.png', name: '截图.png', mediaType: 'image/png' }; }

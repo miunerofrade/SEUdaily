@@ -14,6 +14,7 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 const readKey = (path: string, options: ToolExecutionOptions) => `${options.requestContext?.get('seudailyThreadId') ?? ''}:${path}`;
 const processes = new Map<string, {
     child: ChildProcess;
+    runToken: string;
     output: string;
     exitCode: number | null;
     timer: NodeJS.Timeout;
@@ -58,6 +59,11 @@ else {
         child.kill('SIGKILL');
     }
 } }
+export async function cancelWorkspaceRun(runToken: string) {
+    const owned = [...processes.values()].filter(process => process.runToken === runToken);
+    for (const process of owned) if (process.exitCode === null) kill(process.child);
+    await Promise.all(owned.map(process => process.done));
+}
 export function closeWorkspace() { for (const process of processes.values()) {
     clearTimeout(process.timer);
     kill(process.child);
@@ -96,7 +102,7 @@ export async function getWorkspaceTools(): Promise<Record<string, ToolDefinition
             }
         } }; const target = await workspaceTarget(input.path); if (!(await stat(target)).isDirectory())
             throw new Error('搜索路径必须为目录'); await walk(target); return result('搜索完成', { hits }); }),
-        wrap('execute_command', `执行命令：${sandbox.detail}。默认超时120秒，可启动后台进程。`, z.object({ command: z.string().min(1), background: z.boolean().default(false), timeout: z.number().int().positive().max(600000).optional() }), async (input: any, options: ToolExecutionOptions) => { const launch = sandbox!.wrap(input.command); const environment = Object.fromEntries(['PATH', 'SystemRoot', 'WINDIR', 'COMSPEC', 'LANG', 'TMPDIR', 'TEMP', 'TMP'].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : [])); const child = spawn(launch.command, launch.args, { cwd: sandboxWorkspaceRoot, env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true }); const id = `process-${randomUUID()}`; let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; }); const timer = setTimeout(() => kill(child), input.timeout ?? (Number(envValue('SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS')) || 120000)); const commandProcess = { child, output: '', exitCode: null as number | null, timer, done }; processes.set(id, commandProcess); const capture = (chunk: Buffer) => { commandProcess.output = (commandProcess.output + redactText(chunk.toString())).slice(-64000); }; child.stdout?.on('data', capture); child.stderr?.on('data', capture); const abort = () => kill(child); options.abortSignal?.addEventListener('abort', abort, { once: true }); child.on('error', error => { capture(Buffer.from(error.message)); commandProcess.exitCode = -1; clearTimeout(timer); finish(); }); child.on('close', code => { commandProcess.exitCode = code ?? -1; clearTimeout(timer); options.abortSignal?.removeEventListener('abort', abort); finish(); }); if (!input.background)
+        wrap('execute_command', `执行命令：${sandbox.detail}。默认超时120秒，可启动后台进程。`, z.object({ command: z.string().min(1), background: z.boolean().default(false), timeout: z.number().int().positive().max(600000).optional() }), async (input: any, options: ToolExecutionOptions) => { const launch = sandbox!.wrap(input.command); const environment = Object.fromEntries(['PATH', 'SystemRoot', 'WINDIR', 'COMSPEC', 'LANG', 'TMPDIR', 'TEMP', 'TMP'].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : [])); const child = spawn(launch.command, launch.args, { cwd: sandboxWorkspaceRoot, env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true }); const id = `process-${randomUUID()}`; let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; }); const timer = setTimeout(() => kill(child), input.timeout ?? (Number(envValue('SEUDAILY_WORKSPACE_COMMAND_TIMEOUT_MS')) || 120000)); const commandProcess = { child, runToken: String(options.requestContext?.get('seudailyRunToken') || ''), output: '', exitCode: null as number | null, timer, done }; processes.set(id, commandProcess); const capture = (chunk: Buffer) => { commandProcess.output = (commandProcess.output + redactText(chunk.toString())).slice(-64000); }; child.stdout?.on('data', capture); child.stderr?.on('data', capture); const abort = () => kill(child); options.abortSignal?.addEventListener('abort', abort, { once: true }); child.on('error', error => { capture(Buffer.from(error.message)); commandProcess.exitCode = -1; clearTimeout(timer); finish(); }); child.on('close', code => { commandProcess.exitCode = code ?? -1; clearTimeout(timer); options.abortSignal?.removeEventListener('abort', abort); finish(); }); if (!input.background)
             await done; return result(input.background ? '后台命令已启动' : '命令已结束', { processId: id, exitCode: commandProcess.exitCode, output: commandProcess.output.slice(-10000), sandboxMode: sandbox!.mode, sandboxDetail: sandbox!.detail, workingDirectory: sandbox!.mode === 'wsl-bwrap' ? '/workspace' : sandboxWorkspaceRoot, projectDirectory: sandbox!.mode === 'wsl-bwrap' ? '/project' : projectRoot }); }, true),
         wrap('get_process_output', '查看本运行时启动的命令输出。', z.object({ processId: z.string() }), async (input: any) => { const commandProcess = processes.get(input.processId); if (!commandProcess)
             throw new Error('进程不存在'); return result('进程输出', { exitCode: commandProcess.exitCode, output: commandProcess.output.slice(-8000) }); }),

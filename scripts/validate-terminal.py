@@ -104,11 +104,21 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             first_screen = (time.perf_counter() - started) * 1000
             while not (path / 'ready').exists() and proc.poll() is None: pump(.01)
             rss = json.loads((path / 'ready').read_text())['rss']
+            send('/vpn')
+            send(b'\r', .35)
+            assert any(r.get('vpn') == {'action': 'connect'} for r in records()), '/vpn must connect without overriding the saved port'
+            send('/vpn connect 11081')
+            send(b'\r', .35)
+            assert any(r.get('vpn') == {'action': 'connect', 'port': 11081} for r in records()), 'Enter must submit a completed VPN command'
             send('中文输入\r')
             assert not [r for r in records() if 'messages' in r], 'IME commit must stay in draft'
             send(b'\r', .35)
             assert records()[-1]['messages'] == '中文输入'
             assert '回答完成' in output.decode(), 'streamed answer missing'
+            send('LF 提交'); send(b'\n', .35)
+            assert records()[-1]['messages'] == 'LF 提交'
+            send('连续 Enter'); send(b'\r\r', .35)
+            assert records()[-1]['messages'] == '连续 Enter'
             paste = '\x1b[200~' + json.dumps(str(path / '截图 with spaces.png'), ensure_ascii=False) + '\x1b[201~'
             send(paste, .3)
             assert any(r.get('uploaded') for r in records())
@@ -121,7 +131,16 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             assert message[1]['data'] == 'seudaily-image-ref:fixture.png'
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 70, 0, 0))
             os.killpg(proc.pid, signal.SIGWINCH); pump(.2)
-            send('cancel-fixture'); send(b'\r', .2); send(b'\x03', .2)
+            send('cancel-fixture'); send(b'\r', .2)
+            send(paste, .3); send('排队消息'); send(b'\r', .2)
+            queued = [r['queued'] for r in records() if 'queued' in r][-1]
+            assert queued['text'] == '排队消息' and queued['images'][0]['ref'] == 'fixture.png'
+            send(b'\x1b[A', .2)
+            assert any(r.get('taken') == '排队消息' for r in records()), 'Up must take queued draft out of the queue'
+            send(b'\x7f'); send(b'\r', .2)
+            queued = [r['queued'] for r in records() if 'queued' in r][-1]
+            assert queued['text'] == '排队消息' and queued['images'] == [], 'restored attachment must support Backspace deletion'
+            send(b'\x03', .2)
             assert records()[-1].get('cancelled'), 'Ctrl+C must cancel current stream'
             assert proc.poll() is None, 'short Ctrl+C must keep the app open'
             if exit_method == 'ctrl-d': send(b'\x04', .2)

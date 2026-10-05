@@ -503,3 +503,11 @@ button { color: inherit; }
 .campus-sms-dialog label { display: flex; flex-direction: column; gap: 10px; }
 .campus-sms-dialog input { width: 100%; height: 40px; padding: 8px 12px; border: 1px solid #d8d8d8; border-radius: 8px; background: #fff; color: inherit; text-align: left; font: inherit; }
 .campus-sms-actions { display: flex; justify-content: flex-end; gap: 16px; margin-top: 22px; }
+
+.composer-queue { margin: 8px 0; max-height: 180px; overflow-y: auto; border: 1px solid var(--border, #dedede); border-radius: 12px; padding: 6px 10px; }
+.composer-queue-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.composer-queue-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.composer-queue small { color: #888; }
+.composer-queue button { background: transparent; color: inherit; border: 0; cursor: pointer; font-size: 12px; padding: 4px 6px; }
+.composer-queue button:disabled { opacity: .4; cursor: default; }
+.composer-queue-progress { font-size: 13px; white-space: pre-wrap; max-height: 90px; overflow: auto; }

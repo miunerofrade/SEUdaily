@@ -670,10 +670,16 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [queueState, setQueueState] = useState<{active:boolean;items:any[];progress?:{text:string};runToken?:string}>({active:false,items:[]});
+  const queueStateRef = useRef(queueState);
+  queueStateRef.current = queueState;
+  const submittingRef = useRef(false);
+  const [stopping, setStopping] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const activeStreamRef = useRef<{threadId:string;resourceId:string;runToken:string} | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1058,6 +1064,7 @@ export default function App() {
     const controller = new AbortController();
     abortRef.current = controller;
     const runToken = existingRunToken ?? crypto.randomUUID();
+    activeStreamRef.current = {threadId:conversationId,resourceId:active.resourceId || RESOURCE_ID,runToken};
     mutateMessage(conversationId, assistantId, (message) => ({ ...message, brokerRunToken: runToken }));
     let assistantText = "";
     const pendingToolCalls = new Set<string>();
@@ -1118,7 +1125,7 @@ export default function App() {
         tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, state: "failed" as const } : tool),
       }));
     } finally {
-      if (abortRef.current === controller) abortRef.current = null;
+      if (abortRef.current === controller) { abortRef.current = null; activeStreamRef.current = null; }
       setSending(false);
     }
     return assistantText;
@@ -1147,9 +1154,55 @@ export default function App() {
     }], [], undefined, runToken);
   }
 
+  const queuePath = `/api/memory/threads/${encodeURIComponent(active.id)}/queue?resourceId=${encodeURIComponent(active.resourceId || RESOURCE_ID)}`;
+  async function queueRequest(path: string, method = 'GET', body?: unknown) {
+    const response = await fetch(path, {method, headers:{'Content-Type':'application/json'}, body:body === undefined ? undefined : JSON.stringify(body), signal:AbortSignal.timeout(20000)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '队列操作失败');
+    return result;
+  }
+  useEffect(() => {
+    let disposed = false, polling = false;
+    setQueueState({active:false,items:[]});
+    const poll = async () => {
+      if (polling) return; polling = true;
+      try {
+        const state = await queueRequest(queuePath);
+        if (disposed) return;
+        const previous = queueStateRef.current;
+        if (!sending && ((previous.active && !state.active) || previous.items.some(item => !state.items.some((next:any) => next.id === item.id) || item.state === 'running' && state.items.some((next:any) => next.id === item.id && next.state !== 'running')))) {
+          void syncServerHistory(); setHistoryReload(value => value + 1);
+        }
+        queueStateRef.current = state; setQueueState(state);
+      } catch { /* The normal API connection indicator reports an unavailable backend. */ }
+      finally { polling = false; }
+    };
+    void poll(); const timer = window.setInterval(() => void poll(), 1000);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [queuePath, sending, syncServerHistory]);
+  async function takeQueue(item: any, edit = false) {
+    if (edit && (draft.trim() || pendingImages.length || pendingDocuments.length)) { setConversationError('请先发送或清空当前草稿，再取回排队消息'); return; }
+    try {
+      const payload = await queueRequest(queuePath.replace('?','/' + encodeURIComponent(item.id) + '?'), 'DELETE');
+      setQueueState(current => ({...current,items:current.items.filter(row => row.id !== item.id)}));
+      if (edit) { setDraft(payload.text); setPendingImages(payload.images); setPendingDocuments(payload.documents); setSelectedSkill(payload.skills[0] ?? null); composerTextareaRef.current?.focus(); }
+    } catch(error) { setConversationError((error as Error).message); }
+  }
+  async function stopAnswer() {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      const target = activeStreamRef.current?.threadId === active.id ? activeStreamRef.current : {threadId:active.id,resourceId:active.resourceId || RESOURCE_ID,runToken:queueState.runToken};
+      const result = await queueRequest(`/api/memory/threads/${encodeURIComponent(target.threadId)}/cancel?resourceId=${encodeURIComponent(target.resourceId)}`, 'POST', {runToken:target.runToken});
+      if (result.active) throw new Error('任务仍在停止，请稍候；后端尚未确认结束');
+      if (activeStreamRef.current?.threadId === active.id) abortRef.current?.abort();
+      setHistoryReload(value => value + 1);
+    } catch(error) { setConversationError((error as Error).message); }
+    finally { setStopping(false); }
+  }
   async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string } = {}) {
     const text = prompt.trim();
-    if ((!text && !pendingImages.length && !pendingDocuments.length) || sending || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
+    if ((!text && !pendingImages.length && !pendingDocuments.length) || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
     if (!options.preserveComposer && /^\/ramdisk(?:\s|$)/i.test(text)) {
       if (ramdisk.busy) return;
       setDraft(''); setRightOpen(true);
@@ -1157,11 +1210,27 @@ export default function App() {
       return;
     }
     if (!options.preserveComposer && /^\/vpn(?:\s|$)/i.test(text)) {
-      const [action = 'status', port, ...extra] = text.replace(/^\/vpn/i, '').trim().split(/\s+/).filter(Boolean);
+      const [action = 'connect', port, ...extra] = text.replace(/^\/vpn/i, '').trim().split(/\s+/).filter(Boolean);
       setRightOpen(true);
       if (!['connect', 'disconnect', 'status'].includes(action) || extra.length || (port && action !== 'connect')) { setConversationError('/vpn connect [端口]；或 disconnect / status；额外验证码在面板填写'); return; }
       if (vpn.busy) return;
       setDraft(''); await vpn.run(action as 'connect' | 'disconnect' | 'status', undefined, port ? Number(port) : undefined); return;
+    }
+    if (sending || queueState.active || queueState.items.length || submittingRef.current) {
+      if (submittingRef.current) return;
+      submittingRef.current = true;
+      try {
+        await queueRequest(queuePath, 'POST', {text,images:options.preserveComposer ? [] : pendingImages,documents:options.preserveComposer ? [] : pendingDocuments,skills:!options.preserveComposer && selectedSkill ? [selectedSkill] : [],interface:'web'});
+        if (!options.preserveComposer) {
+          setDraft(current => current === prompt ? '' : current);
+          setPendingImages(current => current.filter(image => !pendingImages.some(sent => sent.id === image.id)));
+          setPendingDocuments(current => current.filter(document => !pendingDocuments.some(sent => sent.id === document.id)));
+          setSelectedSkill(current => current === selectedSkill ? null : current);
+        }
+        const state = await queueRequest(queuePath); setQueueState(state);
+      } catch(error) { setConversationError((error as Error).message); }
+      finally { submittingRef.current = false; }
+      return;
     }
     const effectivePrompt = !options.preserveComposer && selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
     const conversationId = active.id;
@@ -1277,7 +1346,6 @@ export default function App() {
       }
     }
     if (event.key === "Enter" && !event.shiftKey) {
-      if (sending) return;
       event.preventDefault();
       void send();
     }
@@ -1380,15 +1448,17 @@ export default function App() {
         <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
         <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
-        {sending ? (
-          <button type="button" className="send-button stop" onClick={() => abortRef.current?.abort()} aria-label="停止回答"><CircleStop size={19} /></button>
-        ) : (
-          <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>
-        )}
+        {(sending || queueState.active) && <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'}><CircleStop size={19} /></button>}
+        <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active ? '加入队列' : '发送消息'}><ArrowUp size={20} /></button>
       </div>
+      {!!queueState.items.length && <div className="composer-queue" aria-label="待发送队列">
+        {queueState.items.map(item => <div key={item.id} className="composer-queue-row"><span title={item.error || item.text}><small>{item.state === 'running' ? '发送中' : item.state === 'pending' ? '待发送' : '已暂停'}</small> {item.text || `${item.images.length + item.documents.length} 个附件`}{item.error && ` · ${item.error}`}</span><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item,true)}>编辑</button><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item)}>删除</button></div>)}
+        {queueState.progress?.text && <div className="composer-queue-progress">{queueState.progress.text}</div>}
+        {queueState.items.some(item => item.state === 'paused') && <button type="button" onClick={() => void queueRequest(queuePath.replace('?', '/resume?'), 'POST', {}).catch(error => setConversationError(error.message))}>继续队列</button>}
+      </div>}
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
-      {!!active.messages.length && <div className="composer-hint"><span>Enter 发送 · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
+      {!!active.messages.length && <div className="composer-hint"><span>{sending || queueState.active ? "Enter 加入队列" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
     </form>
   );
 

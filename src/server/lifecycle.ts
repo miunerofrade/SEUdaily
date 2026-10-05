@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { queueHasWork } from './message-queue.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { extname, resolve, relative, isAbsolute } from 'node:path';
@@ -55,7 +56,7 @@ export function startClientReaper() {
   startupAt = Date.now();
   const timer = setInterval(() => {
     for (const [id, client] of clients) if (client.expires <= Date.now()) clients.delete(id);
-    if (managed && !clients.size && Date.now() - startupAt > 5000) process.emit('SIGTERM');
+    if (managed && !clients.size && !queueHasWork() && Date.now() - startupAt > 5000) process.emit('SIGTERM');
   }, 1000);
   timer.unref(); return () => clearInterval(timer);
 }

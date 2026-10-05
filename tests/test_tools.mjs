@@ -47,7 +47,8 @@ test("an already cancelled Python tool does not start or cancel the shared worke
   try {
     await writeFile(join(directory, "package.json"), '{"type":"module"}');
     const target = await compileSource("src/runtime/tools/python-bridge.ts", directory);
-    await writeFile(join(directory, "src/runtime/runtime-paths.js"), `export const projectRoot = ${JSON.stringify(directory)};`);
+    await compileSource("src/runtime/process-tree.ts", directory);
+    await writeFile(join(directory, "src/runtime/runtime-paths.js"), `export const projectRoot = ${JSON.stringify(directory)}; export const envValue = (name, fallback) => process.env[name] ?? fallback;`);
     const workerScript = join(directory, "uv");
     const marker = join(directory, "started");
     await writeFile(workerScript, `#!${process.execPath}
@@ -92,7 +93,7 @@ test("capability discovery exposes transformed input schemas and rejects incompl
     process.env.SEUDAILY_PROJECT_ROOT = directory;
     await compileSource("src/agent/tool.ts", directory);
     for (const module of [
-      "runtime-paths", "action-request-store", "auth-resume-store", "local-action-schema", "permission-state", "vpn-state",
+      "runtime-paths", "process-tree", "action-request-store", "auth-resume-store", "local-action-schema", "permission-state", "vpn-state",
       "tools/course-tools", "tools/python-bridge", "tools/tool-result", "tools/tool-broker",
       "tools/browser-tools", "tools/browser-config", "tools/web-reader", "tools/web-fetch", "tools/web-search", "tools/public-url",
     ]) await compileSource(`src/runtime/${module}.ts`, directory);

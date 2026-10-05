@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { resolve, extname, isAbsolute } from "node:path";
 import { normalizedUsage, type Usage } from "./telemetry.js";
 import { Client, RESOURCE, clean } from "./client.js";
-import { diskSize, settingsForm, semesterForm, focusForm, type Form } from "./management.js";
+import { diskSize, settingsForm, permissionForm, semesterForm, focusForm, type Form } from "./management.js";
 import { imageMediaTypes, pastedFilePaths } from './attachments.js';
 export interface Options {
   command: string;
@@ -33,7 +33,7 @@ export const commands: Record<string, string> = {
   help: "命令帮助",
   new: "新会话",
   sessions: "历史会话",
-  resume: "打开会话列表；可指定 [ID/序号/latest]",
+  resume: "打开会话列表；Delete 删除；可指定 [ID/序号/latest]",
   history: "查看完整原记录 [数量]",
   schedule: "课表；Enter 详情，e 编辑；a 添加，o 单日课，m 学期设置；--sync 同步",
   programs: "培养方案 [--sync --plan ID --filter 文字 --page N --limit N]",
@@ -41,7 +41,8 @@ export const commands: Record<string, string> = {
   notices: "校园通知",
   focus: "关注任务",
   settings: "编辑环境变量和 AGENT.md",
-  vpn: "校园 VPN：connect / disconnect / status / verify / resend",
+  queue: "查看待发送消息；resume 继续暂停的队列",
+  vpn: "连接校园 VPN（使用已保存端口）；status / disconnect / verify / resend",
   ramdisk: "内存盘：/ramdisk 512 MB；status / unmount / reveal",
   semester: "编辑学期名称、日期及总周数",
   skills: "项目 Skill",
@@ -50,7 +51,7 @@ export const commands: Record<string, string> = {
   reject: "拒绝当前工具",
   login: "登录续接 [schedule/ID]",
   apply: "确认本地操作 [ID]",
-  mode: "权限 [normal/full/extra]",
+  mode: "选择权限模式 [normal/full/extra]",
   attach: '添加图片或文档 "路径"；也可粘贴文件路径',
   detach: "清空文档",
   thinking: "展开 / 折叠模型思考（Ctrl+T）",
@@ -138,6 +139,61 @@ export class Session extends EventEmitter {
   reasoningExpanded = false;
   status = "就绪";
   busy = false;
+  queueItems: any[] = [];
+  queueActive = false;
+  queueProgress = '';
+  queueRunToken = '';
+  private pollingQueue = false;
+  vpnWatching = false;
+  private vpnState = '';
+  async pollVpn() {
+    if (!this.vpnWatching) return;
+    const result = await this.client.json('/app/vpn', 'GET', undefined, AbortSignal.timeout(4000));
+    this.reportVpn(result);
+  }
+  private reportVpn(result: any) {
+    const state = result.data ?? result;
+    const text = state.state === 'connected' ? 'VPN 已连接' : state.state === 'campus_connected' ? '校园网已连接，无需 VPN' : state.message || result.summary || `VPN 状态：${state.state || '未知'}`;
+    if (this.vpnState !== text) { this.vpnState = text; this.show(text); }
+    this.vpnWatching = state.state === 'connecting';
+  }
+  async pollQueue() {
+    if (this.pollingQueue) return;
+    this.pollingQueue = true;
+    const thread = this.threadId, resource = this.resource;
+    try {
+      const state = await this.client.json(this.path('queue'), 'GET', undefined, AbortSignal.timeout(4000));
+      if (thread !== this.threadId || resource !== this.resource) return;
+      const finished = this.queueItems.some(item => !state.items?.some((next: any) => next.id === item.id) || item.state === 'running' && state.items?.some((next: any) => next.id === item.id && next.state !== 'running'));
+      this.queueItems = state.items ?? [];
+      this.queueActive = state.active ?? false;
+      this.queueProgress = state.progress?.text ?? '';
+      this.queueRunToken = state.runToken ?? '';
+      if (finished && !this.busy) {
+        this.messages = []; await this.history(100);
+        this.pending = (await this.client.json(this.path('run'), 'GET', undefined, AbortSignal.timeout(4000))).pending ?? null;
+      }
+      this.changed();
+    } finally { this.pollingQueue = false; }
+  }
+  async takeQueued() {
+    const item = [...this.queueItems].reverse().find(item => item.state !== 'running');
+    if (!item) return null;
+    const draft = await this.client.json(this.path(`queue/${encodeURIComponent(item.id)}`), 'DELETE', undefined, AbortSignal.timeout(4000));
+    this.images = draft.images; this.documents = draft.documents; this.skills = draft.skills;
+    await this.pollQueue();
+    return draft.text as string;
+  }
+  async enqueue(text: string) {
+    const images = [...this.images], documents = [...this.documents], skills = this.skills;
+    await this.client.json(this.path('queue'), 'POST', {text, images, documents, skills, interface:'cli'}, AbortSignal.timeout(5000));
+    this.images = this.images.filter(image => !images.some(sent => sent.ref === image.ref));
+    this.documents = this.documents.filter(document => !documents.some(sent => sent.contextRef === document.contextRef));
+    if (this.skills === skills) this.skills = [];
+    await this.recordInput(text);
+    await this.pollQueue();
+    this.changed();
+  }
   thinking = false;
   page = "chat";
   schedule: any = { courses: [], availableSemesters: [] };
@@ -360,6 +416,11 @@ export class Session extends EventEmitter {
     for (const thread of this.threads)
       if (!thread.title?.trim()) this.nameThread(thread.id, thread.resourceId, "新对话");
   }
+  requestDeleteThread(id: string) {
+    const thread = this.threads.find(item => item.id === id);
+    if (!thread) throw new Error('找不到会话');
+    this.confirm('delete-thread', thread, `删除会话「${clean(thread.title || '未命名')}」及其全部消息？`);
+  }
   private nameThread(threadId: string, resourceId: string, titleInput: string) {
     if (this.titleTasks.has(threadId) || this.namedThreads.has(threadId)) return;
     const task = this.titleQueue.then(async () => {
@@ -412,21 +473,22 @@ export class Session extends EventEmitter {
     this.changed();
   }
   async cancel() {
-    const controller = this.controller ?? this.operation;
-    if (!controller) return;
-    this.operation?.abort();
+    if (!this.controller && !this.operation && !this.queueActive) return;
     this.status = "正在停止";
     this.changed();
-    controller.abort();
-    if (this.runToken)
-      await this.client
-        .json(
-          this.path("cancel"),
-          "POST",
-          { runToken: this.runToken },
-          new AbortController().signal,
-        )
-        .catch(() => {});
+    try {
+      const result = await this.client.json(this.path("cancel"), "POST", {runToken:this.busy && this.controller ? this.runToken || undefined : this.queueRunToken || undefined}, AbortSignal.timeout(20000));
+      if (result.active) throw new Error('任务仍在停止，请稍候；后端尚未确认结束');
+      this.controller?.abort();
+      this.operation?.abort();
+      for (const message of this.messages) for (const part of message.process ?? [])
+        if (part.type === 'tool' && part.text.endsWith('执行中')) part.text = part.text.replace(/执行中$/, '已取消');
+      if (this.queueActive && !this.busy) this.show('已取消');
+      await this.pollQueue();
+    } catch (error) {
+      this.show(error instanceof Error ? error.message : String(error), '错误');
+    }
+    this.changed();
   }
   async turn(
     text: any,
@@ -437,6 +499,8 @@ export class Session extends EventEmitter {
     const titleThreadId = this.threadId, titleResourceId = this.resource;
     if (this.pending && !approval)
       throw new Error("当前会话有待审批工具，请使用 /approve 或 /reject");
+    const turnImages = this.images, turnDocuments = this.documents;
+    if (!approval) { this.images = []; this.documents = []; }
     const turnSkills = this.skills;
     if (!approval) this.skills = [];
     this.runToken = approval ? this.pending.runToken : randomUUID();
@@ -444,9 +508,9 @@ export class Session extends EventEmitter {
     const controller = new AbortController();
     this.controller = controller;
     await this.save();
-    if (typeof text === "string") this.show(text + (!approval && this.images.length ? '\n' + this.images.map(image => `[图片：${image.name}]`).join(' ') : ''), "你");
-    const input = typeof text === 'string' && !approval && this.images.length
-      ? [{ role: 'user', content: [{ type: 'text', text }, ...this.images.map(image => ({ type: 'file', data: `seudaily-image-ref:${image.ref}`, filename: image.name, mimeType: image.mediaType }))] }]
+    if (typeof text === "string") this.show(text + (!approval && turnImages.length ? '\n' + turnImages.map(image => `[图片：${image.name}]`).join(' ') : ''), "你");
+    const input = typeof text === 'string' && !approval && turnImages.length
+      ? [{ role: 'user', content: [{ type: 'text', text }, ...turnImages.map(image => ({ type: 'file', data: `seudaily-image-ref:${image.ref}`, filename: image.name, mimeType: image.mediaType }))] }]
       : text;
     this.reasoningExpanded = false;
     const message: TerminalMessage = { role: "SEUdaily", text: "", reasoning: "", process: [], streaming: true };
@@ -478,7 +542,7 @@ export class Session extends EventEmitter {
             seudailyInterface: "cli",
             seudailySkills: turnSkills,
             seudailyToolNamespaces: [],
-            seudailyDocumentRefs: this.documents.map((d) => d.contextRef),
+            seudailyDocumentRefs: turnDocuments.map((d) => d.contextRef),
             ...extra,
           },
         },
@@ -532,8 +596,6 @@ export class Session extends EventEmitter {
         }
         this.changed();
       }
-      this.documents = [];
-      this.images = [];
       if (!code && message.text.trim() && typeof text === "string")
         this.nameThread(titleThreadId, titleResourceId, text);
       return code;
@@ -575,10 +637,17 @@ export class Session extends EventEmitter {
       const mode = confirmation.payload;
       await this.client.json("/app/settings", "POST", {
         values: {
-          SEUDAILY_FULL_ACCESS: String(mode === "full"),
+          SEUDAILY_FULL_ACCESS: String(mode !== "normal"),
           SEUDAILY_FULL_ACCESS_EXTRA: String(mode === "extra"),
         },
       });
+    } else if (confirmation.kind === 'delete-thread') {
+      const thread = confirmation.payload;
+      await this.client.json(`/api/memory/threads/${encodeURIComponent(thread.id)}?resourceId=${encodeURIComponent(thread.resourceId ?? this.resource)}`, 'DELETE');
+      this.threads = this.threads.filter(item => item.id !== thread.id);
+      if (this.threadId === thread.id) await this.command('/new');
+      this.show('会话已删除。');
+      return;
     } else if (confirmation.kind === "schedule-start")
       this.result(
         await this.client.json("/app/schedule", "PUT", confirmation.payload),
@@ -649,6 +718,7 @@ export class Session extends EventEmitter {
   }
   async command(text: string) {
     let [name, ...args] = words(text.slice(1));
+    name = name.toLowerCase();
     name = aliases[name] ?? name;
     if (
       !["schedule", "programs", "approve", "reject", "mode", "apply"].includes(
@@ -658,8 +728,13 @@ export class Session extends EventEmitter {
       this.page = "chat";
       this.changed();
     }
+    if (name === 'queue') {
+      if (args[0] === 'resume') { await this.client.json(this.path('queue/resume'), 'POST', {}); await this.pollQueue(); this.show('队列已继续'); }
+      else this.show(this.queueItems.map(item => `${item.state === 'running' ? '发送中' : item.state === 'pending' ? '待发送' : '已暂停'}：${item.text}${item.error ? ` · ${item.error}` : ''}`).join('\n') || '队列为空');
+      return;
+    }
     if (name === 'vpn') {
-      const action = args[0] ?? 'status';
+      const action = args[0] ?? 'connect';
       if (!['connect', 'disconnect', 'status', 'verify', 'resend'].includes(action) || args.length > (action === 'connect' ? 2 : 1)) throw new Error('/vpn connect [端口]；或 disconnect / status / verify / resend');
       if (action === 'verify') {
         this.openForm({ title: 'VPN 额外验证', fields: [{ key: 'code', label: '验证码', value: '', secret: true }], save: async values => {
@@ -668,8 +743,7 @@ export class Session extends EventEmitter {
       }
       const result = await this.client.json('/app/vpn', action === 'status' ? 'GET' : 'POST', action === 'status' ? undefined : { action, ...(args[1] ? { port: Number(args[1]) } : {}) });
       if (action !== 'status') this.result(result);
-      const state = result.data ?? result;
-      this.show(`${state.message}${state.state === 'connected' && state.httpProxy ? ` · HTTP 代理 ${state.httpProxy}` : ''}`); return;
+      this.vpnState = ''; this.reportVpn(result); return;
     }
     if (name === 'settings') { this.openForm(await settingsForm(this)); return; }
     if (name === 'semester') { await this.loadSchedule(); this.openForm(semesterForm(this)); return; }
@@ -904,17 +978,7 @@ export class Session extends EventEmitter {
     }
     if (name === "mode") {
       if (!args.length) {
-        const fields = (await this.client.json("/app/settings")).fields;
-        const value = (key: string) =>
-          fields.find((f: any) => f.name === key)?.value === "true";
-        this.show(
-          "当前权限：" +
-            (value("SEUDAILY_FULL_ACCESS_EXTRA")
-              ? "extra"
-              : value("SEUDAILY_FULL_ACCESS")
-                ? "full"
-                : "normal"),
-        );
+        this.openForm(await permissionForm(this));
       } else if (
         args.length === 1 &&
         ["normal", "full", "extra"].includes(args[0])
@@ -983,7 +1047,6 @@ export class Session extends EventEmitter {
   async attachPastedFiles(text: string) {
     const paths = await pastedFilePaths(text, this.options.cwd ?? this.root);
     if (!paths) return null;
-    if (this.busy) throw new Error('当前任务正在运行，请完成后再添加附件');
     if (paths.length + this.documents.length + this.images.length > MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件，请删除不需要的附件');
     const added = [];
     try {
@@ -1004,6 +1067,10 @@ export class Session extends EventEmitter {
       await this.command(text);
       return 0;
     }
+    if ((this.busy || this.queueActive || this.queueItems.length) && !text.startsWith('/') && !this.confirmation) {
+      await this.enqueue(text); return 0;
+    }
+    if (this.busy && /^\/(?:vpn|queue)(?:\s|$)/i.test(text)) { await this.command(text); return 0; }
     if (this.busy) throw new Error("当前任务正在运行，请先取消。");
     this.busy = true;
     const operation = new AbortController();

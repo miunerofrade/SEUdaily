@@ -25,7 +25,9 @@ seudaily web
 
 ## 首次配置
 
-可在 Web 的设置页面填写模型、校园账号等配置；也可以在用户数据目录中创建 `.env`。已有后端运行时，修改环境变量或手动编辑 `.env` 后，请先执行 `seudaily stop`，再启动。
+运行 `seudaily settings` 打开终端设置，或在聊天输入框输入 `/settings`。使用 Tab / ↑↓ 切换字段，Ctrl+U 清空当前输入，Ctrl+S 保存，Esc 返回聊天。密码和密钥隐藏显示，留空保留原值。保存环境配置后，退出界面并执行 `seudaily stop`，再启动即可生效。
+
+也可在 Web 的设置页面填写配置，或在用户数据目录中创建 `.env`。已有后端运行时，修改环境变量或手动编辑 `.env` 后，请先执行 `seudaily stop`，再启动。
 
 ```dotenv
 DEEPSEEK_API_KEY=你的模型服务密钥
@@ -119,10 +121,12 @@ Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**�
 
 ```text
 /notices
+/mode
 /ramdisk 768M
 /ramdisk status
 /ramdisk unmount
 /ramdisk reveal
+/vpn
 /vpn connect 11081
 /vpn status
 /vpn verify
@@ -130,6 +134,14 @@ Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**�
 ```
 
 内存盘容量支持 **64 MB–64 GB**，用于媒体临时文件；有处理任务时不能卸载。Windows 首次启用时自动下载 ImDisk Toolkit（约 750 KB）并请求管理员授权，安装完成后再次启用；已有驱动直接复用。macOS/Linux 使用系统挂载工具。Skill 选择仅作用于下一次发送，发出后清除。
+
+`/vpn` 直接连接，复用已保存的代理端口，未设置时使用 `11081`；只有更改端口时才需要 `/vpn connect 端口`。
+
+
+运行中继续输入消息并按 Enter，会进入当前会话的待发送队列。TUI 在输入框为空时按 ↑ 取回最后一条排队消息，取回即从队列移除；Web 可直接编辑或删除。取消或发送失败会暂停队列，TUI 使用 `/queue resume`，Web 点击“继续队列”。
+
+`/vpn` 使用已保存的端口连接，并持续回报连接状态；已经连接时显示“VPN 已连接”。`/vpn status` 查看状态，`/vpn disconnect` 断开连接。
+
 
 ## 校园 VPN 与登录
 
@@ -236,3 +248,5 @@ npm run test:distribution
 ## 许可证
 
 SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/main/LICENSE)。发布包保留打包依赖的第三方许可证声明；VPN 核心及其他第三方软件遵循各自许可证，见 [第三方声明](https://github.com/miunerofrade/SEUdaily/blob/main/THIRD_PARTY_NOTICES.md)。
+
+TUI 输入 `/mode` 打开权限选择，用左右方向键选择普通、完全访问或完全访问-extra，保存后下一轮生效；权限与 Web 共享。普通模式逐项审批，完全访问允许业务工具和浏览器免审批，extra 另提供工作区文件和终端能力。

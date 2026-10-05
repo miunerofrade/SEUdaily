@@ -20,9 +20,10 @@ if (options.no_color || process.env.NO_COLOR) process.env.FORCE_COLOR = "0";
 const session = new Session(options, root);
 async function main() {
   await session.initialize();
-  if (options.command === "chat") {
+  if (options.command === "chat" || options.command === "settings") {
     if (!process.stdin.isTTY || !process.stdout.isTTY)
-      throw new Error("交互聊天需要终端");
+      throw new Error("交互界面需要终端");
+    if (options.command === "settings") await session.command("/settings");
     const [{ render }, { App }, { default: React }] = await Promise.all([
       import("ink"),
       import("./app.js"),

@@ -1,4 +1,5 @@
 import { identity, installLifecycle } from './lifecycle.js';
+import { installMessageQueue } from './message-queue.js';
 import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
 import { Hono } from 'hono';
 import { DEFAULT_REASONING_EFFORT } from '../agent/provider.js';
@@ -49,7 +50,16 @@ app.post('/api/memory/threads/:id/cancel', async c => {
     const thread = await agentStore.getThreadById({ threadId: c.req.param('id'), resourceId });
     if (!thread) return c.json({ error: '会话不存在' }, 404);
     const body = z.object({ runToken: identifier.optional() }).parse(await c.req.json().catch(() => ({})));
-    return c.json({ cancelled: agentRuntime.cancelTurn(thread.id, body.runToken) });
+    if (body.runToken && agentRuntime.isActive(thread.id) && agentRuntime.activeRunToken(thread.id) !== body.runToken)
+        return c.json({cancelled:false,active:true});
+    await agentStore.client.execute({sql:"UPDATE message_queue SET state='paused',error='任务已取消，等待继续' WHERE threadId=? AND resourceId=? AND state='pending'",args:[thread.id,resourceId]});
+    const cancelled = agentRuntime.cancelTurn(thread.id, body.runToken);
+    if (cancelled) {
+        const deadline = Date.now() + 15000;
+        while (agentRuntime.isActive(thread.id) && Date.now() < deadline)
+            await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return c.json({ cancelled, active: agentRuntime.isActive(thread.id) });
 });
 app.post('/api/memory/threads/:id/fork', async c => {
  const id=c.req.param('id');
@@ -77,7 +87,7 @@ async function normalizeInput(value: unknown): Promise<ModelMessage[]> {
             throw new Error('新轮次仅接受用户消息');
         if (typeof message.content === 'string')
             return { role: 'user' as const, content: message.content };
-        if (!Array.isArray(message.content) || message.content.length > 8)
+        if (!Array.isArray(message.content) || message.content.length > MAX_ATTACHMENTS + 1)
             throw new Error('无效消息内容');
         const content = await Promise.all(message.content.map(async (part: any) => {
             if (part.type === 'text' && typeof part.text === 'string')
@@ -145,4 +155,5 @@ app.post('/api/agents/seudaily-agent/stream', async (c) => {
     });
 });
 
+installMessageQueue(app, normalizeInput);
 installStaticPages();

@@ -62,3 +62,10 @@ export function terminalKeyboard(env: NodeJS.ProcessEnv = process.env): import("
 export function restoreTextInput(stdout: Pick<NodeJS.WriteStream, "write">) {
   stdout.write("\x1b[=24;3u");
 }
+
+/** Normalize Enter encodings Ink does not expose as key.return. Text+CR remains
+ * a draft because an IME commit is indistinguishable from that encoding. */
+export function enterKey(value: string, key: import('ink').Key): import('ink').Key {
+  return /^[\r\n]+$/.test(value) || /^\[57414(?:;[\d:]+)*u$/.test(value)
+    ? {...key, return: true} : key;
+}

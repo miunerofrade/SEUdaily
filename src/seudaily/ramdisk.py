@@ -183,6 +183,14 @@ class TemporaryWorkspace:
     def open(self) -> Path:
         if self.path:
             return self.path
+        task_root = os.environ.get("SEUDAILY_TASK_WORKSPACE")
+        if task_root:
+            # The Node task owner removes this directory after the worker exits,
+            # including forced cancellation. Shared RAM disks remain service-owned.
+            self._temporary = tempfile.TemporaryDirectory(prefix="media-", dir=task_root)
+            self.path = Path(self._temporary.name)
+            atexit.register(self.close)
+            return self.path
         shared = _disks.get("R:")
         shared_path = shared.path if shared and shared.mounted else Path("R:/") if sys.platform == "win32" and Path("R:/").is_dir() else None
         if shared_path:

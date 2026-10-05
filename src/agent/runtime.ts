@@ -1,3 +1,4 @@
+import { releasePythonTask } from '../runtime/tools/python-bridge.js';
 import { packageDocumentContent } from '../shared/document-content.js';
 import { redactText, redactValue } from './redaction.js';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +33,7 @@ export class AgentRuntime {
     }) {
         this.memory = new ContextMemory(config.store, config.provider, config.memory);
     }
+    activeRunToken(threadId: string) { return this.active.get(threadId)?.runToken; }
     isActive(threadId: string) { return this.active.has(threadId); }
     cancelTurn(threadId: string, runToken?: string) {
         const controller = this.active.get(threadId);
@@ -181,6 +183,7 @@ export class AgentRuntime {
                         yield event('tool-call', payload);
                         signal.throwIfAborted();
                         output = await tool.execute(parsed, options);
+                        signal.throwIfAborted();
                         if (tool.outputSchema)
                             output = await tool.outputSchema.parseAsync(output);
                         output = redactValue(output);
@@ -296,6 +299,10 @@ export class AgentRuntime {
             for (const call of run.pendingCalls)
                 if (!answered.has(call.id))
                     run.messages.push({ role: 'tool', tool_call_id: call.id, content: '本轮中断，未完成的调用不得自动重放。' });
+            if (signal.aborted && run.executing) {
+                const call = run.pendingCalls.find(item => item.id === run.executing);
+                if (call) run.parts.push({ type: 'tool-invocation', toolInvocation: { toolCallId: call.id, toolName: call.function.name, state: 'result', result: { status: 'cancelled', summary: '已取消', artifacts: [], citations: [], warnings: [], metrics: {} } } });
+            }
             run.parts.push({ type: 'error', error: { message: text } });
             await this.persist(run);
             yield event('error', { error: { message: text } });
@@ -305,9 +312,24 @@ export class AgentRuntime {
                 run.status = 'cancelled';
                 await this.persist(run);
             }
-            this.active.delete(run.context.threadId);
+            try {
+                if (signal.aborted) {
+                    await (await import('../runtime/tools/browser-tools.js')).closeBrowserTools(run.context.threadId);
+                    if (run.context.namespaces?.includes('workspace')) await (await import('../runtime/workspace.js')).cancelWorkspaceRun(run.context.runToken);
+                }
+                await releasePythonTask(signal);
+                if (run.status === 'cancelled' || run.status === 'failed')
+                    await this.config.store.client.execute({sql:"UPDATE message_queue SET state='paused',error=? WHERE threadId=? AND resourceId=? AND state='pending'",args:[run.status === 'cancelled' ? '任务已取消，等待继续' : '上一条发送失败，等待继续',run.context.threadId,run.context.resourceId]});
+            } finally { this.active.delete(run.context.threadId); }
         }
     }
-    shutdown() { for (const controller of this.active.values())
-        controller.abort(); }
+    async shutdown() {
+        for (const controller of this.active.values()) controller.abort();
+        for (const threadId of [...this.unstarted]) {
+            const token = this.active.get(threadId)?.runToken;
+            const run = token ? await this.config.store.getRun(token) : undefined;
+            if (run) await this.discardUnstartedTurn(run.context);
+        }
+        while (this.active.size) await new Promise(resolve => setTimeout(resolve, 25));
+    }
 }

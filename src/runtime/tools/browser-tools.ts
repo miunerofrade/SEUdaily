@@ -1,3 +1,4 @@
+import { terminateProcessTree } from '../process-tree.js';
 import { campusProxy } from '../vpn-state.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -11,38 +12,31 @@ import { isUnapprovedAccessEnabled } from '../permission-state.js';
 import { playwrightBrowserConfig } from './browser-config.js';
 const allowed = new Set(['browser_find', 'browser_press_key', 'browser_type', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_select_option', 'browser_tabs']);
 const writes = new Set(['browser_click', 'browser_press_key', 'browser_select_option', 'browser_type']);
-let client: Client | undefined;
-let clientProxy: string | undefined;
-let loading: Promise<Record<string, ToolDefinition>> | undefined;
-let idleTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCalls = 0;
-function scheduleIdleClose(connection: Client) {
-    clearTimeout(idleTimer);
-    if (activeCalls) return;
-    idleTimer = setTimeout(() => {
-        if (client === connection) void connection.callTool({ name: 'browser_close' }).catch(() => {});
-    }, 900000);
-    idleTimer.unref();
+type BrowserState = { transport?: StdioClientTransport; client?: Client; proxy?: string; loading?: Promise<Record<string, ToolDefinition>>; timer?: ReturnType<typeof setTimeout>; activeCalls: number };
+const browsers = new Map<string, BrowserState>();
+function scheduleIdleClose(scope: string, state: BrowserState) {
+    clearTimeout(state.timer);
+    if (state.activeCalls) return;
+    state.timer = setTimeout(() => void closeBrowserTools(scope), 900000);
+    state.timer.unref();
 }
-async function connect() {
-    clientProxy = await campusProxy();
+async function connect(scope: string, state: BrowserState): Promise<Record<string, ToolDefinition>> {
+    state.proxy = await campusProxy();
     const outputDir = resolve(projectRoot, '.seudaily', 'browser');
     mkdirSync(outputDir, { recursive: true });
-    const configPath = resolve(outputDir, 'playwright-config.json');
-    writeFileSync(configPath, JSON.stringify(playwrightBrowserConfig(process.platform, envValue('SEUDAILY_BROWSER'), clientProxy)));
+    const configPath = resolve(outputDir, `playwright-${scope.replace(/[^a-zA-Z0-9-]/g, '_')}.json`);
+    writeFileSync(configPath, JSON.stringify(playwrightBrowserConfig(process.platform, envValue('SEUDAILY_BROWSER'), state.proxy)));
     const managed = !!process.env.SEUDAILY_INSTALL_ROOT;
     const entry = managed ? await (await import('../../distribution/browser-engine.js')).browserComponent() : resolve(projectRoot, 'node_modules', '@playwright', 'mcp', 'cli.js');
     const connection = new Client({ name: 'seudaily-playwright', version: '1.1.0' });
     const transport = new StdioClientTransport({ command: process.execPath, cwd: projectRoot, stderr: 'pipe', args: managed ? [entry, configPath] : [entry, '--config', configPath, '--headless', '--isolated', '--block-service-workers', '--codegen', 'none', '--image-responses', 'omit', '--snapshot-mode', 'full', '--output-dir', outputDir] });
+    state.transport = transport;
     transport.stderr?.on('data', () => { });
-    connection.onclose = () => { if (client === connection) {
-        client = undefined;
-        loading = undefined;
-    } };
+    connection.onclose = () => { if (state.client === connection) { state.client = undefined; state.loading = undefined; } };
     try {
         await connection.connect(transport, { timeout: 30000 });
-        client = connection;
-        scheduleIdleClose(connection);
+        state.client = connection;
+        scheduleIdleClose(scope, state);
         const definitions = [];
         let cursor: string | undefined;
         do {
@@ -54,14 +48,25 @@ async function connect() {
             const id = `playwright_${tool.name}`;
             return [id, defineTool({ id, description: tool.description ?? tool.name, inputSchema: z.fromJSONSchema(tool.inputSchema as any), requireApproval: (_input, options) => !isUnapprovedAccessEnabled(options) && writes.has(tool.name), execute: async (args, options) => {
                         options.abortSignal?.throwIfAborted();
-                        clearTimeout(idleTimer);
-                        activeCalls++;
+                        const owner = String(options.requestContext?.get('seudailyThreadId') || 'shared');
+                        if (scope !== owner) {
+                            const owned = await getPlaywrightBrowserTools(owner);
+                            return owned[id].execute(args, options);
+                        }
+                        clearTimeout(state.timer);
+                        state.activeCalls++;
+                        let cancellation: Promise<void> | undefined;
+                        const abort = () => { cancellation ??= closeBrowserTools(scope); };
+                        options.abortSignal?.addEventListener('abort', abort, {once:true});
+                        if (options.abortSignal?.aborted) abort();
                         let response;
                         try {
                             response = await connection.callTool({ name: tool.name, arguments: args as any }, undefined, { signal: options.abortSignal, timeout: 60000 });
                         } finally {
-                            activeCalls--;
-                            if (client === connection) scheduleIdleClose(connection);
+                            options.abortSignal?.removeEventListener('abort', abort);
+                            await cancellation;
+                            state.activeCalls--;
+                            if (state.client === connection) scheduleIdleClose(scope, state);
                         }
                         const text = (response.content as any[]).filter(part => part.type === 'text').map(part => part.text).join('\n').slice(0, 64000);
                         return { status: response.isError ? 'failed' : 'completed', taskId: `task-${randomUUID()}`, summary: response.isError ? text.slice(0, 500) : `${tool.name} 已完成`, data: { text }, artifacts: [], citations: [], warnings: [], metrics: {} };
@@ -73,9 +78,23 @@ async function connect() {
         throw error;
     }
 }
-export async function getPlaywrightBrowserTools() {
-    if (client && clientProxy !== await campusProxy()) await closeBrowserTools();
-    if (!loading)
-    loading = connect().catch(error => { loading = undefined; throw error; }); return loading; }
+export async function getPlaywrightBrowserTools(scope = 'shared'): Promise<Record<string, ToolDefinition>> {
+    let state = browsers.get(scope);
+    if (!state) { state = {activeCalls:0}; browsers.set(scope,state); }
+    if (state.client && state.proxy !== await campusProxy()) { await closeBrowserTools(scope); return getPlaywrightBrowserTools(scope); }
+    if (!state.loading) state.loading = connect(scope,state).catch(error => {state!.loading = undefined; throw error;});
+    return state.loading;
+}
 export function isBrowserApprovalRequired(name: string) { return writes.has(name.replace(/^playwright_/, '')); }
-export async function closeBrowserTools() { clearTimeout(idleTimer); const connection = client; client = undefined; loading = undefined; await connection?.close(); }
+export async function closeBrowserTools(scope?: string) {
+    const targets = scope ? [[scope,browsers.get(scope)] as const] : [...browsers.entries()];
+    await Promise.all(targets.map(async ([name,state]) => {
+        if (!state) return;
+        browsers.delete(name); clearTimeout(state.timer);
+        const connection = state.client;
+        if (!connection && state.loading) await state.loading.catch(() => {});
+        const pid = state.transport?.pid;
+        if (pid) await terminateProcessTree(pid);
+        await (connection ?? state.client)?.close();
+    }));
+}

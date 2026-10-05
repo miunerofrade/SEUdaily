@@ -32,7 +32,7 @@ import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
 import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
-import { committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } from "./keyboard.js";
+import { enterKey, committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } from "./keyboard.js";
 import { InputCursor } from "./cursor.js";
 import { SessionPicker, type SessionPickerHandle } from "./session-picker.js";
 import { copySelection } from "./clipboard.js";
@@ -137,7 +137,7 @@ export function App({ session, copy = copySelection }: {
     setInput(editor.current.text);
     setCaret(editor.current.cursor);
   };
-  const messages = selectionRef.current?.moved ? selectionMessages.current : session.messages;
+  const messages: import("./session.js").TerminalMessage[] = selectionRef.current?.moved ? selectionMessages.current : [...session.messages, ...session.queueItems.map(item => ({role:item.state === 'running' ? '队列 · 发送中' : item.state === 'pending' ? '队列 · 待发送' : '队列 · 已暂停',text:item.text + (item.error ? `\n${item.error}` : '')})), ...(session.queueProgress ? [{role:'SEUdaily · 队列',text:session.queueProgress}] : [])];
   const busy = session.busy;
   const [offset, setOffset] = useState<number | null>(null);
   const [field, setField] = useState(0);
@@ -162,7 +162,9 @@ export function App({ session, copy = copySelection }: {
   const inputCapacity = Math.min(7, Math.max(1, inputLayout.rows.length));
   const inputHeight = page === "chat" ? inputCapacity + 2 : 0;
   const hasSuggestions =
-    page === "chat" && input.startsWith("/") && !input.includes("\n");
+    page === "chat" && input.startsWith("/") && !input.includes("\n") &&
+    (!input.includes(" ") || input.startsWith("/attach ") ||
+      commandSuggestions(input, session.catalog.map(s => s.name)).some(value => value !== input));
   const suggestionHeight = hasSuggestions ? 9 : 0;
   const showThinking =
     page === "chat" &&
@@ -268,10 +270,16 @@ export function App({ session, copy = copySelection }: {
       session.off("change", changed);
     };
   }, [session]);
+  useEffect(() => {
+    const poll = () => { void session.pollQueue().catch(() => {}); void session.pollVpn().catch(() => {}); };
+    poll(); const timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  }, [session]);
   const run = async (text: string) => {
     try {
       await session.submit(text);
     } catch (error) {
+      if (!editor.current.expanded() && !text.startsWith("/")) edit(text,text.length);
       session.page = "chat";
       session.status =
         "错误：" + (error instanceof Error ? error.message : String(error));
@@ -409,6 +417,13 @@ export function App({ session, copy = copySelection }: {
             full: "完整权限",
             extra: "工作区权限",
             latest: "最近会话",
+            connect: "连接校园 VPN；可追加代理端口",
+            disconnect: "断开校园 VPN",
+            status: "查看状态",
+            verify: "输入短信验证码",
+            resend: "重新发送验证码",
+            unmount: "卸载内存盘",
+            reveal: "打开内存盘目录",
             schedule: "登录教务系统",
           } as Record<string, string>
         )[last] ?? (name === "attach" ? "添加文档" : "调用项目 Skill")
@@ -710,7 +725,7 @@ export function App({ session, copy = copySelection }: {
       if (action === "exit") { cancel(); exit(); return; }
       if (action === "repeat") return;
       if (selectionRef.current?.moved) copyCurrent();
-      else if (busy) cancel();
+      else if (session.busy || session.queueActive) cancel();
       else { edit("", 0); setModal(null); setDetail(null); }
     };
     if (key.ctrl && value.toLowerCase() === "c") { interrupt(); return; }
@@ -917,8 +932,8 @@ export function App({ session, copy = copySelection }: {
       }
       const text = editor.current.expanded().trim();
       if (!text && !session.images.length && !session.documents.length) return;
-      if (pendingPastes.current || session.attachmentLoading) return;
-      if (busy && text !== "/cancel") return;
+      if (pendingPastes.current || session.attachmentLoading) { session.show('附件仍在处理，请稍候再发送'); return; }
+
       if (text === "/quit" || text === "/exit") {
         cancel();
         exit();
@@ -936,6 +951,16 @@ export function App({ session, copy = copySelection }: {
       setModal(null);
       setDetail(null);
       void run(text);
+      return;
+    }
+    if (key.upArrow && !editor.current.expanded() && session.queueItems.some(item => item.state !== 'running')) {
+      void session.takeQueued().then(text => {
+        if (text === null) return;
+        edit(text, text.length);
+        for (const image of session.images) editor.current.attachment(image.ref, clean(image.name), '图片');
+        for (const document of session.documents) editor.current.attachment(document.contextRef, clean(document.name), '文档');
+        setInput(editor.current.text); setCaret(editor.current.cursor);
+      }).catch(error => session.show(error.message, '错误'));
       return;
     }
     if (key.upArrow || key.downArrow) {
@@ -998,7 +1023,7 @@ export function App({ session, copy = copySelection }: {
   // Keep state-dependent decisions current even when Ink retains the original callback.
   const inputHandler = useRef(handleInput);
   inputHandler.current = handleInput;
-  useInput((value, key) => inputHandler.current(value, key));
+  useInput((value, key) => inputHandler.current(value, enterKey(value, key)));
   const choose = async (value: string) => {
     const kind = modal;
     setModal(null);
@@ -1154,6 +1179,7 @@ export function App({ session, copy = copySelection }: {
         {modal === "resume" ? (
           <SessionPicker ref={resumePicker} threads={session.threads} currentId={session.threadId}
             width={width} height={height}
+            onDelete={(id) => { setModal(null); session.requestDeleteThread(id); }}
             onSelect={(id) => { setModal(null); setOffset(null); void run(`/resume ${id}`); }} />
         ) : decisions ? (
           <Box
@@ -1513,7 +1539,10 @@ export function App({ session, copy = copySelection }: {
             ? (process.platform === "darwin"
                 ? "已选中 · ⌘C / Ctrl+C 复制 · Esc 取消"
                 : "已选中 · Ctrl+C 复制 · Esc 取消")
-            : telemetryLabel(session.model, session.effort, session.usage, width < 105))}
+            : session.queueItems.length
+              ? `队列 ${session.queueItems.length} · ↑ 取回编辑 · /queue resume 继续${session.queueItems.some(item => item.state === 'failed' || item.state === 'paused') ? ' · 已暂停' : ''}`
+              : (session.busy || session.queueActive) ? `${session.status} · Enter 加入队列 · Ctrl+C 停止`
+              : telemetryLabel(session.model, session.effort, session.usage, width < 105))}
         </Text>
       </Box>
       {modal !== "resume" && <InputCursor position={nativeCursor} />}

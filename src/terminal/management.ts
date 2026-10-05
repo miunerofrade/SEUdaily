@@ -8,10 +8,21 @@ export { diskSize } from '../shared/disk-size.js';
 import { diskSize } from '../shared/disk-size.js';
 export async function settingsForm(s:Session):Promise<Form> {
  const data=await s.client.json('/app/settings');
- return {title:'设置 · 空白密钥保持原值',fields:[...data.fields.map((f:any)=>({...field(f.name,f.name+(f.configured?' · 已配置':''),f.value),secret:f.secret})),{...field('agentInstructions','AGENT.md',data.agentInstructions),multiline:true}],save:async values=>{
+ const labels:Record<string,string>={DEEPSEEK_API_KEY:'DeepSeek API 密钥',DEEPSEEK_MODEL:'模型',TAVILY_API_KEY:'Tavily 搜索密钥',SEUDAILY_VPN_BINARY:'VPN 核心路径（可选）',SEUDAILY_VPN_DNS_SERVER:'校园 DNS 地址',SEUDAILY_USERNAME:'校园账号',SEUDAILY_PASSWORD:'校园密码',SEUDAILY_ASR_API_KEY:'语音转写 API 密钥',SEUDAILY_WHISPER_MODEL:'本地 Whisper 模型',SEUDAILY_FULL_ACCESS:'完全访问权限',SEUDAILY_FULL_ACCESS_EXTRA:'工作区文件与终端权限'};
+ const booleanFields=new Set(['SEUDAILY_FULL_ACCESS','SEUDAILY_FULL_ACCESS_EXTRA']);
+ return {title:'设置 · 空白密钥保持原值',fields:[...data.fields.map((f:any)=>({...field(f.name,(labels[f.name] ?? f.name)+(f.configured?' · 已配置':''),f.value),secret:f.secret,...(booleanFields.has(f.name)?{choices:[{value:'false',label:'关闭'},{value:'true',label:'开启'}]}:{})})),{...field('agentInstructions','全局对话规则（AGENT.md）',data.agentInstructions),multiline:true}],save:async values=>{
  const {agentInstructions,...env}=values;
  const result=await s.client.json('/app/settings','POST',{values:env,agentInstructions});
- s.show(result.restartRequired?'设置已保存；环境变量在服务重启后生效。':'设置已保存；下一轮对话生效。');
+ s.show(result.restartRequired?'设置已保存。退出后执行 seudaily stop，再启动 seudaily，配置即可生效。':'设置已保存；下一轮对话生效。');
+ }};
+}
+export async function permissionForm(s:Session):Promise<Form> {
+ const data=await s.client.json('/app/settings');
+ const enabled=(name:string)=>data.fields.some((f:any)=>f.name===name && f.value==='true');
+ const mode=enabled('SEUDAILY_FULL_ACCESS_EXTRA')?'extra':enabled('SEUDAILY_FULL_ACCESS')?'full':'normal';
+ return {title:'权限模式 · 与 Web 共享，保存后下一轮生效',fields:[{...field('mode','普通：逐项审批；完全访问：业务与浏览器免审批；extra：增加文件与终端',mode),choices:[{value:'normal',label:'普通（逐项审批）'},{value:'full',label:'完全访问'},{value:'extra',label:'完全访问-extra（含工作区文件与终端）'}]}],save:async values=>{
+ await s.client.json('/app/settings','POST',{values:{SEUDAILY_FULL_ACCESS:String(values.mode!=='normal'),SEUDAILY_FULL_ACCESS_EXTRA:String(values.mode==='extra')}});
+ s.show(`权限已更新：${values.mode==='normal'?'普通（逐项审批）':values.mode==='full'?'完全访问':'完全访问-extra'}；下一轮生效。`);
  }};
 }
 export function semesterForm(s:Session):Form {

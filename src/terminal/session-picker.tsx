@@ -1,7 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { Box, Text, measureElement, useCursor, useInput, usePaste, type DOMElement } from "ink";
 import stringWidth from "string-width";
-import { TerminalReplyFilter } from "./keyboard.js";
+import { enterKey, TerminalReplyFilter } from "./keyboard.js";
 import { clean } from "./client.js";
 export interface SessionPickerHandle { click(x: number, y: number): void; scroll(amount: number): void }
 const fit = (text: string, width: number) => {
@@ -18,7 +18,8 @@ export function sessionDate(value: unknown) {
 export const SessionPicker = forwardRef<SessionPickerHandle, {
   threads: any[]; currentId: string; width: number; height: number;
   onSelect(id: string): void;
-}>(({ threads, currentId, width, height, onSelect }, ref) => {
+  onDelete(id: string): void;
+}>(({ threads, currentId, width, height, onSelect, onDelete }, ref) => {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const elements = useRef<(DOMElement | null)[]>([]);
@@ -55,6 +56,7 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
   const search = (text: string) => { setQuery(clean(text).replace(/\n/g, "")); setIndex(0); };
   usePaste((text) => search(view.current.query + text));
   useInput((value, key) => {
+    key = enterKey(value, key);
     if (terminalReplies.current.consume(value)) return;
     if (key.eventType === "release" || key.ctrl || key.super || key.meta || value.includes("[<") || /^<?\d+;\d+;\d+[Mm]$/.test(value) || /^\[\?/.test(value)) return;
     if (key.upArrow) change(-1, true);
@@ -62,7 +64,8 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
     else if (key.pageUp) change(-view.current.capacity);
     else if (key.pageDown) change(view.current.capacity);
     else if (key.return) { if (view.current.filtered[view.current.current]) onSelect(view.current.filtered[view.current.current].id); }
-    else if (key.backspace || key.delete) search(Array.from(view.current.query).slice(0, -1).join(""));
+    else if (key.delete) { const thread = view.current.filtered[view.current.current]; if (thread) onDelete(thread.id); }
+    else if (key.backspace) search(Array.from(view.current.query).slice(0, -1).join(""));
     else if (!key.escape && value) search(view.current.query + value);
   });
   // Search is on a known single terminal row; expose a real cursor for IME composition.
@@ -70,7 +73,7 @@ export const SessionPicker = forwardRef<SessionPickerHandle, {
   const dateWidth = width >= 55 ? 14 : 0;
   const titleWidth = Math.max(4, width - 4 - dateWidth);
   return <Box flexDirection="column" height={height} overflow="hidden">
-    <Text bold>恢复会话 · ↑↓ 选择 · Enter 恢复 · Esc 返回</Text>
+    <Text bold>会话 · ↑↓ 选择 · Enter 恢复 · Delete 删除 · Esc 返回</Text>
     <Text>搜索：{fit(query || "", Math.max(1, width - 10))}</Text>
     <Text dimColor>{fit("  会话标题", titleWidth + 2)}{dateWidth ? "更新时间" : ""}</Text>
     {!filtered.length && <Text dimColor>{threads.length ? "没有匹配的会话。" : "暂无历史会话。"}</Text>}
