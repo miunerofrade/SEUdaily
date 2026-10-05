@@ -12,7 +12,7 @@ export async function run() {
   const record = (value: any) => appendFileSync(join(root, 'requests.jsonl'), JSON.stringify(value) + '\n');
   const observeInput = (bytes: unknown) => record({ input: String(bytes), at: Date.now() });
   const session = new Session({ command: 'chat' }, root);
-  session.on('change', () => session.busy ? writeFileSync(join(root, 'session-busy'), '') : rmSync(join(root, 'session-busy'), {force:true}));
+  session.on('change', () => session.busy || session.queueActive ? writeFileSync(join(root, 'session-busy'), '') : rmSync(join(root, 'session-busy'), {force:true}));
   let queue: any[] = [];
   session.client.json = async (path: string, _method?: string, body?: any) => {
     if (path.includes('/queue')) {

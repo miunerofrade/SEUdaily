@@ -149,7 +149,7 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             deadline = time.monotonic() + 5
             while not any(r.get('cancelled') for r in records()) and time.monotonic() < deadline and proc.poll() is None:
                 pump(.025)
-            assert any(r.get('cancelled') for r in records()), 'Ctrl+C must cancel current stream'
+            assert any(r.get('cancelled') for r in records()), 'Ctrl+C must cancel current stream: ' + repr(records()) + output.decode(errors='replace')[-4000:]
             assert proc.poll() is None, 'short Ctrl+C must keep the app open'
             if exit_method == 'ctrl-d': send(b'\x04', .2)
             else:
