@@ -1,6 +1,32 @@
-# SEUdaily
+<div align="center">
+  <img src="https://raw.githubusercontent.com/miunerofrade/SEUdaily/main/docs/assets/logo.png" width="140" height="140" alt="SEUdaily logo" />
+  <h1>SEUdaily</h1>
+  <p><strong>从终端到网页，把校园日常接起来。</strong></p>
+  <p>课表 · 课程资料 · 培养方案 · 校园通知 · Focus · VPN</p>
 
-面向东南大学学习与校园事务的本地助手。安装一个命令即可使用终端聊天；需要网页时，再启动 Web 工作台。两种界面共享后端、会话和校园工具。
+  <p>
+    <a href="https://www.npmjs.com/package/seudaily"><img src="https://img.shields.io/npm/v/seudaily?style=flat-square&amp;color=155bc4&amp;label=npm" alt="npm version" /></a>
+    <a href="https://github.com/miunerofrade/SEUdaily/actions/workflows/distribution-ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/miunerofrade/SEUdaily/distribution-ci.yml?branch=main&amp;style=flat-square&amp;label=CI" alt="Distribution CI" /></a>
+    <a href="https://github.com/miunerofrade/SEUdaily/blob/main/LICENSE"><img src="https://img.shields.io/github/license/miunerofrade/SEUdaily?style=flat-square&amp;color=0b918a" alt="MIT license" /></a>
+    <a href="#分发与运行环境"><img src="https://img.shields.io/badge/Node.js-22%20%2F%2024-155bc4?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 22 / 24" /></a>
+    <a href="#分发与运行环境"><img src="https://img.shields.io/badge/Python-3.11%2B-0b918a?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11+" /></a>
+    <a href="#分发与运行环境"><img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-334155?style=flat-square" alt="macOS, Windows and Linux" /></a>
+  </p>
+
+  <p>
+    <a href="#快速安装">快速安装</a> ·
+    <a href="#首次配置">首次配置</a> ·
+    <a href="#可以做什么">功能概览</a> ·
+    <a href="#常用命令">使用说明</a> ·
+    <a href="https://github.com/miunerofrade/SEUdaily/issues">反馈问题</a>
+  </p>
+</div>
+
+---
+
+面向东南大学学习与校园事务的本地助手。**安装一个包，就能使用终端聊天与共享后端。** 需要网页时启动 Web 工作台，两种界面共用会话、设置与校园工具。
+
+普通聊天直接运行；Web、Python 和浏览器组件在首次需要时自动准备。
 
 ## 快速安装
 
@@ -22,14 +48,6 @@ seudaily web
 `-g` 将命令安装到当前 Node 环境的全局目录，随后可在任意工作目录执行 `seudaily`。
 
 校园、文档及浏览器工具在首次使用时联网准备对应组件和运行环境，后续复用缓存。普通聊天直接使用主包。
-
-更新到最新版本：
-
-```bash
-seudaily update
-```
-
-终端启动后会在后台检查更新，有新版本时显示提醒；检查结果缓存一天。更新命令复用当前安装位置，已是最新版本时直接提示。更新前自动停止当前数据目录的后端，更新后重新启动即可；用户设置和会话保留，可选组件按新版本自动准备。此命令将在 1.1.2 之后的版本提供。
 
 ## 首次配置
 
@@ -68,14 +86,18 @@ seudaily
 
 ## 可以做什么
 
-- **对话与资料**：终端和 Web 聊天、历史会话、Markdown 与公式、图片和文档附件。
-- **课表**：同步个人课表，查看课程安排，调整学期日期和课程信息。
-- **课程学习**：查询点播及录播场次，获取字幕、课件与媒体，生成课程笔记。
-- **培养方案**：同步个人培养方案，结合历年课表提供课程与学分核对依据。
-- **通知与 Focus**：查看校园通知，创建、编辑、暂停关注任务。
-- **校园 VPN**：连接本地代理，让校园工具和指定代理的宿主机程序访问授权资源。
+| | 功能 | 日常用法 |
+| :---: | --- | --- |
+| 💬 | **对话与资料** | 终端与 Web 聊天、历史会话、Markdown 与公式、图片和文档附件 |
+| 📅 | **个人课表** | 同步课程安排，调整学期日期和课程信息 |
+| 📚 | **课程学习** | 查询点播与录播，获取字幕、课件与媒体，生成课程笔记 |
+| 🎓 | **培养方案** | 同步个人方案，结合历年课表核对课程与学分 |
+| 🔔 | **通知与 Focus** | 查看校园通知，创建、编辑和暂停关注任务 |
+| 🔗 | **校园 VPN** | 建立本地代理，供校园工具及宿主机程序访问授权资源 |
 
 课表、培养方案和常规课程查询优先使用 HTTP。通用网页操作与部分交互登录按需启动浏览器。
+
+**同一份数据，两种使用方式：** 在终端里快速提问，在网页里查看课表、培养方案、通知和资料；也可以同时使用。
 
 ## 常用命令
 
@@ -83,6 +105,7 @@ seudaily
 seudaily                       # 默认终端聊天
 seudaily chat                  # 同上；也可用 -c / --chat
 seudaily web                   # 网页；也可用 -w / --web
+seudaily settings              # 终端配置界面
 seudaily ask "查看今天的课程"    # 单次提问
 seudaily ask --stdin --json     # 从标准输入读取问题，输出 JSONL
 seudaily --resume               # 选择并恢复已有会话
@@ -90,6 +113,7 @@ seudaily sessions               # 会话列表
 seudaily skills                 # Skill 列表
 seudaily status                 # 查看本地后端状态
 seudaily stop                   # 停止本地后端
+seudaily update                 # 检查并更新版本
 seudaily --help                 # 完整参数说明
 seudaily --version
 ```
@@ -145,11 +169,9 @@ Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**�
 
 `/vpn` 直接连接，复用已保存的代理端口，未设置时使用 `11081`；只有更改端口时才需要 `/vpn connect 端口`。
 
-
 运行中继续输入消息并按 Enter，会进入当前会话的待发送队列。TUI 在输入框为空时按 ↑ 取回最后一条排队消息，取回即从队列移除；Web 可直接编辑或删除。取消或发送失败会暂停队列，TUI 使用 `/queue resume`，Web 点击“继续队列”。
 
-`/vpn` 使用已保存的端口连接，并持续回报连接状态；已经连接时显示“VPN 已连接”。`/vpn status` 查看状态，`/vpn disconnect` 断开连接。
-
+`/vpn` 持续回报连接状态；已经连接时显示“VPN 已连接”。`/vpn status` 查看状态，`/vpn disconnect` 断开连接。
 
 ## 校园 VPN 与登录
 
@@ -178,7 +200,15 @@ VPN 与业务门户分别维护登录会话，失效时重新认证。普通登�
 
 创建 Focus 前会提示授权：该任务可免逐次工具审批，但不获得 extra 工作区文件和终端能力。编辑要求沿用同一任务与会话，后续执行使用新要求并保留历史版本；暂停停止自动执行，删除撤回授权。Focus 没有自动到期时间，登录续接请求有效期为 30 分钟。
 
-普通对话的工具访问由应用权限设置控制；模型、搜索与转写使用配置的服务。
+TUI 输入 `/mode` 打开权限选择，用左右方向键选择并保存，与 Web 共享设置，下一轮生效：
+
+| 模式 | 工具访问 |
+| --- | --- |
+| 普通 | 需要写入、命令和浏览器交互时逐项审批 |
+| 完全访问 | 业务工具和浏览器交互免审批 |
+| 完全访问-extra | 在完全访问基础上增加工作区文件与终端能力 |
+
+模型、搜索与转写使用配置的服务。
 
 ## 数据、更新与卸载
 
@@ -192,7 +222,15 @@ VPN 与业务门户分别维护登录会话，失效时重新认证。普通登�
 
 数据目录保存 `.env`、会话数据库、校园会话和设置，课程产物位于 `exports/`。后端日志位于数据目录下的 `.seudaily/logs/core.log`。可用 `--data-dir` 或 `SEUDAILY_DATA_DIR` 覆盖数据目录，用 `SEUDAILY_CACHE_DIR` 覆盖组件缓存目录。
 
-更新前停止后端，再安装新版本：
+检查并升级到最新版本：
+
+```bash
+seudaily update
+```
+
+更新命令复用当前安装位置，自动停止旧后端，完成后重新启动 `seudaily` 即可。TUI 在后台检查新版本并显示提醒，结果缓存一天，退出时取消检查。
+
+从 1.1.2 及更早版本升级时，先运行一次：
 
 ```bash
 seudaily stop
@@ -256,5 +294,3 @@ npm run test:distribution
 ## 许可证
 
 SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/main/LICENSE)。发布包保留打包依赖的第三方许可证声明；VPN 核心及其他第三方软件遵循各自许可证，见 [第三方声明](https://github.com/miunerofrade/SEUdaily/blob/main/THIRD_PARTY_NOTICES.md)。
-
-TUI 输入 `/mode` 打开权限选择，用左右方向键选择普通、完全访问或完全访问-extra，保存后下一轮生效；权限与 Web 共享。普通模式逐项审批，完全访问允许业务工具和浏览器免审批，extra 另提供工作区文件和终端能力。

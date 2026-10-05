@@ -1,0 +1,7 @@
+# Logo
+
+`logo.png` 是经确认的 SEUdaily 标志，使用内置 imagegen 生成，透明 PNG 背景。蓝绿交叠的方形图案表达 CLI 与 Web 共用一个核心。README 使用原始图片，在显示时缩放。
+
+生成提示词：
+
+> Use case: logo-brand. Create a single minimal contemporary software logo icon for a local assistant that combines terminal and Web interfaces into one shared core. User direction: compact square silhouette, genuinely unified intertwined construction, layered overlap resembling multiply blend; no burgundy, no text or letters. Design one balanced square-shaped geometric mark constructed from only two broad interlocking folded bands or modular rounded L-like shapes. Make the forms fuse into one coherent compact symbol with a small crisp central negative-space square; four strong corners, only subtly rounded outer corners, consistent thickness. Use sophisticated deep blue and fresh muted teal; at their overlap use a darker flat blue-teal tone to communicate multiply blending without rendering realistic materials. It should read as ONE iconic app mark, not two icons next to each other. Elegant, bold, restrained, recognizable at 24px; a memorable software identity rather than a university seal. Straight-on flat graphic, centered and large with generous even margin, square image. Genuine transparent background outside the mark. Absolutely NO English text, NO Chinese text, NO initials, NO letterforms, NO wordmark, NO book, NO sun, NO campus building, NO gradients, NO shadows, NO 3D, NO outlines, NO mockup, NO multiple alternatives. Render a clean crisp raster PNG.
