@@ -30,6 +30,7 @@ async function main() {
       import("react"),
     ]);
     const restoreInput = prepareTerminalInput(process.stdin);
+    const updateCheck = new AbortController();
     try {
       const instance = render(React.createElement(App, { session }), {
         alternateScreen: true,
@@ -38,12 +39,13 @@ async function main() {
         kittyKeyboard: terminalKeyboard(),
       });
       if (process.env.SEUDAILY_INSTALL_ROOT && !options.quiet) {
-        void import('../distribution/update.js').then(({updateNotice})=>updateNotice(process.env.SEUDAILY_INSTALL_ROOT!,root))
-          .then(notice=>{if(notice)session.show(notice);}).catch(()=>{});
+        void import('../distribution/update.js').then(({updateNotice})=>updateNotice(process.env.SEUDAILY_INSTALL_ROOT!,root,updateCheck.signal))
+          .then(notice=>{if(notice && !updateCheck.signal.aborted)session.show(notice);}).catch(()=>{});
       }
       await instance.waitUntilExit();
       await session.cancel();
     } finally {
+      updateCheck.abort();
       restoreInput();
     }
     return 0;

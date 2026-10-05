@@ -13,21 +13,22 @@ export function newerVersion(latest: string, current = VERSION) {
   }
   return false;
 }
-export async function checkForUpdate() {
-  const response = await fetch('https://registry.npmjs.org/seudaily/latest', {signal:AbortSignal.timeout(5000)});
+export async function checkForUpdate(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(5000);
+  const response = await fetch('https://registry.npmjs.org/seudaily/latest', {signal:signal ? AbortSignal.any([signal,timeout]) : timeout});
   if (!response.ok) throw new Error('检查更新失败（' + response.status + '）');
   const metadata = await response.json() as {version:string};
   if (!/^\d+\.\d+\.\d+$/.test(metadata.version)) throw new Error('更新版本格式无效');
   return {current:VERSION, latest:metadata.version, available:newerVersion(metadata.version)};
 }
-export async function updateNotice(installRoot: string, dataRoot: string) {
+export async function updateNotice(installRoot: string, dataRoot: string, signal?: AbortSignal) {
   const metadata = JSON.parse(await readFile(join(installRoot,'package.json'),'utf8'));
   if (metadata.private) return; // Source checkouts are updated through Git.
   const file = join(dataRoot,'.seudaily','update-check.json');
   const cached = await readFile(file,'utf8').then(JSON.parse).catch(()=>undefined);
   let latest = cached?.latest;
   if (!cached || Date.now() - cached.checkedAt > 24 * 60 * 60 * 1000) {
-    latest = (await checkForUpdate()).latest;
+    latest = (await checkForUpdate(signal)).latest;
     await mkdir(dirname(file),{recursive:true});
     await writeFile(file,JSON.stringify({latest,checkedAt:Date.now()}));
   }
