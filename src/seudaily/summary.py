@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from openai import OpenAI
+from .optional_runtime import openai_client as OpenAI
 
 
 class AISummarizer:

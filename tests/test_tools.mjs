@@ -97,6 +97,7 @@ test("capability discovery exposes transformed input schemas and rejects incompl
       "tools/course-tools", "tools/python-bridge", "tools/tool-result", "tools/tool-broker",
       "tools/browser-tools", "tools/browser-config", "tools/web-reader", "tools/web-fetch", "tools/web-search", "tools/public-url",
     ]) await compileSource(`src/runtime/${module}.ts`, directory);
+    await writeFile(join(directory, 'src/runtime/tools/browser-catalog.json'), await readFile(join(root, 'src/runtime/tools/browser-catalog.json')));
     await writeFile(join(directory, "src/runtime/tools/python-bridge.js"), `
 export async function runPythonTool() {
   return { status: "auth_required", taskId: "task-test", summary: "Login required", data: {}, artifacts: [], citations: [], warnings: [], metrics: {} };

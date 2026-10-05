@@ -10,11 +10,11 @@ const require = createRequire(import.meta.url);
 config({ path: resolve(root, '.env') });
 const core = dirname(require.resolve('playwright-core/package.json'));
 const nodeVersion = require('playwright-core/package.json').version;
-const metadata = spawnSync('uv', ['run', '--frozen', 'python', '-c',
+const metadata = spawnSync('uv', ['run', '--frozen', '--extra', 'browser', 'python', '-c',
   'import json,pathlib,playwright,importlib.metadata; p=pathlib.Path(playwright.__file__).parent/"driver/package/browsers.json"; print(json.dumps({"version":importlib.metadata.version("playwright"),"browsers":json.loads(p.read_text())}))'],
   { cwd: root, encoding: 'utf8' });
 if (metadata.status !== 0) {
-  process.stderr.write(metadata.stderr || '无法读取 Python Playwright 版本；请先运行 uv sync --frozen。\n');
+  process.stderr.write(metadata.stderr || '无法读取 Python Playwright 版本；请先运行 uv sync --frozen --extra browser。\n');
   process.exit(1);
 }
 const python = JSON.parse(metadata.stdout);
@@ -33,7 +33,7 @@ if (!['msedge', 'webkit', 'firefox', 'chromium'].includes(browser)) {
 if (browser === 'msedge') {
   console.log('使用已安装的 Microsoft Edge，无需下载浏览器。');
 } else {
-  const result = spawnSync('uv', ['run', '--frozen', 'playwright', 'install', browser], { cwd: root, stdio: 'inherit' });
+  const result = spawnSync('uv', ['run', '--frozen', '--extra', 'browser', 'playwright', 'install', browser], { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(result.error.message);
   process.exitCode = result.status ?? 1;
 }

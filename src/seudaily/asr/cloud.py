@@ -143,6 +143,8 @@ class CloudASRWorker(MediaWorker):
             raise FileNotFoundError(f"未找到待处理音频: {self.temp_audio_path}")
         if not self.api_key:
             raise ValueError("未配置 ASR API 密钥。")
+        from seudaily.optional_runtime import ensure_dependencies
+        ensure_dependencies("asr")
         timeout = _timeout(self.config, "asr_timeout_seconds", 900)
         yield {"progress": 0.1, "text": f"正在初始化云端转写 (请求模型: {self.model_version})..."}
         context = multiprocessing.get_context("spawn")

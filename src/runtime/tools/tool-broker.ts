@@ -167,5 +167,5 @@ export function namespaceTools(namespaces: Iterable<ToolNamespace>) {
 }
 
 export async function browserNamespaceTools(namespaces: Iterable<ToolNamespace>, scope?: string) {
-  return new Set(namespaces).has("browser") ? getPlaywrightBrowserTools() : {};
+  return new Set(namespaces).has("browser") ? getPlaywrightBrowserTools(scope) : {};
 }

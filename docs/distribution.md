@@ -25,7 +25,7 @@ npm 发布后，基础包安装提供 `seudaily` 命令。三个可选组件已�
 | --- | --- | --- |
 | `seudaily` | Node 启动器、内置 CLI、公共核心、内置 Skill、可选组件清单 | 安装即可使用终端 |
 | `@miunerofrade/seudaily-web` | React 静态页面及资源 | web |
-| `@miunerofrade/seudaily-python` | Python wheel、固定版本且带 hash 的基础/媒体依赖清单 | 校园、文档、VPN 等工具 |
+| `@miunerofrade/seudaily-python` | Python wheel，以及基础、browser、documents、summary、asr、media 的锁定 hash 清单 | 首次调用 Python 工具先准备基础环境，其余依赖在功能内部首次实际使用时安装 |
 | `@miunerofrade/seudaily-browser` | 合并后的 MCP 服务与固定 Playwright core 依赖 | 通用浏览器工具 |
 
 构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。内置 CLI 也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
@@ -34,7 +34,15 @@ npm 发布后，基础包安装提供 `seudaily` 命令。三个可选组件已�
 
 CLI 不下载、不写入组件缓存。可选组件按当前应用版本安装至私有缓存，用目录锁避免重复安装，npm 校验包 integrity，禁用安装脚本；下载/安装完成后原子发布目录。失败目录清理后可重试。Python 环境先安装锁定 wheel 和 hash 清单，再写就绪标记，不把半成品交给 worker。uv 0.11.1 的下载 URL 和 SHA256 已固定，保留 MIT/Apache 许可证，不修改全局 uv、Python 或 Shell 配置。
 
-Python 与 Node Playwright 同为 1.63.0，共享浏览器缓存。浏览器引擎直到实际浏览器操作时才准备；Windows 默认已有 Edge。官方 PDF 导出成功时不安装视频提取依赖；确实落到视频幻灯片提取时才准备媒体 extras。FFmpeg 与 Linux 浏览器系统库仍是外部系统依赖。本地 ASR 尚不可用。
+Python 基础环境只有 httpx、cryptography、tzdata 及其传递依赖；worker 导入、VPN、课表及培养方案 HTTP 路径不加载 Playwright、文档库或模型 SDK。文档解析、课程摘要/语义 Focus、云端 ASR、视频幻灯片提取分别准备 documents、summary、asr、media。Python 浏览器兜底在实际调用时准备 browser，包含 Playwright 驱动；通用浏览器工具由独立 browser npm 包提供。两个驱动仍各自属于对应语言的调用端，版本同为 1.63.0，共享一份所选浏览器引擎缓存。Windows 默认已有 Edge，不另下载浏览器。官方 PDF 导出成功时不安装视频提取依赖。FFmpeg 与 Linux 浏览器系统库仍是外部系统依赖。本地 ASR 尚不可用。
+
+分包控制代码下载，extras 控制 Python 运行依赖安装；清单随 Python 包一起下载，但不会因此安装所有清单。开发环境默认也不安装重依赖，按需执行 `uv sync --extra documents` 或 `uv sync --extra browser`；测试使用独立 `test` 依赖组。升级不主动卸载用户已经准备的可选能力。
+
+四个 npm 包是当前的代码分发渠道，不是按需安装的必要条件。也可以把小型工具代码放入主包，把较大的可选组件改为版本化的 Release 下载资源。第三方 Python 库仍由 uv 从 PyPI 下载，浏览器引擎由 Playwright 从其下载源获取，VPN 核心来自上游 GitHub Release；这些资源不会因为合并 npm 包而消失。当前发布结构保持四包。
+
+准备提示覆盖组件下载、uv、Python/虚拟环境、各可选依赖、浏览器引擎及 VPN 核心。TUI 保留阶段消息并在底栏显示当前准备状态；Web 显示准备浮层，完成提示自动收起，失败提示可关闭。Web 组件下载发生在网页可用前，因此显示在启动终端。各功能分别维护准备状态，文档安装失败不会被当成 VPN 基础环境失败。
+
+浏览器工具发现只使用主包内的工具元数据，不下载组件或启动 MCP；实际执行工具时才准备浏览器服务及引擎。元数据由 `node scripts/update-browser-catalog.mjs` 从固定版本 MCP 生成，浏览器验收会比对实际服务的参数及说明。
 
 VPN 核心继续独立按需下载；源代码/AGPL 说明见 [VPN 许可证记录](licensing-vpn.md)。
 
@@ -66,7 +74,7 @@ npm run build
 npm run test:agent
 npm run test:distribution
 node --import tsx --test tests/*.mjs
-uv run pytest -q
+uv run --group test pytest -q
 node scripts/build-fixtures.mjs
 python3 scripts/validate-terminal.py --python
 python3 scripts/validate-terminal.py --browser-only

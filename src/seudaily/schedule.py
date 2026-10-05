@@ -12,9 +12,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
 from .browser_runtime import browser_runtime
 from .campus_auth import CampusAuthError, CampusSession
 from .cancellation import TaskCancelledError
@@ -40,7 +37,7 @@ SCHEDULE_DATA_URL = (
 )
 
 
-class _SchedulePageLoadTimeout(PlaywrightTimeoutError):
+class _SchedulePageLoadTimeout(TimeoutError):
     """The timetable has not initialized its current semester yet."""
 
 
@@ -180,6 +177,9 @@ class ScheduleService:
                     return error.result()
                 # Keep the visible login entry for CAPTCHA and other interactive checks.
                 pass
+        from .optional_runtime import ensure_dependencies
+        ensure_dependencies("browser")
+        from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
         with self._page(
             visible=True, load_saved_cookies=not reset_session
         ) as page:
@@ -317,6 +317,7 @@ class ScheduleService:
         *,
         include_available_semesters: bool = False,
     ) -> dict[str, Any]:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         label = page.locator("#dqxnxq2")
         try:
             page.wait_for_function(
@@ -1127,6 +1128,9 @@ class ScheduleService:
                         return api_result
             except CampusAuthError as error:
                 return error.result()
+        from .optional_runtime import ensure_dependencies
+        ensure_dependencies("browser")
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         payloads: list[tuple[str, Any]] = []
         with self._page(visible=False) as page:
             def collect(response) -> None:

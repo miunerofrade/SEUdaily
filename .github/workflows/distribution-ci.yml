@@ -46,19 +46,19 @@ jobs:
           python-version: ${{ matrix.runtime.python }}
           enable-cache: true
       - run: npm ci
-      - run: uv sync --frozen
+      - run: uv sync --frozen --group test
       - run: npm run typecheck
       - run: npm run build
       - name: Node regression and isolated npm installation
         timeout-minutes: 8
         run: node --import tsx --test --test-timeout=240000 tests/*.mjs
       - name: Python regression
-        run: uv run pytest -q
+        run: uv run --group test pytest -q
       - name: Build fixed terminal/browser fixtures
         run: node scripts/build-fixtures.mjs
       - name: POSIX terminal input, cancellation and exit
         if: runner.os != 'Windows'
-        run: uv run python scripts/validate-terminal.py --python
+        run: uv run --group test python scripts/validate-terminal.py --python
       - name: Windows ConPTY input, attachment and exit
         if: runner.os == 'Windows'
         # ConPTY's native test driver is independent of the product's Python worker.

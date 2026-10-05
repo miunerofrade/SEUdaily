@@ -259,12 +259,16 @@ seudaily import-data /path/to/old/SEUdaily
 | --- | --- |
 | `seudaily` | 公共名称；内置 CLI、共享后端、Agent 与会话存储 |
 | `@miunerofrade/seudaily-web` | 按需安装的 Web 静态页面 |
-| `@miunerofrade/seudaily-python` | 校园、文档、VPN 管理的 Python 代码与依赖清单 |
+| `@miunerofrade/seudaily-python` | 校园、VPN 和可选工具的 Python 代码，以及各功能独立的依赖清单 |
 | `@miunerofrade/seudaily-browser` | 按需安装的浏览器自动化服务与驱动 |
 
 工具首次使用时优先复用已有 uv 0.11.1+ 和 Python 3.11+，缺少时自动下载。依赖安装在应用专用虚拟环境。Python 3.11、3.12、3.13 均有 CI 验证。
 
-浏览器引擎按需安装，Python 与 Node 的 Playwright 版本和缓存统一。Windows 默认使用已有 Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Linux 浏览器所需系统库按安装提示准备；媒体处理使用系统 FFmpeg。视频幻灯片提取依赖按需安装，语音转写使用云端 ASR。
+校园 HTTP 查询和 VPN 只安装基础 HTTP、认证及时区依赖。首次解析 PDF/Office 文档时安装文档库；首次使用课程摘要、云端转写或视频幻灯片提取时分别安装对应依赖。图片附件直接发送给模型，不触发文档或浏览器安装。
+
+准备过程中，终端和 Web 会显示当前下载、安装阶段，以及完成或失败结果；已准备的依赖直接复用。Web 界面组件安装发生在网页打开前，进度显示在启动终端中。
+
+通用浏览器工具按需安装浏览器服务；校园业务只有实际进入浏览器登录或页面兜底时才安装 Python Playwright。两端版本一致，共享浏览器引擎缓存。Windows 默认使用已有 Edge，macOS 使用 Playwright WebKit，Linux 使用 Playwright Firefox。Linux 浏览器所需系统库按安装提示准备；媒体处理使用系统 FFmpeg。
 
 ## 从源码开发
 

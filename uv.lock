@@ -1592,22 +1592,27 @@ wheels = [
 
 [[package]]
 name = "seudaily-core"
-version = "1.1.4"
+version = "1.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
-    { name = "dashscope" },
     { name = "httpx" },
-    { name = "openai" },
-    { name = "openpyxl" },
-    { name = "playwright" },
-    { name = "pypdfium2" },
-    { name = "python-docx" },
-    { name = "python-pptx" },
     { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
+asr = [
+    { name = "dashscope" },
+]
+browser = [
+    { name = "playwright" },
+]
+documents = [
+    { name = "openpyxl" },
+    { name = "pypdfium2" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
+]
 media = [
     { name = "img2pdf" },
     { name = "numpy" },
@@ -1618,35 +1623,58 @@ ppt = [
     { name = "numpy" },
     { name = "opencv-python" },
 ]
+summary = [
+    { name = "openai" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
 ]
+test = [
+    { name = "dashscope" },
+    { name = "openai" },
+    { name = "openpyxl" },
+    { name = "playwright" },
+    { name = "pypdfium2" },
+    { name = "pytest" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.6" },
-    { name = "dashscope", specifier = ">=1.25.15" },
+    { name = "dashscope", marker = "extra == 'asr'", specifier = ">=1.25.15" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "img2pdf", marker = "extra == 'media'", specifier = ">=0.6.3" },
     { name = "img2pdf", marker = "extra == 'ppt'", specifier = ">=0.6.3" },
     { name = "numpy", marker = "extra == 'media'", specifier = ">=2.4.3" },
     { name = "numpy", marker = "extra == 'ppt'", specifier = ">=2.4.3" },
-    { name = "openai", specifier = ">=2.30.0" },
+    { name = "openai", marker = "extra == 'summary'", specifier = ">=2.30.0" },
     { name = "opencv-python", marker = "extra == 'media'", specifier = ">=4.13.0.92" },
     { name = "opencv-python", marker = "extra == 'ppt'", specifier = ">=4.13.0.92" },
-    { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "playwright", specifier = "==1.63.0" },
-    { name = "pypdfium2", specifier = ">=5.13.0" },
-    { name = "python-docx", specifier = ">=1.2.0" },
-    { name = "python-pptx", specifier = ">=1.0.2" },
+    { name = "openpyxl", marker = "extra == 'documents'", specifier = ">=3.1.5" },
+    { name = "playwright", marker = "extra == 'browser'", specifier = "==1.63.0" },
+    { name = "pypdfium2", marker = "extra == 'documents'", specifier = ">=5.13.0" },
+    { name = "python-docx", marker = "extra == 'documents'", specifier = ">=1.2.0" },
+    { name = "python-pptx", marker = "extra == 'documents'", specifier = ">=1.0.2" },
     { name = "tzdata", specifier = ">=2025.2" },
 ]
-provides-extras = ["ppt", "media"]
+provides-extras = ["browser", "documents", "summary", "asr", "ppt", "media"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.0" }]
+test = [
+    { name = "dashscope", specifier = ">=1.25.15" },
+    { name = "openai", specifier = ">=2.30.0" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
+    { name = "playwright", specifier = "==1.63.0" },
+    { name = "pypdfium2", specifier = ">=5.13.0" },
+    { name = "pytest", specifier = ">=8.4.0" },
+    { name = "python-docx", specifier = ">=1.2.0" },
+    { name = "python-pptx", specifier = ">=1.0.2" },
+]
 
 [[package]]
 name = "sniffio"

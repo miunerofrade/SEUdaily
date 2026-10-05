@@ -52,7 +52,10 @@ export async function ensureComponent(name: Component): Promise<string> {
     const temporary = `${target}.install-${process.pid}`;
     await rm(temporary, { recursive: true, force: true });
     await mkdir(temporary, { recursive: true });
-    console.error(`正在准备 ${name} 组件…`);
+    const label = { web: 'Web 界面', python: '校园工具代码', browser: '浏览器自动化服务' }[name];
+    const message = `首次使用，正在下载并安装${label}组件…`;
+    console.error(message);
+    if (name !== 'web') setPreparation(name === 'browser' ? 'browser' : 'python', 'preparing', message);
     try {
       const npm = await npmCommand();
       await exec(npm.command, [...npm.args, 'install', '--prefix', temporary, '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--package-lock=true', `${packageName}@${VERSION}`], { timeout: 10 * 60_000, maxBuffer: 2 * 1024 * 1024 });
@@ -63,10 +66,11 @@ export async function ensureComponent(name: Component): Promise<string> {
       await writeFile(join(temporary, 'ready.json'), JSON.stringify({ version: VERSION }), { mode: 0o600 });
       await rm(target, { recursive: true, force: true });
       await rename(temporary, target);
+      console.error(`${label}组件已就绪`);
       return installed;
     } catch (error) {
       await rm(temporary, { recursive: true, force: true });
-      throw new Error(`${name} 组件准备失败，可重试：${(error as Error).message}`);
+      throw new Error(`${label}组件准备失败，可重试：${(error as Error).message}`);
     }
   } finally { await release(); }
 }
@@ -104,6 +108,7 @@ export async function ensureUv(): Promise<string> {
     if (!family || !['x64', 'arm64'].includes(process.arch)) throw new Error('当前平台尚不支持自动准备 uv');
     const wheel = uvRelease.files.find(file => file.filename.includes(family) && file.filename.endsWith(`${architecture}.whl`));
     if (!wheel) throw new Error('没有对应平台的 uv 构建');
+    setPreparation('python', 'preparing', '未找到可用 uv，正在下载并安装依赖管理工具…');
     const download = await fetch(wheel.url, { signal: AbortSignal.timeout(120_000) });
     if (!download.ok) throw new Error(`uv 下载失败（${download.status}）`);
     const bytes = new Uint8Array(await download.arrayBuffer());
@@ -117,24 +122,25 @@ export async function ensureUv(): Promise<string> {
     await writeFile(`${executable}.tmp`, binary, { mode: 0o700 });
     await chmod(`${executable}.tmp`, 0o700);
     await rename(`${executable}.tmp`, executable);
+    setPreparation('python', 'preparing', 'uv 已就绪，继续准备 Python 环境…');
     return executable;
   } finally { await release(); }
 }
 let pythonLoading: Promise<string> | undefined;
-let pythonPreparation = { state: 'idle', message: '', startedAt: 0 };
-let browserPreparation = { state: 'idle', message: '', startedAt: 0 };
+type PreparationKind = 'python' | 'browser' | 'documents' | 'summary' | 'asr' | 'media' | 'vpn';
+const preparations = Object.fromEntries(['python', 'browser', 'documents', 'summary', 'asr', 'media', 'vpn'].map(name => [name, { state: 'idle', message: '', startedAt: 0 }])) as Record<PreparationKind, {state: string; message: string; startedAt: number}>;
 let preparationSequence = 0;
 const preparationEvents: { id: number; name: string; state: string; message: string }[] = [];
-export function setPreparation(name: 'python' | 'browser', state: string, message: string) {
-  const previous = name === 'python' ? pythonPreparation : browserPreparation;
+export function setPreparation(name: PreparationKind, state: string, message: string) {
+  const previous = preparations[name];
   const next = { state, message, startedAt: previous.state !== 'preparing' && state === 'preparing' ? Date.now() : previous.startedAt };
-  if (name === 'python') pythonPreparation = next; else browserPreparation = next;
+  preparations[name] = next;
   if (state !== previous.state || message !== previous.message) {
     preparationEvents.push({ id: ++preparationSequence, name, state, message });
     if (preparationEvents.length > 30) preparationEvents.shift();
   }
 }
-export function preparationStatus() { return { python: { ...pythonPreparation }, browser: { ...browserPreparation }, events: [...preparationEvents] }; }
+export function preparationStatus() { return { ...preparations, events: [...preparationEvents] }; }
 export function ensurePython(): Promise<string> {
   if (!pythonLoading) {
     setPreparation('python', 'preparing', '正在准备校园工具运行环境（首次使用需要下载依赖）');
@@ -143,7 +149,7 @@ export function ensurePython(): Promise<string> {
     }).catch(error => {
       pythonLoading = undefined;
       const detail = error.killed ? '下载或安装超过 10 分钟，请检查网络后重试' : String(error.stderr || error.message).trim().split('\n').slice(-6).join('\n');
-      const message = `校园工具运行环境准备失败（${pythonPreparation.message.replace(/…$/, '')}）：${detail}`;
+      const message = `校园工具运行环境准备失败（${preparations.python.message.replace(/…$/, '')}）：${detail}`;
       setPreparation('python', 'failed', message);
       throw new Error(message);
     });
@@ -155,6 +161,7 @@ async function preparePython(): Promise<string> {
   setPreparation('python', 'preparing', '正在检查或下载 Python 工具组件…');
   const component = await ensureComponent('python');
   process.env.SEUDAILY_MEDIA_REQUIREMENTS = join(component, 'media-requirements.txt');
+  process.env.SEUDAILY_OPTIONAL_REQUIREMENTS_DIR = component;
   process.env.UV_CACHE_DIR ??= join(cacheRoot(), 'uv-cache');
   const directory = join(cacheRoot(), 'python', VERSION);
   const executable = join(directory, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
@@ -172,7 +179,7 @@ async function preparePython(): Promise<string> {
 
     process.env.SEUDAILY_UV_BINARY = uv;
     const environment = process.env;
-    console.error('正在准备校园与文档工具运行环境…');
+    console.error('正在准备基础校园 HTTP 运行环境…');
     try {
       // The final venv path must be used when creating it: scripts contain absolute paths.
       await rm(directory, { recursive: true, force: true });
@@ -194,7 +201,7 @@ async function preparePython(): Promise<string> {
       if (!wheel) throw new Error('Python 组件缺少 wheel');
       setPreparation('python', 'preparing', '正在安装校园工具…');
       await exec(uv, ['pip', 'install', '--python', executable, '--no-deps', join(component, wheel)], { env: environment, timeout: 10 * 60_000 });
-      setPreparation('python', 'preparing', '正在下载并安装 Python 依赖（含 Playwright）…');
+      setPreparation('python', 'preparing', '正在下载并安装基础校园 HTTP 依赖…');
       await exec(uv, ['pip', 'install', '--python', executable, '--require-hashes', '-r', join(component, 'requirements.txt')], { env: environment, timeout: 10 * 60_000, maxBuffer: 2 * 1024 * 1024 });
       await writeFile(join(directory, 'ready.json'), JSON.stringify({ version: VERSION }), { mode: 0o600 });
       return executable;

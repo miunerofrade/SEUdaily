@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { browserChildEnvironment } from '../../src/runtime/tools/browser-config.js';
+import browserCatalog from '../../src/runtime/tools/browser-catalog.json' with { type: 'json' };
 
 export async function run() {
 const snapshotText = async (result: any) => {
@@ -25,6 +26,12 @@ let errors = ''; transport.stderr?.on('data', data => { errors += data.toString(
 try {
   await client.connect(transport, { timeout: 30000 });
   const tools = (await client.listTools()).tools;
+  for (const saved of browserCatalog) {
+    const actual = tools.find(tool => tool.name === saved.name);
+    assert.ok(actual, `browser catalog tool missing: ${saved.name}`);
+    assert.deepEqual(actual.inputSchema, saved.inputSchema);
+    assert.equal(actual.description, saved.description);
+  }
   assert.ok(tools.some(tool => tool.name === 'browser_navigate'));
   const navigate = await client.callTool({ name: 'browser_navigate', arguments: { url } });
   assert.ok(!navigate.isError, JSON.stringify(navigate));

@@ -134,6 +134,9 @@ def parse_document(path: str, filename: str | None = None) -> dict[str, Any]:
     if not source.is_file():
         raise FileNotFoundError(f"文档不存在：{source}")
 
+    from .optional_runtime import ensure_dependencies
+    ensure_dependencies("documents")
+
     parsers = {
         ".pdf": _parse_pdf,
         ".docx": _parse_docx,

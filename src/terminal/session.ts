@@ -155,7 +155,7 @@ export class Session extends EventEmitter {
       this.preparationSequence = event.id;
       if (this.messages.at(-1)?.text !== event.message) this.show(event.message, event.state === 'failed' ? '错误' : '系统');
     }
-    const message = [state.python, state.browser].filter(item => item?.state === 'preparing').map(item => item.message).join(' · ');
+    const message = Object.entries(state).filter(([name, item]) => name !== 'events' && (item as any)?.state === 'preparing').map(([, item]) => (item as any).message).join(' · ');
     if (message !== this.preparationMessage) { this.preparationMessage = message; this.changed(); }
   }
   async pollVpn() {

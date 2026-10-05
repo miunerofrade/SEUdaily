@@ -61,6 +61,12 @@ export class PythonWorkerClient {
     child.stderr.on("data", (chunk: string) => {
       this.stderrTail = `${this.stderrTail}${chunk}`.slice(-16_000);
     });
+    createInterface({ input: child.stderr }).on('line', async line => {
+      const prefix = 'SEUDAILY_PREPARATION ';
+      if (!line.startsWith(prefix)) return;
+      const event = JSON.parse(line.slice(prefix.length));
+      (await import('../../distribution/components.js')).setPreparation(event.name, event.state, event.message);
+    });
     createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
     child.stdin.on("error", (error) => { if (this.child === child) this.failAll(error); });
     child.on("error", (error) => { if (this.child === child) this.failAll(error); });

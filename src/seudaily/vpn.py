@@ -135,6 +135,8 @@ def install_core() -> Path:
         if saved.get("version") == RELEASE and saved.get("binarySha256") == hashlib.sha256(binary.read_bytes()).hexdigest():
             _write_core_notices(directory)
             return binary
+    from .optional_runtime import preparation
+    preparation("preparing", "首次使用，正在下载并校验 VPN 核心…", name="vpn")
     opener = build_opener()
     api = f"https://api.github.com/repos/Mythologyli/zju-connect/releases/tags/{RELEASE}"
     with opener.open(Request(api, headers={"User-Agent": "SEUdaily"}), timeout=30) as response:
@@ -154,6 +156,7 @@ def install_core() -> Path:
     binary.chmod(0o700)
     provenance.write_text(json.dumps({"version": RELEASE, "source": asset["browser_download_url"], "sourceCommit": SOURCE_COMMIT, "binarySha256": hashlib.sha256(binary.read_bytes()).hexdigest()}))
     _write_core_notices(directory)
+    preparation("ready", "VPN 核心已就绪", name="vpn")
     return binary
 
 
@@ -446,7 +449,12 @@ class VpnManager:
     def _run_once(self):
         ready = False
         try:
-            binary = install_core()
+            try:
+                binary = install_core()
+            except Exception as error:
+                from .optional_runtime import preparation
+                preparation("failed", f"VPN 核心准备失败：{error}", name="vpn")
+                raise
             # Validate the public gateway certificate before using the core.
             with build_opener().open(SERVER + "/public/manifest", timeout=15) as response:
                 if json.load(response).get("code") != 0:

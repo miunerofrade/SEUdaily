@@ -10,6 +10,7 @@ import { defineTool, type ToolDefinition } from '../../agent/tool.js';
 import { envValue, projectRoot } from '../runtime-paths.js';
 import { isUnapprovedAccessEnabled } from '../permission-state.js';
 import { playwrightBrowserConfig, browserChildEnvironment } from './browser-config.js';
+import browserCatalog from './browser-catalog.json' with { type: 'json' };
 const allowed = new Set(['browser_find', 'browser_press_key', 'browser_type', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_select_option', 'browser_tabs']);
 const writes = new Set(['browser_click', 'browser_press_key', 'browser_select_option', 'browser_type']);
 type BrowserState = { transport?: StdioClientTransport; client?: Client; proxy?: string; loading?: Promise<Record<string, ToolDefinition>>; timer?: ReturnType<typeof setTimeout>; activeCalls: number };
@@ -52,9 +53,9 @@ async function connect(scope: string, state: BrowserState): Promise<Record<strin
             const id = `playwright_${tool.name}`;
             return [id, defineTool({ id, description: tool.description ?? tool.name, inputSchema: z.fromJSONSchema(tool.inputSchema as any), requireApproval: (_input, options) => !isUnapprovedAccessEnabled(options) && writes.has(tool.name), execute: async (args, options) => {
                         options.abortSignal?.throwIfAborted();
-                        const owner = String(options.requestContext?.get('seudailyThreadId') || 'shared');
+                        const owner = String(options.requestContext?.get('seudailyThreadId') || scope);
                         if (scope !== owner) {
-                            const owned = await getPlaywrightBrowserTools(owner);
+                            const owned = await connectedBrowserTools(owner);
                             return owned[id].execute(args, options);
                         }
                         clearTimeout(state.timer);
@@ -82,12 +83,27 @@ async function connect(scope: string, state: BrowserState): Promise<Record<strin
         throw error;
     }
 }
-export async function getPlaywrightBrowserTools(scope = 'shared'): Promise<Record<string, ToolDefinition>> {
+async function connectedBrowserTools(scope = 'shared'): Promise<Record<string, ToolDefinition>> {
     let state = browsers.get(scope);
     if (!state) { state = {activeCalls:0}; browsers.set(scope,state); }
-    if (state.client && state.proxy !== await campusProxy()) { await closeBrowserTools(scope); return getPlaywrightBrowserTools(scope); }
+    if (state.client && state.proxy !== await campusProxy()) { await closeBrowserTools(scope); return connectedBrowserTools(scope); }
     if (!state.loading) state.loading = connect(scope,state).catch(error => {state!.loading = undefined; throw error;});
     return state.loading;
+}
+// Generated from the pinned MCP version: discovering tools needs metadata, not a browser.
+export async function getPlaywrightBrowserTools(scope = 'shared'): Promise<Record<string, ToolDefinition>> {
+    return Object.fromEntries(browserCatalog.map(tool => {
+        const id = `playwright_${tool.name}`;
+        return [id, defineTool({ id, description: tool.description ?? tool.name,
+            inputSchema: z.fromJSONSchema(tool.inputSchema as any),
+            requireApproval: (_input, options) => !isUnapprovedAccessEnabled(options) && writes.has(tool.name),
+            execute: async (args, options) => {
+                options.abortSignal?.throwIfAborted();
+                const owner = String(options.requestContext?.get('seudailyThreadId') || scope);
+                const tools = await connectedBrowserTools(owner);
+                return tools[id].execute(args, options);
+            }, toModelOutput: output => ({ type: 'text', value: output.data.text }) })];
+    }));
 }
 export function isBrowserApprovalRequired(name: string) { return writes.has(name.replace(/^playwright_/, '')); }
 export async function closeBrowserTools(scope?: string) {

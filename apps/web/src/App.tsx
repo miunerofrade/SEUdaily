@@ -1,4 +1,5 @@
 import { MAX_ATTACHMENTS } from "../../../src/shared/attachment-limits";
+import { RuntimePreparationNotice } from './runtime-preparation';
 import { CampusSmsDialog } from "./campus-sms";
 import { useVpn, VpnPanel, VpnLicense } from './vpn-panel';
 import { useRamDisk } from './ramdisk';
@@ -1584,6 +1585,7 @@ export default function App() {
         <div className="inspector-footer"><span>课程凭据不会发送到对话内容中</span><VpnLicense /></div>
       </aside>
       {previewImage && attachmentSource(previewImage) && <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }}><div className="image-preview-dialog" role="dialog" aria-modal="true" aria-label="图片预览"><button type="button" className="preview-close" aria-label="关闭预览" onClick={() => setPreviewImage(null)}><X size={19} /></button><img src={attachmentSource(previewImage)} alt={previewImage.name} /></div></div>}
+      <RuntimePreparationNotice />
       {deleteTarget && (
         <div
           className="confirm-overlay"

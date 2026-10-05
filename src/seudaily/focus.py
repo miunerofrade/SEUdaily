@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from openai import OpenAI
+from .optional_runtime import openai_client as OpenAI
 
 from .jwc import JWC_CATEGORIES, JwcService
 from .runtime_paths import env_value

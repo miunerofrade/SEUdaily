@@ -3,13 +3,21 @@ from __future__ import annotations
 import atexit
 import sys
 import os
-import subprocess
 from pathlib import Path
 import threading
 from contextlib import contextmanager, suppress
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
-from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+if TYPE_CHECKING:
+    from playwright.sync_api import Browser, BrowserContext, Page, Playwright
+
+from .optional_runtime import ensure_dependencies, preparation, run_install
+
+
+def sync_playwright():
+    ensure_dependencies("browser")
+    from playwright.sync_api import sync_playwright as start
+    return start()
 
 from .runtime_paths import env_value
 from .vpn import campus_proxy
@@ -32,7 +40,13 @@ def launch_browser(playwright: Playwright, *, visible: bool) -> Browser:
     if os.environ.get("SEUDAILY_INSTALL_ROOT") and backend != "msedge":
         executable = Path(getattr(playwright, backend).executable_path)
         if not executable.exists():
-            subprocess.run([sys.executable, "-m", "playwright", "install", backend], check=True, timeout=600)
+            preparation("preparing", f"正在下载并安装 {backend} 浏览器…", name="browser")
+            try:
+                run_install([sys.executable, "-m", "playwright", "install", backend])
+                preparation("ready", "浏览器运行环境已就绪", name="browser")
+            except Exception as error:
+                preparation("failed", f"浏览器安装失败：{error}", name="browser")
+                raise
     options: dict[str, Any] = {"headless": not visible}
     if backend in {"msedge", "chromium"}:
         options["args"] = ["--disable-blink-features=AutomationControlled", "--mute-audio"]

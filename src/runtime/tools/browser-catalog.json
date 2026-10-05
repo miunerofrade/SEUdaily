@@ -1,0 +1,278 @@
+[
+  {
+    "name": "browser_find",
+    "description": "Search the accessibility snapshot of the current page for text or a regular expression. Returns matching snapshot nodes with a few lines of surrounding context (like search snippets), each shown under its path from the root of the tree, which is cheaper than capturing the whole snapshot when you only need to locate an element and its ref.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "Plain text to search for in the page snapshot (case-insensitive substring match). Provide either text or regex, not both.",
+          "type": "string"
+        },
+        "regex": {
+          "description": "Regular expression to search for in the page snapshot. Matching is case-sensitive by default; wrap the pattern in slashes to add flags, e.g. \"/error/i\" for case-insensitive. Provide either text or regex, not both.",
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Find in page snapshot",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_press_key",
+    "description": "Press a key on the keyboard",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Name of the key to press or a character to generate, such as `ArrowLeft` or `a`"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Press a key",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_type",
+    "description": "Type text into editable element",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "element": {
+          "description": "Human-readable element description used to obtain permission to interact with the element",
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "Exact target element reference from the page snapshot, or a unique element selector"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to type into the element"
+        },
+        "submit": {
+          "description": "Whether to submit entered text (press Enter after)",
+          "type": "boolean"
+        },
+        "slowly": {
+          "description": "Whether to type one character at a time. Useful for triggering key handlers in the page. By default entire text is filled in at once.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "target",
+        "text"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Type text",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_navigate",
+    "description": "Navigate to a URL",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The URL to navigate to"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Navigate to a URL",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_snapshot",
+    "description": "Capture accessibility snapshot of the current page, this is better than screenshot",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Exact target element reference from the page snapshot, or a unique element selector",
+          "type": "string"
+        },
+        "filename": {
+          "description": "Save snapshot to a file instead of returning it in the response. Relative file names are resolved against the workspace root.",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Limit the depth of the snapshot tree",
+          "type": "number"
+        },
+        "boxes": {
+          "description": "Include each element's bounding box as [box=x,y,width,height] in the snapshot. Coordinates are viewport-relative, in CSS pixels (Element.getBoundingClientRect)",
+          "type": "boolean"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Page snapshot",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_click",
+    "description": "Perform click on a web page",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "element": {
+          "description": "Human-readable element description used to obtain permission to interact with the element",
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "Exact target element reference from the page snapshot, or a unique element selector"
+        },
+        "doubleClick": {
+          "description": "Whether to perform a double click instead of a single click",
+          "type": "boolean"
+        },
+        "button": {
+          "description": "Button to click, defaults to left",
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ]
+        },
+        "modifiers": {
+          "description": "Modifier keys to press",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Alt",
+              "Control",
+              "ControlOrMeta",
+              "Meta",
+              "Shift"
+            ]
+          }
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Click",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_select_option",
+    "description": "Select an option in a dropdown",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "element": {
+          "description": "Human-readable element description used to obtain permission to interact with the element",
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "Exact target element reference from the page snapshot, or a unique element selector"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Array of values to select in the dropdown. This can be a single value or multiple values."
+        }
+      },
+      "required": [
+        "target",
+        "values"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Select option",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "browser_tabs",
+    "description": "List, create, close, or select a browser tab.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "new",
+            "close",
+            "select"
+          ],
+          "description": "Operation to perform"
+        },
+        "index": {
+          "description": "Tab index, used for close/select. If omitted for close, current tab is closed.",
+          "type": "number"
+        },
+        "url": {
+          "description": "URL to navigate to in the new tab, used for new.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "title": "Manage tabs",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  }
+]
