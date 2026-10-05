@@ -24,6 +24,11 @@ export async function acquireLock(path: string, waitMs = 0): Promise<() => Promi
   } finally { await rm(candidate, { recursive: true, force: true }); }
   return async () => {
     const owner = JSON.parse(await readFile(`${path}/owner.json`, 'utf8').catch(() => '{}'));
-    if (owner.token === token) await rm(path, { recursive: true, force: true });
+    if (owner.token === token) {
+      // Release the shared name atomically; recursive deletion must not race
+      // with another process placing its new owner file into that directory.
+      await rename(path, candidate);
+      await rm(candidate, { recursive: true, force: true });
+    }
   };
 }
