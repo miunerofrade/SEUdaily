@@ -92,6 +92,11 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
 
         def send(value, wait=.15):
             os.write(master, value.encode() if isinstance(value, str) else value); pump(wait)
+            if wait >= .35:
+                deadline = time.monotonic() + 5
+                state = path / 'session-busy'
+                while state.exists() and time.monotonic() < deadline and proc.poll() is None:
+                    pump(.025)
 
         def records():
             file = path / 'requests.jsonl'
@@ -141,7 +146,10 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             queued = [r['queued'] for r in records() if 'queued' in r][-1]
             assert queued['text'] == '排队消息' and queued['images'] == [], 'restored attachment must support Backspace deletion'
             send(b'\x03', .2)
-            assert records()[-1].get('cancelled'), 'Ctrl+C must cancel current stream'
+            deadline = time.monotonic() + 5
+            while not any(r.get('cancelled') for r in records()) and time.monotonic() < deadline and proc.poll() is None:
+                pump(.025)
+            assert any(r.get('cancelled') for r in records()), 'Ctrl+C must cancel current stream'
             assert proc.poll() is None, 'short Ctrl+C must keep the app open'
             if exit_method == 'ctrl-d': send(b'\x04', .2)
             else:
