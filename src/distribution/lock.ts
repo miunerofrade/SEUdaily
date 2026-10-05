@@ -27,8 +27,17 @@ export async function acquireLock(path: string, waitMs = 0): Promise<() => Promi
     if (owner.token === token) {
       // Release the shared name atomically; recursive deletion must not race
       // with another process placing its new owner file into that directory.
-      await rename(path, candidate);
-      await rm(candidate, { recursive: true, force: true });
+      // Windows can briefly deny renaming a directory while another launcher
+      // reads owner.json. Keep ownership until the atomic rename succeeds.
+      const releaseDeadline = Date.now() + 5_000;
+      while (true) {
+        try { await rename(path, candidate); break; }
+        catch (error) {
+          if (!['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || Date.now() >= releaseDeadline) throw error;
+          await delay(100);
+        }
+      }
+      await rm(candidate, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   };
 }
