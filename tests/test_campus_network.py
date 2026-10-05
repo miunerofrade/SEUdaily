@@ -76,9 +76,9 @@ def test_campus_web_url_is_classified_and_false_suffix_is_not():
     assert network_category('read-web-page', {'url': 'https://seu.edu.cn.example.com'}, error) is None
 
 
-def test_notice_cache_warning_and_batch_failure_are_classified():
+def test_notice_cache_survives_public_network_failure_and_campus_batch_is_classified():
     result = {'status': 'completed', 'warnings': ['远端刷新失败，返回本地结果: <urlopen error timed out>']}
-    assert sanitize_campus_result('list-jwc', {}, result)['errorCode'] == CODE
+    assert sanitize_campus_result('list-jwc', {}, result) == result
     batch = {'status': 'partial', 'results': [{'status': 'failed', 'error': 'Page.goto: net::ERR_ADDRESS_UNREACHABLE at https://cvs.seu.edu.cn/'}]}
     assert sanitize_campus_result('capture-course-sessions', {}, batch)['message'] == MESSAGE
 
@@ -116,3 +116,9 @@ def test_cli_and_worker_emit_structured_network_failure_without_traceback(monkey
     assert response['result']['data']['errorCode'] == CODE
     assert worker_output.err == ''
     assert 'fixture' not in worker_output.out
+
+
+@pytest.mark.parametrize("action", ["list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article"])
+def test_public_notice_failures_do_not_require_campus_network(action):
+    error = RuntimeError("远端刷新失败 https://jwc.seu.edu.cn/: <urlopen error timed out>")
+    assert network_category(action, {}, error) is None

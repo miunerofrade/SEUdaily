@@ -378,7 +378,7 @@ def test_read_confirmed_attachment_uses_temp_and_cleans_up(
         )
         return real_parse_document(path, filename)
 
-    monkeypatch.setattr(jwc_module, "campus_opener", lambda: SimpleNamespace(open=fake_urlopen))
+    monkeypatch.setattr(jwc_module, "public_opener", lambda: SimpleNamespace(open=fake_urlopen))
     monkeypatch.setattr(jwc_module, "parse_document", tracking_parse)
 
     result = service.read_attachment(article_id)
@@ -444,7 +444,7 @@ def test_read_attachment_directly_from_notice_url(
     }
     monkeypatch.setattr(
         jwc_module,
-        "campus_opener",
+        "public_opener",
         lambda: SimpleNamespace(open=lambda request, timeout: _FakeDownload(pdf_bytes, attachment_url)),
     )
 
@@ -493,3 +493,38 @@ def test_search_queries_each_explicit_category_and_deduplicates(tmp_path: Path) 
     assert calls == ["academic", "lectures"]
     assert [item["id"] for item in result["results"]] == ["seu-jwc-1"]
     assert result["results"][0]["category"] == "academic"
+
+
+@pytest.mark.parametrize("service_class", [JwcService, CseService])
+def test_public_notices_bypass_campus_and_environment_proxies(tmp_path, monkeypatch, service_class):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import seudaily.vpn as vpn
+
+    monkeypatch.setattr(vpn, "campus_proxy", lambda: "http://127.0.0.1:1")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    paths = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            paths.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<html>Public notice</html>")
+        def log_message(self, *_args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        service = service_class(base_url=f"http://127.0.0.1:{server.server_port}", background_sync=False)
+        result = service._fetch(f"http://127.0.0.1:{server.server_port}/notices.htm")
+        assert "Public notice" in result["html"]
+        assert paths == ["/notices.htm"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

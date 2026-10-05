@@ -20,10 +20,14 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
-from urllib.request import HTTPCookieProcessor, Request
+from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
-from .vpn import campus_opener
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
+
+
+def public_opener(*handlers):
+    """Public notice sites use direct HTTP, independently of the campus VPN."""
+    return build_opener(ProxyHandler({}), *handlers)
 
 
 _ARTICLE_PATH = re.compile(
@@ -457,7 +461,7 @@ class JwcService:
                     "Referer": str(article.get("url") or self.base_url),
                 },
             )
-            with campus_opener().open(request, timeout=self.timeout_seconds) as response:
+            with public_opener().open(request, timeout=self.timeout_seconds) as response:
                 final_url = urlparse(response.geturl())
                 if (
                     final_url.scheme not in {"http", "https"}
@@ -738,7 +742,7 @@ class JwcService:
             headers["If-Modified-Since"] = validators["lastModified"]
         request = Request(url, headers=headers)
         try:
-            with campus_opener().open(request, timeout=self.timeout_seconds) as response:
+            with public_opener().open(request, timeout=self.timeout_seconds) as response:
                 raw = response.read()
                 encoding = response.headers.get_content_charset() or "utf-8"
                 return {
@@ -927,7 +931,7 @@ class JwcService:
             if category is not None
             else f"{self.base_url}/"
         )
-        opener = campus_opener(HTTPCookieProcessor())
+        opener = public_opener(HTTPCookieProcessor())
         headers = {"User-Agent": "Mozilla/5.0 (SEUdaily)", "Referer": list_url}
         with opener.open(Request(list_url, headers=headers), timeout=self.timeout_seconds) as response:
             encoding = response.headers.get_content_charset() or "utf-8"

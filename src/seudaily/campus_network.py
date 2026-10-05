@@ -16,8 +16,7 @@ CAMPUS_ACTIONS = frozenset({
     "authorize", "authorize-schedule", "get-schedule", "get-training-plan",
     "search-training-plans", "analyze-training-plan", "list-courses", "search-courses",
     "list-course-sessions", "find-course-session", "capture-course-session",
-    "capture-course-sessions", "list-dates", "capture-course", "list-jwc", "search-jwc",
-    "get-jwc-article", "list-cse", "search-cse", "get-cse-article", "run-focus-cycle",
+    "capture-course-sessions", "list-dates", "capture-course", "run-focus-cycle",
     "run-course-focus-queue",
 })
 _URL = re.compile(r'https?://[^\s<>"\']+', re.I)
@@ -44,6 +43,8 @@ def _campus_url(value: str) -> bool:
 
 
 def _campus_context(action: str, payload: dict[str, Any], message: str) -> bool:
+    if action in {"list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article"}:
+        return False  # Public notices do not require the campus network.
     urls = _URL.findall(message)
     if urls:
         return any(_campus_url(url) for url in urls) and all(_campus_url(url) for url in urls)
