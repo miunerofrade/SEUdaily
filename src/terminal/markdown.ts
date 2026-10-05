@@ -50,7 +50,7 @@ export function messageLines(
       }
     lines.push(row.length ? row : [{ text: " " }]);
   };
-  if (message.role !== "你" && message.role !== "SEUdaily")
+  if (!["你", "SEUdaily", "系统", "错误"].includes(message.role))
     append([{ text: message.role, role: message.role, bold: true }]);
   const source = clean(message.text).split("\n");
   for (let index = 0; index < source.length; index++) {

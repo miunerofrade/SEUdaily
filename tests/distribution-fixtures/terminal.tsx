@@ -14,7 +14,15 @@ export async function run() {
   const session = new Session({ command: 'chat' }, root);
   session.on('change', () => session.busy || session.queueActive ? writeFileSync(join(root, 'session-busy'), '') : rmSync(join(root, 'session-busy'), {force:true}));
   let queue: any[] = [];
+  let threads = [{id:session.threadId,resourceId:session.resource,title:'删除测试会话',updatedAt:'2026-10-05T00:00:00Z'}];
   session.client.json = async (path: string, _method?: string, body?: any) => {
+    if (path === '/app/runtime/preparation') return {python:{state:'ready'},events:[
+      {id:1,state:'preparing',message:'正在创建 Python 虚拟环境'},
+      {id:2,state:'preparing',message:'正在安装 Firefox 浏览器'},
+      {id:3,state:'ready',message:'运行环境准备完成'},
+    ]};
+    if (path.startsWith('/api/memory/threads?')) return {threads:path.includes('resourceId=seudaily-web-local')?threads:[]};
+    if (_method === 'DELETE' && !path.includes('/queue')) { threads=[]; record({deleted:true}); return {deleted:true}; }
     if (path.includes('/queue')) {
       if (_method === 'POST') { queue.push({id:String(queue.length+1),state:'pending',...body}); record({queued:body}); return {id:queue.at(-1).id}; }
       if (_method === 'DELETE') { const item = queue.pop(); record({taken:item.text}); return item; }

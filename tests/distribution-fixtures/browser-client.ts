@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { browserChildEnvironment } from '../../src/runtime/tools/browser-config.js';
 
 export async function run() {
 const snapshotText = async (result: any) => {
@@ -19,7 +20,7 @@ await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${(server.address() as any).port}`;
 const command = JSON.parse(process.env.PROBE_CHILD_COMMAND!);
 const client = new Client({ name: 'phase-one-fixture', version: '1' });
-const transport = new StdioClientTransport({ command: command[0], args: command.slice(1), env: process.env as Record<string, string>, stderr: 'pipe' });
+const transport = new StdioClientTransport({ command: command[0], args: command.slice(1), env: browserChildEnvironment(), stderr: 'pipe' });
 let errors = ''; transport.stderr?.on('data', data => { errors += data.toString(); });
 try {
   await client.connect(transport, { timeout: 30000 });

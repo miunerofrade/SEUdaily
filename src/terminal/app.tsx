@@ -271,7 +271,7 @@ export function App({ session, copy = copySelection }: {
     };
   }, [session]);
   useEffect(() => {
-    const poll = () => { void session.pollQueue().catch(() => {}); void session.pollVpn().catch(() => {}); };
+    const poll = () => { void session.pollQueue().catch(() => {}); void session.pollPreparation().catch(() => {}); void session.pollVpn().catch(() => {}); };
     poll(); const timer = setInterval(poll, 1000);
     return () => clearInterval(timer);
   }, [session]);
@@ -774,7 +774,7 @@ export function App({ session, copy = copySelection }: {
       wheel(Math.max(1, height - 1));
       return;
     }
-    if (decisions) return;
+    if (decisions || session.confirmation) return;
     if (key.ctrl && key.end) {
       setOffset(null);
       return;
@@ -1217,7 +1217,10 @@ export function App({ session, copy = copySelection }: {
               onChange={(value) => {
                 if (session.pending)
                   void run(value === "yes" ? "/approve" : "/reject");
-                else void run(value === "yes" ? "y" : "n");
+                else void session.decide(value === 'yes').catch(error => {
+                  session.status = error instanceof Error ? error.message : String(error);
+                  session.show(session.status, '错误');
+                });
               }}
             />
           </Box>
@@ -1535,6 +1538,7 @@ export function App({ session, copy = copySelection }: {
       )}
       <Box height={1} flexShrink={0} justifyContent="center">
         <Text color={color.muted} wrap="truncate">
+          {session.preparationMessage ? `${session.preparationMessage} · ` : session.vpnState ? `${session.vpnState} · ` : ''}
           {copyNotice || (selection?.moved
             ? (process.platform === "darwin"
                 ? "已选中 · ⌘C / Ctrl+C 复制 · Esc 取消"

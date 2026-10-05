@@ -121,11 +121,38 @@ export async function ensureUv(): Promise<string> {
   } finally { await release(); }
 }
 let pythonLoading: Promise<string> | undefined;
+let pythonPreparation = { state: 'idle', message: '', startedAt: 0 };
+let browserPreparation = { state: 'idle', message: '', startedAt: 0 };
+let preparationSequence = 0;
+const preparationEvents: { id: number; name: string; state: string; message: string }[] = [];
+export function setPreparation(name: 'python' | 'browser', state: string, message: string) {
+  const previous = name === 'python' ? pythonPreparation : browserPreparation;
+  const next = { state, message, startedAt: previous.state !== 'preparing' && state === 'preparing' ? Date.now() : previous.startedAt };
+  if (name === 'python') pythonPreparation = next; else browserPreparation = next;
+  if (state !== previous.state || message !== previous.message) {
+    preparationEvents.push({ id: ++preparationSequence, name, state, message });
+    if (preparationEvents.length > 30) preparationEvents.shift();
+  }
+}
+export function preparationStatus() { return { python: { ...pythonPreparation }, browser: { ...browserPreparation }, events: [...preparationEvents] }; }
 export function ensurePython(): Promise<string> {
-  return pythonLoading ??= preparePython().catch(error => { pythonLoading = undefined; throw error; });
+  if (!pythonLoading) {
+    setPreparation('python', 'preparing', '正在准备校园工具运行环境（首次使用需要下载依赖）');
+    pythonLoading = preparePython().then(executable => {
+      setPreparation('python', 'ready', '校园工具运行环境已就绪'); return executable;
+    }).catch(error => {
+      pythonLoading = undefined;
+      const detail = error.killed ? '下载或安装超过 10 分钟，请检查网络后重试' : String(error.stderr || error.message).trim().split('\n').slice(-6).join('\n');
+      const message = `校园工具运行环境准备失败（${pythonPreparation.message.replace(/…$/, '')}）：${detail}`;
+      setPreparation('python', 'failed', message);
+      throw new Error(message);
+    });
+  }
+  return pythonLoading;
 }
 async function preparePython(): Promise<string> {
   process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(cacheRoot(), 'browsers');
+  setPreparation('python', 'preparing', '正在检查或下载 Python 工具组件…');
   const component = await ensureComponent('python');
   process.env.SEUDAILY_MEDIA_REQUIREMENTS = join(component, 'media-requirements.txt');
   process.env.UV_CACHE_DIR ??= join(cacheRoot(), 'uv-cache');
@@ -151,6 +178,7 @@ async function preparePython(): Promise<string> {
       await rm(directory, { recursive: true, force: true });
       await mkdir(directory, { recursive: true });
       let interpreter: string;
+      setPreparation('python', 'preparing', '正在查找可用的 Python 解释器…');
       try {
         const found = await execute(uv, ['python', 'find', '--no-config', '--no-project', '--system', '--no-python-downloads', '>=3.11'], { env: environment, timeout: 30_000, windowsHide: true });
         interpreter = found.stdout.trim();
@@ -158,11 +186,15 @@ async function preparePython(): Promise<string> {
         // No compatible interpreter exists: keep the downloaded runtime in our cache.
         environment.UV_PYTHON_INSTALL_DIR ??= join(cacheRoot(), 'python-runtime');
         interpreter = '3.13';
+        setPreparation('python', 'preparing', '正在下载 Python 3.13 并创建虚拟环境…');
       }
+      if (interpreter !== '3.13') setPreparation('python', 'preparing', '正在使用已有 Python 创建虚拟环境…');
       await exec(uv, ['venv', '--python', interpreter, join(directory, 'venv')], { env: environment, timeout: 10 * 60_000 });
       const wheel = (await readdir(component)).find(file => file.endsWith('.whl'));
       if (!wheel) throw new Error('Python 组件缺少 wheel');
+      setPreparation('python', 'preparing', '正在安装校园工具…');
       await exec(uv, ['pip', 'install', '--python', executable, '--no-deps', join(component, wheel)], { env: environment, timeout: 10 * 60_000 });
+      setPreparation('python', 'preparing', '正在下载并安装 Python 依赖（含 Playwright）…');
       await exec(uv, ['pip', 'install', '--python', executable, '--require-hashes', '-r', join(component, 'requirements.txt')], { env: environment, timeout: 10 * 60_000, maxBuffer: 2 * 1024 * 1024 });
       await writeFile(join(directory, 'ready.json'), JSON.stringify({ version: VERSION }), { mode: 0o600 });
       return executable;

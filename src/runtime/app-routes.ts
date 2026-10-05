@@ -337,6 +337,8 @@ function legacyEnvironmentName(name: string) {
 }
 
 export const appRoutes = [
+  registerApiRoute('/app/runtime/preparation', { method: 'GET', handler: async (c: any) =>
+    c.json((await import('../distribution/components.js')).preparationStatus()) }),
   registerApiRoute('/app/vpn', { method: 'GET', handler: async (c: any) => {
     const result = await runPythonTool<ToolResult>('vpn-status', {});
     return c.json(await fullResultData(result));

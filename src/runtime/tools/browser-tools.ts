@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { defineTool, type ToolDefinition } from '../../agent/tool.js';
 import { envValue, projectRoot } from '../runtime-paths.js';
 import { isUnapprovedAccessEnabled } from '../permission-state.js';
-import { playwrightBrowserConfig } from './browser-config.js';
+import { playwrightBrowserConfig, browserChildEnvironment } from './browser-config.js';
 const allowed = new Set(['browser_find', 'browser_press_key', 'browser_type', 'browser_navigate', 'browser_snapshot', 'browser_click', 'browser_select_option', 'browser_tabs']);
 const writes = new Set(['browser_click', 'browser_press_key', 'browser_select_option', 'browser_type']);
 type BrowserState = { transport?: StdioClientTransport; client?: Client; proxy?: string; loading?: Promise<Record<string, ToolDefinition>>; timer?: ReturnType<typeof setTimeout>; activeCalls: number };
@@ -27,9 +27,13 @@ async function connect(scope: string, state: BrowserState): Promise<Record<strin
     const configPath = resolve(outputDir, `playwright-${scope.replace(/[^a-zA-Z0-9-]/g, '_')}.json`);
     writeFileSync(configPath, JSON.stringify(playwrightBrowserConfig(process.platform, envValue('SEUDAILY_BROWSER'), state.proxy)));
     const managed = !!process.env.SEUDAILY_INSTALL_ROOT;
-    const entry = managed ? await (await import('../../distribution/browser-engine.js')).browserComponent() : resolve(projectRoot, 'node_modules', '@playwright', 'mcp', 'cli.js');
+    const engine = await import('../../distribution/browser-engine.js');
+    const entry = managed ? await engine.browserComponent(envValue('SEUDAILY_BROWSER')) : resolve(projectRoot, 'node_modules', '@playwright', 'mcp', 'cli.js');
+    if (!managed) await engine.prepareBrowserEngine(projectRoot, envValue('SEUDAILY_BROWSER'));
     const connection = new Client({ name: 'seudaily-playwright', version: '1.1.0' });
-    const transport = new StdioClientTransport({ command: process.execPath, cwd: projectRoot, stderr: 'pipe', args: managed ? [entry, configPath] : [entry, '--config', configPath, '--headless', '--isolated', '--block-service-workers', '--codegen', 'none', '--image-responses', 'omit', '--snapshot-mode', 'full', '--output-dir', outputDir] });
+    const transport = new StdioClientTransport({ command: process.execPath, cwd: projectRoot, stderr: 'pipe',
+        env: browserChildEnvironment(),
+        args: managed ? [entry, configPath] : [entry, '--config', configPath, '--headless', '--isolated', '--block-service-workers', '--codegen', 'none', '--image-responses', 'omit', '--snapshot-mode', 'full', '--output-dir', outputDir] });
     state.transport = transport;
     transport.stderr?.on('data', () => { });
     connection.onclose = () => { if (state.client === connection) { state.client = undefined; state.loading = undefined; } };

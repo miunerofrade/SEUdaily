@@ -145,9 +145,27 @@ export class Session extends EventEmitter {
   queueRunToken = '';
   private pollingQueue = false;
   vpnWatching = false;
-  private vpnState = '';
+  vpnState = '';
+  preparationMessage = '';
+  private preparationSequence = 0;
+  async pollPreparation() {
+    const state = await this.client.json('/app/runtime/preparation', 'GET', undefined, AbortSignal.timeout(4000));
+    for (const event of state.events ?? []) {
+      if (event.id <= this.preparationSequence) continue;
+      this.preparationSequence = event.id;
+      if (this.messages.at(-1)?.text !== event.message) this.show(event.message, event.state === 'failed' ? '错误' : '系统');
+    }
+    const message = [state.python, state.browser].filter(item => item?.state === 'preparing').map(item => item.message).join(' · ');
+    if (message !== this.preparationMessage) { this.preparationMessage = message; this.changed(); }
+  }
   async pollVpn() {
     if (!this.vpnWatching) return;
+    const preparation = (await this.client.json('/app/runtime/preparation', 'GET', undefined, AbortSignal.timeout(4000))).python;
+    if (preparation?.state === 'preparing') {
+      this.vpnState = 'VPN 等待运行环境准备'; this.changed();
+      return;
+    }
+    if (preparation?.state === 'failed') { this.vpnWatching = false; this.vpnState = 'VPN 未连接：工具环境准备失败'; this.changed(); return; }
     const result = await this.client.json('/app/vpn', 'GET', undefined, AbortSignal.timeout(4000));
     this.reportVpn(result);
   }
@@ -170,8 +188,13 @@ export class Session extends EventEmitter {
       this.queueProgress = state.progress?.text ?? '';
       this.queueRunToken = state.runToken ?? '';
       if (finished && !this.busy) {
+        const notices = this.messages.filter(message => !message.welcome && !['你', 'SEUdaily'].includes(message.role));
         this.messages = []; await this.history(100);
-        this.pending = (await this.client.json(this.path('run'), 'GET', undefined, AbortSignal.timeout(4000))).pending ?? null;
+        if (thread !== this.threadId || resource !== this.resource) return;
+        this.messages.push(...notices);
+        const run = await this.client.json(this.path('run'), 'GET', undefined, AbortSignal.timeout(4000));
+        if (thread !== this.threadId || resource !== this.resource) return;
+        this.pending = run.pending ?? null;
       }
       this.changed();
     } finally { this.pollingQueue = false; }
@@ -368,9 +391,11 @@ export class Session extends EventEmitter {
         this.usage[key] = (this.usage[key] ?? 0) + amount;
   }
   async history(count = 100) {
+    const thread = this.threadId, resource = this.resource;
     const result = await this.client.json(
       this.path("messages") + `&perPage=${count}&selectedPath=true`,
     );
+    if (thread !== this.threadId || resource !== this.resource) return;
     for (const m of result.messages ?? []) {
       if (m.content?.runToken)
         this.recordUsage(m.content.runToken, m.content.usage);
@@ -456,6 +481,7 @@ export class Session extends EventEmitter {
     this.page = "chat";
     this.threadId = selected.id;
     this.resource = selected.resourceId;
+    this.queueItems = []; this.queueActive = false; this.queueProgress = ''; this.queueRunToken = '';
     this.focusTarget = null;
     this.skills = [];
     this.documents = [];
@@ -629,6 +655,7 @@ export class Session extends EventEmitter {
     const confirmation = this.confirmation;
     if (!confirmation) return;
     this.confirmation = null;
+    this.status = '就绪';
     if (!approved) {
       this.show("已取消");
       return;
@@ -645,7 +672,12 @@ export class Session extends EventEmitter {
       const thread = confirmation.payload;
       await this.client.json(`/api/memory/threads/${encodeURIComponent(thread.id)}?resourceId=${encodeURIComponent(thread.resourceId ?? this.resource)}`, 'DELETE');
       this.threads = this.threads.filter(item => item.id !== thread.id);
-      if (this.threadId === thread.id) await this.command('/new');
+      if (this.threadId === thread.id) {
+        // The server has accepted deletion: detach any remaining client stream.
+        this.controller?.abort(); this.operation?.abort();
+        this.client.operationSignal = undefined;
+        await this.command('/new');
+      }
       this.show('会话已删除。');
       return;
     } else if (confirmation.kind === "schedule-start")
@@ -741,9 +773,19 @@ export class Session extends EventEmitter {
           this.result(await this.client.json('/app/vpn', 'POST', { action: 'verify', code: values.code })); this.show('已提交 VPN 验证');
         } }); return;
       }
-      const result = await this.client.json('/app/vpn', action === 'status' ? 'GET' : 'POST', action === 'status' ? undefined : { action, ...(args[1] ? { port: Number(args[1]) } : {}) });
-      if (action !== 'status') this.result(result);
-      this.vpnState = ''; this.reportVpn(result); return;
+      this.vpnState = action === 'connect' ? 'VPN 正在连接' : action === 'disconnect' ? 'VPN 正在断开' : 'VPN 正在查询';
+      this.vpnWatching = true;
+      this.show(action === 'connect' ? '正在连接 VPN…' : action === 'disconnect' ? '正在断开 VPN…' : '正在查询 VPN 状态…');
+      try {
+        const timeout = AbortSignal.timeout(15 * 60_000);
+        const signal = this.operation ? AbortSignal.any([this.operation.signal, timeout]) : timeout;
+        const result = await this.client.json('/app/vpn', action === 'status' ? 'GET' : 'POST', action === 'status' ? undefined : { action, ...(args[1] ? { port: Number(args[1]) } : {}) }, signal, 15 * 60);
+        this.vpnState = ''; this.reportVpn(result);
+        if (action !== 'status') this.result(result);
+      } catch (error) {
+        this.vpnWatching = false; this.vpnState = 'VPN 操作失败'; this.changed(); throw error;
+      }
+      return;
     }
     if (name === 'settings') { this.openForm(await settingsForm(this)); return; }
     if (name === 'semester') { await this.loadSchedule(); this.openForm(semesterForm(this)); return; }
@@ -788,6 +830,7 @@ export class Session extends EventEmitter {
       this.focusTarget = null; this.resource = RESOURCE;
       if (this.pending) this.show("原会话的待审批状态保留，可 /resume 恢复。");
       this.threadId = randomUUID();
+      this.queueItems = []; this.queueActive = false; this.queueProgress = ''; this.queueRunToken = '';
       this.usageByRun.clear();
       this.usage = {};
       this.resource = RESOURCE;
@@ -1063,6 +1106,13 @@ export class Session extends EventEmitter {
       await this.cancel();
       return 0;
     }
+    // Confirmation choices are UI actions, not prompts or input-history entries.
+    if (this.confirmation) { await this.decide(["y", "yes"].includes(text.toLowerCase())); return 0; }
+    // Browsing sessions must not be locked by a running model or another UI operation.
+    if (/^\/resume(?:\s|$)/.test(text)) {
+      if (this.controller && text.trim() !== '/resume') throw new Error('当前任务正在运行，请先取消。');
+      await this.command(text); return 0;
+    }
     if (text === "/thinking" || /^\/copy-on-select(?:\s|$)/.test(text)) {
       await this.command(text);
       return 0;
@@ -1079,10 +1129,6 @@ export class Session extends EventEmitter {
     this.changed();
     try {
       await this.recordInput(text);
-      if (this.confirmation) {
-        await this.decide(["y", "yes"].includes(text.toLowerCase()));
-        return 0;
-      }
       return (
         (text.startsWith("/")
           ? await this.command(text)

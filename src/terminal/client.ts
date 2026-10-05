@@ -14,9 +14,10 @@ export class Client {
     path: string,
     init: RequestInit = {},
     signal?: AbortSignal,
+    timeoutSeconds = this.timeout,
   ): Promise<any> {
     signal ??= this.operationSignal;
-    const timeout = AbortSignal.timeout(this.timeout * 1000);
+    const timeout = AbortSignal.timeout(timeoutSeconds * 1000);
     const response = await fetch(API + path, {
       ...init,
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -36,6 +37,7 @@ export class Client {
     method = "GET",
     body?: unknown,
     signal?: AbortSignal,
+    timeoutSeconds = this.timeout,
   ): Promise<any> {
     return (
       await this.request(
@@ -50,6 +52,7 @@ export class Client {
               }),
         },
         signal,
+        timeoutSeconds,
       )
     ).json();
   }

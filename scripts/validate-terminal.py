@@ -112,9 +112,17 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             send('/vpn')
             send(b'\r', .35)
             assert any(r.get('vpn') == {'action': 'connect'} for r in records()), '/vpn must connect without overriding the saved port'
+            assert '正在创建 Python 虚拟环境' in output.decode() and '正在安装 Firefox 浏览器' in output.decode(), 'preparation stages must be visible in the terminal'
             send('/vpn connect 11081')
             send(b'\r', .35)
             assert any(r.get('vpn') == {'action': 'connect', 'port': 11081} for r in records()), 'Enter must submit a completed VPN command'
+            send('/resume'); send(b'\r', .35)
+            send(b'\x1b[3~'); send(b'\x1b[B'); send(b'\r', .35)
+            assert any(r.get('deleted') for r in records()), 'session picker must delete the selected conversation'
+            send('/resume'); send(b'\r', .35); send(b'\x1b', .15)
+            assert '当前任务正在运行' not in output.decode(), 'deletion must not leave the session busy'
+            history = json.loads((path / '.seudaily/cli-history').read_text())
+            assert 'y' not in history, 'confirmation must not leak into prompt history'
             send('中文输入\r')
             assert not [r for r in records() if 'messages' in r], 'IME commit must stay in draft'
             send(b'\r', .35)

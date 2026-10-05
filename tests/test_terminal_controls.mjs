@@ -59,6 +59,33 @@ test('conversation deletion requires confirmation and removes the selected threa
  session.requestDeleteThread('other');assert.equal(calls.length,0);await session.decide(false);assert.equal(calls.length,0);
  session.requestDeleteThread('other');await session.decide(true);assert.equal(calls[0].method,'DELETE');assert.equal(session.threads.length,0);
 });
+test('deletion choices stay out of prompt history and session browsing is available while busy',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'seudaily-delete-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const session=new Session({command:'chat'},root);
+ const current={id:session.threadId,resourceId:session.resource,title:'current'};
+ session.threads=[current];session.client.threads=async()=>session.threads;
+ session.client.json=async()=>({});
+ session.queueActive=true;session.queueProgress='stale';session.queueItems=[{id:'old'}];
+ session.requestDeleteThread(current.id);await session.submit('y');
+ assert.notEqual(session.threadId,current.id);assert.equal(session.queueActive,false);assert.equal(session.queueItems.length,0);
+ assert.equal(session.inputHistory.includes('y'),false);assert.equal(session.status,'就绪');
+ session.busy=true;await session.submit('/resume');assert.equal(session.resumePickerRequested,1);
+});
+test('VPN feedback appears before the request completes and survives queue-history refresh',async()=>{
+ const session=new Session({command:'chat'},'/tmp');let finish;
+ session.client.json=async path=>path==='/app/vpn'?await new Promise(resolve=>{finish=resolve;}):path.includes('/queue')?{items:[],active:false}:path.includes('/messages')?{messages:[]}:{pending:null};
+ const connecting=session.command('/vpn');assert.match(session.messages.at(-1).text,/正在连接/);
+ finish({state:'connected'});await connecting;assert.equal(session.vpnState,'VPN 已连接');
+ session.queueItems=[{id:'done',state:'running'}];await session.pollQueue();
+ assert.equal(session.messages.at(-1).text,'VPN 已连接');
+});
+test('preparation polling retains quick intermediate stages without duplicating them',async()=>{
+ const session=new Session({command:'chat'},'/tmp');
+ session.client.json=async()=>({python:{state:'ready'},events:[{id:1,state:'preparing',message:'正在创建虚拟环境'},{id:2,state:'preparing',message:'正在安装 Python 依赖'},{id:3,state:'ready',message:'准备完成'}]});
+ await session.pollPreparation();await session.pollPreparation();
+ assert.deepEqual(session.messages.map(message=>message.text),['正在创建虚拟环境','正在安装 Python 依赖','准备完成']);
+ assert.equal(session.preparationMessage,'');
+});
 test('invalid model error points to settings without exposing provider details',async()=>{
  const {DeepSeekProvider}=await import('../src/agent/provider.ts');const original=globalThis.fetch;
  globalThis.fetch=async()=>new Response('Invalid model fixture-private-key',{status:400});

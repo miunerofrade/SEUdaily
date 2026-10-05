@@ -1,3 +1,6 @@
+export function browserChildEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return env.PLAYWRIGHT_BROWSERS_PATH ? { PLAYWRIGHT_BROWSERS_PATH: env.PLAYWRIGHT_BROWSERS_PATH } : {};
+}
 export function playwrightBrowserConfig(platform: NodeJS.Platform, configured = 'auto', proxy?: string) {
   let selected = configured.trim().toLowerCase() || 'auto';
   if (selected === 'auto') selected = platform === 'win32' ? 'msedge' : platform === 'darwin' ? 'webkit' : 'firefox';
