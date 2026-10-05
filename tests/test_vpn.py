@@ -141,3 +141,34 @@ def test_custom_proxy_port_is_saved_for_next_connection(tmp_path, monkeypatch):
     finally:
         manager.disconnect()
     assert vpn.VpnManager().status()['configuredPort'] == 12081
+
+
+def test_tunnel_probe_uses_proxy_connect_and_head_and_closes(monkeypatch):
+    manager = vpn.VpnManager()
+    manager.port = 12081
+    connection = MagicMock()
+    connection.getresponse.return_value.status = 200
+    factory = MagicMock(return_value=connection)
+    monkeypatch.setattr(vpn.http.client, 'HTTPSConnection', factory)
+    assert manager._probe_tunnel()
+    assert factory.call_args.args == ('127.0.0.1', 12081)
+    connection.set_tunnel.assert_called_once_with('cvs.seu.edu.cn', 443)
+    connection.request.assert_called_once_with('HEAD', '/', headers={'Connection': 'close'})
+    connection.close.assert_called_once()
+
+
+def test_tunnel_monitor_requires_consecutive_failures(monkeypatch):
+    manager = vpn.VpnManager()
+    monkeypatch.setattr(manager, '_probe_tunnel', MagicMock(side_effect=[False, False, True, False, False, False]))
+    for _ in range(5):
+        manager._check_tunnel()
+    with pytest.raises(RuntimeError, match='连续三次检查失败'):
+        manager._check_tunnel()
+
+
+def test_tunnel_probe_timeout_is_failure_and_closes(monkeypatch):
+    connection = MagicMock()
+    connection.request.side_effect = TimeoutError('unresponsive tunnel')
+    monkeypatch.setattr(vpn.http.client, 'HTTPSConnection', lambda *_args, **_kwargs: connection)
+    assert not vpn.VpnManager()._probe_tunnel()
+    connection.close.assert_called_once()

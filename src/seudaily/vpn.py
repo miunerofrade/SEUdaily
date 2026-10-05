@@ -25,6 +25,7 @@ from .runtime_paths import env_value
 from .subprocess_utils import hidden_process_options
 
 SERVER = "https://vpn.seu.edu.cn"
+PROBE_INTERVAL = 60
 RELEASE = "v1.3.1"
 SOURCE_COMMIT = "5d7f5b11fcf231f72a0ec0d888bf0f2eadcce1da"
 SOURCE_URL = f"https://github.com/Mythologyli/zju-connect/tree/{SOURCE_COMMIT}"
@@ -197,6 +198,7 @@ class VpnManager:
         self.state["configuredPort"] = self.configured_port
         self.port = 0
         self.sms_challenge = None
+        self.probe_failures = 0
 
     def _publish(self, state: str, message: str):
         with self.lock:
@@ -218,6 +220,23 @@ class VpnManager:
             state = dict(self.state)
             state["smsRetryAfter"] = max(0, int(61 - (time.monotonic() - self.sms_challenge.sent_at))) if self.sms_challenge else 0
             return state
+
+    def _probe_tunnel(self, timeout=5):
+        probe = http.client.HTTPSConnection("127.0.0.1", self.port, timeout=timeout, context=ssl.create_default_context())
+        try:
+            probe.set_tunnel("cvs.seu.edu.cn", 443)
+            probe.request("HEAD", "/", headers={"Connection": "close"})
+            return 200 <= probe.getresponse().status < 500
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            probe.close()
+
+    def _check_tunnel(self):
+        healthy = self._probe_tunnel()
+        self.probe_failures = 0 if healthy else self.probe_failures + 1
+        if self.probe_failures >= 3:
+            raise RuntimeError("VPN 校园连接连续三次检查失败，会话可能失效；请重新连接")
 
     def connect(self, port: int | None = None):
         with self.lock:
@@ -422,7 +441,12 @@ class VpnManager:
                 lines.put(None)
             threading.Thread(target=read_output, daemon=True).start()
             deadline = time.monotonic() + 360
+            next_probe = 0
+            self.probe_failures = 0
             while not self.stop_event.is_set():
+                if ready and time.monotonic() >= next_probe:
+                    self._check_tunnel()
+                    next_probe = time.monotonic() + PROBE_INTERVAL
                 if not ready and time.monotonic() > deadline:
                     raise RuntimeError("VPN 连接超时，请重新连接")
                 try:
@@ -452,21 +476,11 @@ class VpnManager:
                 elif "HTTP server listening" in line:
                     self._publish("connecting", "正在检查校园代理连接")
                     for attempt in range(3):
-                        probe = http.client.HTTPSConnection("127.0.0.1", self.port, timeout=10, context=ssl.create_default_context())
-                        try:
-                            # Verify a real campus response, not just a listening
-                            # proxy or CONNECT status. HEAD never downloads media.
-                            probe.set_tunnel("cvs.seu.edu.cn", 443)
-                            probe.request("HEAD", "/", headers={"Connection": "close"})
-                            response = probe.getresponse()
-                            if 200 <= response.status < 500:
-                                ready = True
-                                self._publish("connected", "VPN 已连接，课程门户响应检查通过")
-                                break
-                        except (OSError, http.client.HTTPException):
-                            pass
-                        finally:
-                            probe.close()
+                        if self._probe_tunnel(timeout=10):
+                            ready = True
+                            next_probe = time.monotonic() + PROBE_INTERVAL
+                            self._publish("connected", "VPN 已连接，课程门户响应检查通过")
+                            break
                         if self.stop_event.wait(0.5):
                             break
                     if not ready and not self.stop_event.is_set():
