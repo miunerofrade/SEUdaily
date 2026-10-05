@@ -10,7 +10,7 @@
 
 ## 发布候选
 
-Actions → `npm release candidate` → Run workflow，选择 main，版本必须等于已提交的 `package.json`（当前 1.1.0），`publish` 默认 false。流程先跑完整矩阵，再构建并生成公开发布候选。不设置 npm 凭据也能完成这一步。
+Actions → `npm release candidate` → Run workflow，选择 main，版本必须等于已提交的 `package.json`（当前 1.1.1），`publish` 默认 false。流程先跑完整矩阵，再构建并生成公开发布候选。不设置 npm 凭据也能完成这一步。
 
 源代码根包和组件仍保持 private。`scripts/prepare-release.mjs` 在 `build/release/staging/` 复制文件白名单、移除主包开发依赖与脚本、设置公开清单，再打包；不会修改源码 package.json 或直接发布。默认包 `seudaily` 内置 CLI 与后端，不再发布 `seudaily-cli`。发布顺序为 Web、Python、浏览器，最后默认包；用户只安装默认包，可选组件由启动器自动安装。
 

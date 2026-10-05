@@ -14,6 +14,7 @@ import { parseCommand } from '../src/distribution/arguments.ts';
 import { ensureUv } from '../src/distribution/components.ts';
 const exec = promisify(execFile), root = resolve(import.meta.dirname, '..');
 const node = process.execPath;
+const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const npm = (args, options) => process.platform === 'win32' ? exec(node, [process.env.npm_execpath ?? join(dirname(node), 'node_modules/npm/bin/npm-cli.js'), ...args], options) : exec('npm', args, options);
 const freshEnv = extra => ({ ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(SEUDAILY_|CVSTREAM_|DEEPSEEK_|NODE_OPTIONS)/.test(key))), ...extra });
 async function freePort() { const server = netServer(); await new Promise(r => server.listen(0, '127.0.0.1', r)); const port = server.address().port; await new Promise(r => server.close(r)); return port; }
@@ -83,7 +84,7 @@ test('packed installation runs without source/node_modules, installs only select
     counts.set(name, (counts.get(name) ?? 0) + 1);
     if (request.url.endsWith('.tgz')) { response.end(record.bytes); return; }
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ name, 'dist-tags': { latest: '1.1.0' }, versions: { '1.1.0': { name, version: '1.1.0', dist: { tarball: `http://127.0.0.1:${registryPort}/${encodeURIComponent(name)}/-/package.tgz`, integrity: record.integrity } } } }));
+    response.end(JSON.stringify({ name, 'dist-tags': { latest: version }, versions: { [version]: { name, version, dist: { tarball: `http://127.0.0.1:${registryPort}/${encodeURIComponent(name)}/-/package.tgz`, integrity: record.integrity } } } }));
   });
   await new Promise(r => registry.listen(0, '127.0.0.1', r)); registryPort = registry.address().port;
   const port = await freePort(); api = `http://127.0.0.1:${port}`;
@@ -101,14 +102,14 @@ test('packed installation runs without source/node_modules, installs only select
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
   await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });
   // Pre-release caches used an unscoped component name at this same version.
-  const legacyWeb = join(cache, 'components', '1.1.0', 'web');
+  const legacyWeb = join(cache, 'components', version, 'web');
   await mkdir(join(legacyWeb, 'node_modules', 'seudaily-web'), { recursive: true });
-  await writeFile(join(legacyWeb, 'ready.json'), JSON.stringify({ version: '1.1.0' }));
-  await writeFile(join(legacyWeb, 'node_modules', 'seudaily-web', 'package.json'), JSON.stringify({ name: 'seudaily-web', version: '1.1.0' }));
+  await writeFile(join(legacyWeb, 'ready.json'), JSON.stringify({ version }));
+  await writeFile(join(legacyWeb, 'node_modules', 'seudaily-web', 'package.json'), JSON.stringify({ name: 'seudaily-web', version }));
   await assert.rejects(command(['web']));
   rejectWeb = false;
-  assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli', 'ready.json')));
-  assert.ok(!existsSync(join(cache, 'components', '1.1.0', 'cli.lock')));
+  assert.ok(!existsSync(join(cache, 'components', version, 'cli', 'ready.json')));
+  assert.ok(!existsSync(join(cache, 'components', version, 'cli.lock')));
   const launchWeb = () => {
     const child = spawn(node, [host, 'web', '--data-dir', data, '--port', String(port)], { cwd: temporary, env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.logs = ''; child.stdout.on('data', b => child.logs += b); child.stderr.on('data', b => child.logs += b); launchers.push(child); return child;

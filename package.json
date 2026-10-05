@@ -1,6 +1,6 @@
 {
   "name": "seudaily",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "SEU campus assistant with a built-in terminal UI and shared backend; optional Web and automation components.",
   "private": true,
   "packageManager": "npm@10.9.9",

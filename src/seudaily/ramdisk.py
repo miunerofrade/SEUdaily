@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import atexit
 import ctypes
+import hashlib
+import io
 import os
 import re
 import shutil
@@ -10,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import warnings
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from .runtime_paths import env_value
@@ -47,17 +51,45 @@ def _linux_run(*command: str) -> str:
     return _run(*command)
 
 
+IMDISK_VERSION = "20250206"
+IMDISK_URL = f"https://downloads.sourceforge.net/project/imdisk-toolkit/{IMDISK_VERSION}/ImDiskTk.zip"
+IMDISK_SHA256 = "b93eac82a86bf8913bff9c99cec30fc463d455d565baca2f5f45e4577d8ad3b9"
+
+
+def _download_imdisk_installer() -> Path:
+    """Provision the upstream installer only for an explicit Windows mount."""
+    if sys.platform != "win32":
+        raise RamDiskError("ImDisk 仅用于 Windows")
+    cache = Path(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd()) / ".seudaily" / "imdisk"
+    archive_path = cache / f"ImDiskTk{IMDISK_VERSION}.zip"
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = archive_path.read_bytes() if archive_path.exists() else None
+        if payload is None or hashlib.sha256(payload).hexdigest() != IMDISK_SHA256:
+            with urllib.request.urlopen(IMDISK_URL, timeout=60) as response:
+                payload = response.read()
+            if hashlib.sha256(payload).hexdigest() != IMDISK_SHA256:
+                raise RamDiskError("ImDisk 安装包校验失败，请重新启用内存盘")
+            archive_path.write_bytes(payload)
+        directory = cache / f"ImDiskTk{IMDISK_VERSION}"
+        directory.mkdir(exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            for name in ("files.cab", "install.bat"):
+                (directory / name).write_bytes(archive.read(f"ImDiskTk{IMDISK_VERSION}/{name}"))
+        return directory / "install.bat"
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+        raise RamDiskError(f"无法获取 ImDisk 安装程序：{error}") from error
+
+
 def check_and_install_imdisk():
-    """Retain the existing Windows installer entry point."""
+    """Reuse ImDisk, or offer its installer through Windows administrator consent."""
     if sys.platform != "win32":
         return False, "ImDisk 仅用于 Windows"
     if shutil.which("imdisk"):
         return True, "驱动已就绪"
     resource = Path(__file__).resolve().parents[2] / "res"
     installers = sorted(resource.glob("ImDiskTk*.exe")) or sorted(resource.rglob("install.bat"))
-    if not installers:
-        return False, "未安装 ImDisk；请安装 ImDisk Toolkit 后重试"
-    installer = installers[0]
+    installer = installers[0] if installers else _download_imdisk_installer()
     if installer.suffix == ".bat":
         result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f'/c "{installer}"', str(installer.parent), 1)
     else:

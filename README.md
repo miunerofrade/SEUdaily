@@ -129,7 +129,7 @@ Web 使用附件入口上传。两端每条消息合计最多 **10 个附件**�
 /vpn disconnect
 ```
 
-内存盘容量支持 **64 MB–64 GB**，用于媒体临时文件；有处理任务时不能卸载。Skill 选择仅作用于下一次发送，发出后清除。
+内存盘容量支持 **64 MB–64 GB**，用于媒体临时文件；有处理任务时不能卸载。Windows 首次启用时自动下载 ImDisk Toolkit（约 750 KB）并请求管理员授权，安装完成后再次启用；已有驱动直接复用。macOS/Linux 使用系统挂载工具。Skill 选择仅作用于下一次发送，发出后清除。
 
 ## 校园 VPN 与登录
 
@@ -231,7 +231,7 @@ npm run test:distribution
 
 `main` 统一维护 CLI、Web 与公共核心，旧 `cli` 分支已合入，旧 `dev` 停止维护。GitHub Actions 验证 Windows、macOS、Linux，以及 Node 22/24 和 Python 3.11/3.12/3.13 的组合。
 
-更多信息：[分发说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/distribution.md) · [发布维护](https://github.com/miunerofrade/SEUdaily/blob/main/docs/npm-release.md) · [版本历史](https://github.com/miunerofrade/SEUdaily/blob/main/CHANGELOG.md)。
+更多信息：[分发说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/distribution.md) · [发布维护](https://github.com/miunerofrade/SEUdaily/blob/main/docs/npm-release.md)。
 
 ## 许可证
 

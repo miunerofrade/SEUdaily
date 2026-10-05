@@ -121,3 +121,63 @@ def test_reveal_uses_system_handler_with_separate_path_argument(monkeypatch,tmp_
 def test_reveal_rejects_unmounted_disk(monkeypatch):
     monkeypatch.setattr(ramdisk,'ramdisk_status',lambda:{'mounted':False,'path':None})
     with pytest.raises(ramdisk.RamDiskError):ramdisk.reveal_ramdisk()
+
+
+def test_imdisk_download_is_windows_only(monkeypatch):
+    monkeypatch.setattr(ramdisk.sys, 'platform', 'darwin')
+    monkeypatch.setattr(ramdisk.urllib.request, 'urlopen', lambda *a, **k: pytest.fail('unexpected download'))
+    assert ramdisk.check_and_install_imdisk() == (False, 'ImDisk 仅用于 Windows')
+    with pytest.raises(ramdisk.RamDiskError, match='Windows'):
+        ramdisk._download_imdisk_installer()
+
+
+def test_imdisk_download_verified_and_cached(monkeypatch, tmp_path):
+    import hashlib
+    import io
+    import zipfile
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, 'w') as archive:
+        for name, content in [('install.bat', b'installer'), ('files.cab', b'driver')]:
+            archive.writestr(f'ImDiskTk{ramdisk.IMDISK_VERSION}/{name}', content)
+    data = payload.getvalue()
+    monkeypatch.setattr(ramdisk.sys, 'platform', 'win32')
+    monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
+    monkeypatch.setattr(ramdisk, 'IMDISK_SHA256', hashlib.sha256(data).hexdigest())
+    calls = []
+    def download(*args, **kwargs):
+        calls.append(args)
+        return io.BytesIO(data)
+    monkeypatch.setattr(ramdisk.urllib.request, 'urlopen', download)
+    installer = ramdisk._download_imdisk_installer()
+    assert installer.read_bytes() == b'installer'
+    assert installer.with_name('files.cab').read_bytes() == b'driver'
+    installer.write_bytes(b'changed')
+    assert ramdisk._download_imdisk_installer().read_bytes() == b'installer'
+    assert len(calls) == 1
+    monkeypatch.setattr(ramdisk, 'IMDISK_SHA256', '0' * 64)
+    with pytest.raises(ramdisk.RamDiskError, match='校验失败'):
+        ramdisk._download_imdisk_installer()
+
+
+def test_existing_imdisk_does_not_download(monkeypatch):
+    monkeypatch.setattr(ramdisk.sys, 'platform', 'win32')
+    monkeypatch.setattr(ramdisk.shutil, 'which', lambda _: 'imdisk.exe')
+    monkeypatch.setattr(ramdisk, '_download_imdisk_installer', lambda: pytest.fail('unexpected download'))
+    assert ramdisk.check_and_install_imdisk() == (True, '驱动已就绪')
+
+
+def test_installed_wheel_uses_downloaded_installer_and_uac(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    module = tmp_path / 'venv' / 'lib' / 'seudaily' / 'ramdisk.py'
+    installer = tmp_path / 'download cache' / 'install.bat'
+    monkeypatch.setattr(ramdisk, '__file__', str(module))
+    monkeypatch.setattr(ramdisk.sys, 'platform', 'win32')
+    monkeypatch.setattr(ramdisk.shutil, 'which', lambda _: None)
+    monkeypatch.setattr(ramdisk, '_download_imdisk_installer', lambda: installer)
+    calls = []
+    def execute(*args):
+        calls.append(args)
+        return 42
+    monkeypatch.setattr(ramdisk.ctypes, 'windll', SimpleNamespace(shell32=SimpleNamespace(ShellExecuteW=execute)), raising=False)
+    assert ramdisk.check_and_install_imdisk() == (False, '请完成 ImDisk 安装后重试')
+    assert calls == [(None, 'runas', 'cmd.exe', f'/c "{installer}"', str(installer.parent), 1)]
