@@ -5,6 +5,7 @@ import atexit
 import hashlib
 import http.client
 import io
+import ipaddress
 import json
 import os
 import platform
@@ -186,6 +187,22 @@ def capture_cas_redirect(context, current: str) -> str | None:
     raise RuntimeError("CAS 跳转次数过多")
 
 
+def campus_direct():
+    """Require a private campus DNS address and a direct campus HTTPS response."""
+    try:
+        addresses = socket.getaddrinfo("cvs.seu.edu.cn", 443, type=socket.SOCK_STREAM)
+        if not any(ipaddress.ip_address(item[4][0]).is_private and not ipaddress.ip_address(item[4][0]).is_loopback for item in addresses):
+            return False
+        connection = http.client.HTTPSConnection("cvs.seu.edu.cn", timeout=3, context=ssl.create_default_context())
+        try:
+            connection.request("HEAD", "/", headers={"Connection": "close"})
+            return 200 <= connection.getresponse().status < 400
+        finally:
+            connection.close()
+    except (OSError, http.client.HTTPException):
+        return False
+
+
 class VpnManager:
     def __init__(self):
         self.process: subprocess.Popen | None = None
@@ -198,7 +215,7 @@ class VpnManager:
         self.state["configuredPort"] = self.configured_port
         self.port = 0
         self.sms_challenge = None
-        self.probe_failures = 0
+        self.reconnect_attempts = 0
 
     def _publish(self, state: str, message: str):
         with self.lock:
@@ -216,7 +233,10 @@ class VpnManager:
     def status(self):
         with self.lock:
             if self.state["state"] == "connected" and (not self.process or self.process.poll() is not None):
-                self._publish("expired", "VPN 会话已失效，请重新连接")
+                if self.thread and self.thread.is_alive():
+                    self._publish("connecting", "VPN 核心已退出，正在恢复连接")
+                else:
+                    self._publish("failed", "VPN 会话已失效，请重新连接")
             state = dict(self.state)
             state["smsRetryAfter"] = max(0, int(61 - (time.monotonic() - self.sms_challenge.sent_at))) if self.sms_challenge else 0
             return state
@@ -233,10 +253,9 @@ class VpnManager:
             probe.close()
 
     def _check_tunnel(self):
-        healthy = self._probe_tunnel()
-        self.probe_failures = 0 if healthy else self.probe_failures + 1
-        if self.probe_failures >= 3:
-            raise RuntimeError("VPN 校园连接连续三次检查失败，会话可能失效；请重新连接")
+        if not self._probe_tunnel():
+            raise RuntimeError("VPN 校园连接检查失败")
+        self.reconnect_attempts = 0
 
     def connect(self, port: int | None = None):
         with self.lock:
@@ -253,6 +272,7 @@ class VpnManager:
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             (directory / "settings.json").write_text(json.dumps({"port": self.configured_port}))
             self.stop_event.clear()
+            self.reconnect_attempts = 0
             self._publish("connecting", "正在准备 VPN 核心")
             self.thread = threading.Thread(target=self._run, name="seudaily-vpn", daemon=True)
             self.thread.start()
@@ -403,6 +423,27 @@ class VpnManager:
                 browser.close()
 
     def _run(self):
+        while not self.stop_event.is_set():
+            if campus_direct():
+                self.port = 0
+                self._publish("campus_connected", "校园网直连，无需 VPN")
+                return
+            try:
+                self._run_once()
+                return
+            except Exception as error:
+                if self.stop_event.is_set():
+                    return
+                message = str(error) if isinstance(error, RuntimeError) else f"VPN 连接失败（{type(error).__name__}）"
+                if self.reconnect_attempts >= 3:
+                    self._publish("failed", f"VPN 重连三次仍未恢复：{message}")
+                    return
+                self.reconnect_attempts += 1
+                self._publish("connecting", f"正在重连 VPN（{self.reconnect_attempts}/3）")
+                if self.stop_event.wait(2):
+                    return
+
+    def _run_once(self):
         ready = False
         try:
             binary = install_core()
@@ -442,7 +483,6 @@ class VpnManager:
             threading.Thread(target=read_output, daemon=True).start()
             deadline = time.monotonic() + 360
             next_probe = 0
-            self.probe_failures = 0
             while not self.stop_event.is_set():
                 if ready and time.monotonic() >= next_probe:
                     self._check_tunnel()
@@ -485,10 +525,6 @@ class VpnManager:
                             break
                     if not ready and not self.stop_event.is_set():
                         raise RuntimeError("VPN 认证成功，但校园数据通道未通过验证（课程门户未响应）；尚不可用")
-        except Exception as error:
-            if not self.stop_event.is_set():
-                message = str(error) if isinstance(error, RuntimeError) else f"VPN 连接失败（{type(error).__name__}），请检查网络或登录窗口后重试"
-                self._publish("expired" if ready else "failed", message)
         finally:
             process = self.process
             if process and process.poll() is None:
@@ -514,6 +550,9 @@ def run_standalone(port: int) -> int:
     import signal
     if not 1024 <= port <= 65535:
         raise RuntimeError("--vpn 端口应为 1024–65535")
+    if campus_direct():
+        print("校园网直连，无需 VPN", flush=True)
+        return 0
     if not (env_value("SEUDAILY_USERNAME") or "").strip() or not (env_value("SEUDAILY_PASSWORD") or "").strip():
         raise RuntimeError("缺少校园账号或密码；请配置 SEUDAILY_USERNAME 和 SEUDAILY_PASSWORD")
     if campus_proxy():
@@ -541,6 +580,8 @@ def run_standalone(port: int) -> int:
                 if state["state"] == "connected":
                     print(f"HTTP 代理：{state['httpProxy']}（支持 HTTPS CONNECT）；按 Ctrl+C 断开。", flush=True)
                 previous = current
+            if state["state"] == "campus_connected":
+                return 0
             if state["state"] in {"failed", "expired"}:
                 return 1
             if state["state"] == "verification_required":

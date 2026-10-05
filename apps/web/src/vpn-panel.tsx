@@ -45,10 +45,10 @@ export function VpnPanel({ controller }: { controller: ReturnType<typeof useVpn>
   useEffect(() => { if (state.configuredPort) setPort(String(state.configuredPort)); }, [state.configuredPort]);
   const active = ['connecting', 'auth_required', 'verification_required', 'connected'].includes(state.state);
   return <section className="inspector-section vpn-section">
-    <div className="section-title"><span>校园 VPN</span><button type="button" className="disk-action" disabled={busy} onClick={() => void run(active ? 'disconnect' : 'connect', undefined, active ? undefined : Number(port))}>{busy ? '处理中…' : active ? '断开' : '连接'}</button></div>
+    <div className="section-title"><span>校园 VPN</span><button type="button" className="disk-action" disabled={busy} onClick={() => void run(active ? 'disconnect' : 'connect', undefined, active ? undefined : Number(port))}>{busy ? '处理中…' : active ? '断开' : state.state === 'campus_connected' ? '重新检测' : '连接'}</button></div>
     <p className="inspector-description">使用已保存的校园账号，额外验证按提示完成。</p>
     <p className="vpn-status" role="status">{state.state === 'connected' ? '已连接' : state.message}</p>
-    <label className="vpn-port-row"><span>代理端口</span><input type="number" aria-label="VPN 代理端口" min={1024} max={65535} value={port} disabled={active || busy} onChange={event => setPort(event.target.value)} /></label>
+    {state.state !== 'campus_connected' && <label className="vpn-port-row"><span>代理端口</span><input type="number" aria-label="VPN 代理端口" min={1024} max={65535} value={port} disabled={active || busy} onChange={event => setPort(event.target.value)} /></label>}
     {state.state === 'verification_required' && <form onSubmit={event => { event.preventDefault(); void run('verify', code); setCode(''); }}><input type="password" aria-label="VPN 验证码" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} />{state.smsResend && <button type="button" disabled={busy || Boolean(state.smsRetryAfter)} onClick={() => void run('resend')}>{state.smsRetryAfter ? `${state.smsRetryAfter} 秒后重发` : '重发短信'}</button>}<button type="submit" disabled={busy || !code}>验证</button></form>}
     {error && <p className="disk-error" role="alert">{error}</p>}
   </section>;

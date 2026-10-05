@@ -157,13 +157,15 @@ def test_tunnel_probe_uses_proxy_connect_and_head_and_closes(monkeypatch):
     connection.close.assert_called_once()
 
 
-def test_tunnel_monitor_requires_consecutive_failures(monkeypatch):
+def test_tunnel_monitor_failure_triggers_recovery_and_success_resets_budget(monkeypatch):
     manager = vpn.VpnManager()
-    monkeypatch.setattr(manager, '_probe_tunnel', MagicMock(side_effect=[False, False, True, False, False, False]))
-    for _ in range(5):
+    manager.reconnect_attempts = 2
+    monkeypatch.setattr(manager, '_probe_tunnel', MagicMock(side_effect=[False, True]))
+    with pytest.raises(RuntimeError, match='连接检查失败'):
         manager._check_tunnel()
-    with pytest.raises(RuntimeError, match='连续三次检查失败'):
-        manager._check_tunnel()
+    assert manager.reconnect_attempts == 2
+    manager._check_tunnel()
+    assert manager.reconnect_attempts == 0
 
 
 def test_tunnel_probe_timeout_is_failure_and_closes(monkeypatch):
@@ -172,3 +174,43 @@ def test_tunnel_probe_timeout_is_failure_and_closes(monkeypatch):
     monkeypatch.setattr(vpn.http.client, 'HTTPSConnection', lambda *_args, **_kwargs: connection)
     assert not vpn.VpnManager()._probe_tunnel()
     connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize('failures', [2, 4])
+def test_vpn_reconnects_with_three_retry_limit(tmp_path, monkeypatch, failures):
+    monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
+    monkeypatch.setattr(vpn, 'campus_direct', lambda: False)
+    manager = vpn.VpnManager()
+    monkeypatch.setattr(manager.stop_event, 'wait', lambda _seconds: False)
+    attempts = []
+    def attempt():
+        attempts.append(1)
+        if len(attempts) <= failures:
+            raise RuntimeError('fixture tunnel stopped')
+        manager._publish('connected', 'restored')
+    monkeypatch.setattr(manager, '_run_once', attempt)
+    manager._run()
+    assert len(attempts) == min(failures + 1, 4)
+    assert manager.state['state'] == ('failed' if failures == 4 else 'connected')
+
+
+def test_campus_connection_skips_vpn_core(tmp_path, monkeypatch):
+    monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
+    monkeypatch.setattr(vpn, 'campus_direct', lambda: True)
+    manager = vpn.VpnManager()
+    start = MagicMock()
+    monkeypatch.setattr(manager, '_run_once', start)
+    manager._run()
+    assert manager.status()['state'] == 'campus_connected'
+    assert manager.status()['httpProxy'] == ''
+    start.assert_not_called()
+    assert vpn.campus_proxy() is None
+
+
+@pytest.mark.parametrize('address,status,expected', [('10.64.86.180',200,True),('10.64.86.180',403,False),('8.8.8.8',200,False)])
+def test_campus_detection_requires_private_address_and_direct_access(monkeypatch,address,status,expected):
+    monkeypatch.setattr(vpn.socket,'getaddrinfo',lambda *_args,**_kwargs:[(2,1,6,'',(address,443))])
+    connection=MagicMock()
+    connection.getresponse.return_value.status=status
+    monkeypatch.setattr(vpn.http.client,'HTTPSConnection',lambda *_args,**_kwargs:connection)
+    assert vpn.campus_direct() is expected
