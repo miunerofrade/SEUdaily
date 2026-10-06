@@ -26,22 +26,36 @@ async function fixture(t) {
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(SEUDAILY_|CVSTREAM_|DEEPSEEK_)/.test(key))),
     SEUDAILY_NO_OPEN:'1', SEUDAILY_CACHE_DIR:join(directory,'cache'), SEUDAILY_UV_BINARY:join(directory,'missing-uv') };
   const args = ['--data-dir',directory,'--port',String(port)];
-  const children = [];
+  const children = [], exits = [], backendPids = new Set();
   let output = '';
   const start = command => {
     const child = spawn(process.execPath,[cli,...command,...args],{cwd:root,env,stdio:['ignore','pipe','pipe']});
     child.stdout.on('data',chunk => { output += chunk; }); child.stderr.on('data',chunk => { output += chunk; });
+    exits.push(new Promise(resolve => child.once('close',resolve)));
     children.push(child); return child;
   };
   const request = async (path, options) => {
     const response = await fetch(api+path,{...options,signal:AbortSignal.timeout(1000)});
-    assert.equal(response.status,200,await response.clone().text()); return response.json();
+    assert.equal(response.status,200,await response.clone().text());
+    const value = await response.json();
+    if (value.name === 'SEUdaily' && value.processId) backendPids.add(value.processId);
+    return value;
   };
   t.after(async () => {
     for (const child of children) if (child.exitCode===null) child.kill('SIGTERM');
     await request('/app/runtime/stop',{method:'POST'}).catch(() => {});
     await eventually(async () => { try { await fetch(api+'/api'); } catch { return; } throw new Error('backend still running'); }).catch(() => {});
-    await rm(directory,{recursive:true,force:true});
+    await Promise.all(exits);
+    // server.close() stops HTTP before SQLite/log handles and the process cwd
+    // have been released. Windows cannot remove a live process's cwd.
+    await eventually(async () => {
+      for (const pid of backendPids) {
+        try { process.kill(pid,0); }
+        catch (error) { if (error.code === 'ESRCH') continue; throw error; }
+        throw new Error('backend process still stopping');
+      }
+    },20000);
+    await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});
   });
   return {directory,env,args,start,request,output:()=>output};
 }
@@ -93,6 +107,13 @@ test('ordinary Web without an existing backend keeps its automatic shutdown beha
   const web = f.start(['web']);
   const identity = await eventually(() => f.request('/api'));
   assert.equal(identity.persistent,false); assert.equal(identity.managed,true);
+  // /api is ready before the Web launcher has registered its signal cleanup.
+  // Wait for the interface itself, otherwise killing during startup leaves a
+  // client lease to expire normally after 30 seconds.
+  await eventually(async () => {
+    assert.match(f.output(), /SEUdaily Web/);
+    assert.equal((await f.request('/api')).clients,1);
+  });
   web.kill('SIGTERM');
   await eventually(async () => {
     try { await f.request('/api'); } catch(error) { if (error.cause?.code==='ECONNREFUSED') return; throw error; }
