@@ -1,0 +1,22 @@
+# User service: copy to ~/.config/systemd/user/seudaily.service.
+# Set ExecStart to stable, absolute Node and seudaily paths on your machine.
+[Unit]
+Description=SEUdaily personal service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /usr/local/lib/node_modules/seudaily/bin/seudaily.mjs serve --with-web --data-dir=%h/.local/share/seudaily --port=4111
+WorkingDirectory=%h
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=25s
+KillMode=control-group
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

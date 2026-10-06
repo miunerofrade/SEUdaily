@@ -17,7 +17,7 @@ const drain=async stream=>{for await(const _ of await stream){};};
 async function until(check){const end=Date.now()+5000;while(Date.now()<end){const value=await check();if(value)return value;await new Promise(resolve=>setTimeout(resolve,30));}throw new Error('fixture timeout');}
 
 test('shared queue preserves drafts, sends FIFO, pauses on cancel/error, and resumes explicitly',async t=>{
- t.after(async()=>{stopMessageQueue();agentRuntime.shutdown();await until(()=>!agentRuntime.isActive('hold')&&!agentRuntime.isActive('error'));agentStore.close();await rm(root,{recursive:true,force:true});});
+ t.after(async()=>{stopMessageQueue();agentRuntime.shutdown();await until(()=>!agentRuntime.isActive('hold')&&!agentRuntime.isActive('error'));await agentStore.close();await rm(root,{recursive:true,force:true});});
  const seen=[];let started;
  const ready=new Promise(resolve=>started=resolve);
  agentRuntime.config.tools=async()=>({});agentRuntime.config.instructions=async()=>'';

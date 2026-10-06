@@ -34,7 +34,8 @@ async function load(): Promise<State> {
   try {
     const value = JSON.parse(await readFile(statePath, "utf8")) as State;
     if (value.version === 1 && Array.isArray(value.resumes)) return value;
-  } catch { /* missing state */ }
+    throw new Error('登录续接状态格式无效，原文件已保留');
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   return { version: 1, resumes: [] };
 }
 

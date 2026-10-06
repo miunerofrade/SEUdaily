@@ -19,7 +19,7 @@ function input(thread,token,messages,resource='fixture'){return {messages,memory
 function events(text){return text.split('\n\n').filter(block=>block.startsWith('data: ')&&!block.includes('[DONE]')).map(block=>JSON.parse(block.slice(6)));}
 
 test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async t=>{
- t.after(async()=>{await agentRuntime.shutdown();agentStore.close();await rm(root,{recursive:true,force:true});});
+ t.after(async()=>{await agentRuntime.shutdown();await agentStore.close();await rm(root,{recursive:true,force:true});});
  assert.equal((await (await request('/app/skills')).json()).skills[0].name,'training-plan-audit');
  const saved=await request('/app/settings',{agentInstructions:'FIXTURE_AGENT_RULE'});
  assert.equal(saved.status,200);

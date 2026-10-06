@@ -12,10 +12,19 @@ export class LocalClient {
   #database;
   #queue = Promise.resolve();
   #closed = false;
+  #closing?: Promise<void>;
 
-  constructor(path: string) { this.#database = new DatabaseSync(path, { timeout: 5000 }); }
+  constructor(path: string) {
+    this.#database = new DatabaseSync(path, { timeout: 5000 });
+    try {
+      this.#database.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+      const check = this.#database.prepare('PRAGMA quick_check').all();
+      if (check.length !== 1 || Object.values(check[0])[0] !== 'ok') throw new Error('SQLite integrity check failed; preserve the database and inspect it before restarting');
+    } catch (error) { this.#database.close(); throw error; }
+  }
 
   async #acquire() {
+    if (this.#closing || this.#closed) throw new Error('SQLite client is closed');
     let release!: () => void;
     const previous = this.#queue;
     this.#queue = new Promise<void>(resolve => { release = resolve; });
@@ -79,5 +88,12 @@ export class LocalClient {
     };
   }
 
-  close() { this.#closed = true; this.#database.close(); }
+  close(): Promise<void> {
+    if (!this.#closing) this.#closing = this.#queue.then(() => {
+      this.#closed = true;
+      try { this.#database.exec('PRAGMA wal_checkpoint(TRUNCATE)'); }
+      finally { this.#database.close(); }
+    });
+    return this.#closing;
+  }
 }

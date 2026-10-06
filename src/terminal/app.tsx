@@ -32,10 +32,10 @@ import { commandSuggestions, attachmentSuggestions } from "./completion.js";
 import { clean } from "./client.js";
 import stringWidth from "string-width";
 import { screenText, selectionRows, selectedText, type Selection } from "./selection.js";
-import { enterKey, committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } from "./keyboard.js";
+import { isClipboardPaste, enterKey, committedInput, InterruptHold, restoreTextInput, TerminalReplyFilter } from "./keyboard.js";
 import { InputCursor } from "./cursor.js";
 import { SessionPicker, type SessionPickerHandle } from "./session-picker.js";
-import { copySelection } from "./clipboard.js";
+import { readClipboard, copySelection } from "./clipboard.js";
 import { ManagementForm } from "./form.js";
 import { FocusManager } from "./focus.js";
 import { courseForm, semesterForm, programStatusForm } from "./management.js";
@@ -129,6 +129,7 @@ export function App({ session, copy = copySelection }: {
   const [caret, setCaret] = useState(0);
   const editor = useRef(new Composer());
   const pendingPastes = useRef(0);
+  const pasteQueue = useRef<Promise<void>>(Promise.resolve());
   editor.current.onAttachmentRemoved = id => session.removeAttachment(id);
   const historyIndex = useRef(-1);
   const historyDraft = useRef("");
@@ -700,16 +701,36 @@ export function App({ session, copy = copySelection }: {
           : current,
     );
   };
+  const pasteText = async (text: string) => {
+    const attachments = await session.attachPastedFiles(clean(text));
+    if (attachments) {
+      for (const attachment of attachments) editor.current.attachment(attachment.id, clean(attachment.name), attachment.kind);
+    } else editor.current.paste(clean(text));
+    setInput(editor.current.text);
+    setCaret(editor.current.cursor);
+  };
+  const pasteClipboard = () => {
+    if (pendingPastes.current) return;
+    pendingPastes.current++;
+    pasteQueue.current = pasteQueue.current.then(async () => {
+      const content = await readClipboard();
+      if ('image' in content) {
+        const attachment = await session.attachClipboardImage(content.image, content.mediaType);
+        editor.current.attachment(attachment.id, attachment.name, attachment.kind);
+        setInput(editor.current.text);
+        setCaret(editor.current.cursor);
+      } else if (content.text) await pasteText(content.text);
+      else session.show('剪贴板为空');
+    }).catch(error => session.show(error.message, '粘贴错误'))
+      .finally(() => { pendingPastes.current--; });
+  };
   usePaste((text) => {
     if (page === "chat" && !modal && !detail && !decisions) {
       pendingPastes.current++;
-      void session.attachPastedFiles(clean(text)).then(attachments => {
-        if (attachments) {
-          for (const attachment of attachments) editor.current.attachment(attachment.id, clean(attachment.name), attachment.kind);
-        } else editor.current.paste(clean(text));
-        setInput(editor.current.text);
-        setCaret(editor.current.cursor);
-      }).catch(error => session.show(error.message, '附件错误')).finally(() => { pendingPastes.current--; });
+      // Serialize attachment uploads so consecutive paste events keep their order.
+      pasteQueue.current = pasteQueue.current.then(() => pasteText(text))
+        .catch(error => session.show(error.message, '附件错误'))
+        .finally(() => { pendingPastes.current--; });
     }
   });
   const handleInput = (value: string, key: Key) => {
@@ -738,6 +759,9 @@ export function App({ session, copy = copySelection }: {
     if (selectionRef.current?.moved) {
       clearSelection();
       if (key.escape) return;
+    }
+    if (isClipboardPaste(value, key) && page === 'chat' && !modal && !detail && !decisions) {
+      void pasteClipboard(); return;
     }
     if (key.ctrl && value === "t" && page === "chat" && !modal && !detail && !decisions) {
       toggleReasoning();

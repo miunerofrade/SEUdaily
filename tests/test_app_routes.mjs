@@ -114,3 +114,31 @@ test('VPN controls use the worker and RAMdisk accepts custom capacity', async (t
   await ramdisk.handler({ req: { json: async () => ({ action: 'mount', size: '1.5 GB' }) }, json });
   assert.equal(f.calls[1].payload.size, '1536M');
 });
+
+test('successful document uploads retain originals while temporary parser inputs are removed', async t => {
+  const { createHash } = await import('node:crypto');
+  const f = await fixture(t);
+  const contexts = new Map();
+  Object.assign(f.context, { File, Buffer, tmpdir, createHash,
+    supportedDocumentExtensions: new Set(['.pdf']), documentMediaTypes: {'.pdf':'application/pdf'},
+    storeDocumentContext: (ref,name,markdown) => contexts.set(ref,{name,markdown}) });
+  const bytes = Buffer.from('%PDF-1.4 fixture');
+  let parserPath;
+  f.context.runPythonTool = async (action, payload) => {
+    assert.equal(action,'parse-document'); parserPath = payload.path;
+    assert.deepEqual(await fs.readFile(parserPath),bytes);
+    return {status:'completed',data:{markdown:'parsed text',filename:payload.filename,charCount:11}};
+  };
+  const route = f.routes.find(r => r.route==='/app/documents');
+  const result = await route.handler({req:{parseBody:async () => ({file:new File([bytes],'课程.pdf')})},json:(body,status=200) => ({body,status})});
+  assert.equal(result.status,200);
+  assert.equal(result.body.filename,'课程.pdf');
+  assert.deepEqual(await fs.readFile(result.body.path),bytes);
+  assert.equal(result.body.sha256,createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(contexts.get(result.body.contextRef).markdown,'parsed text');
+  await assert.rejects(fs.stat(parserPath),{code:'ENOENT'});
+  f.context.runPythonTool = async () => ({status:'failed',summary:'cannot parse'});
+  const failed = await route.handler({req:{parseBody:async () => ({file:new File([bytes],'失败.pdf')})},json:(body,status=200) => ({body,status})});
+  assert.equal(failed.status,422);
+  assert.equal((await fs.readdir(path.dirname(result.body.path))).length,1);
+});

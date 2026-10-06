@@ -81,6 +81,7 @@ else if (options.command === 'update') {
   else {
     const identity = await probe();
     if (identity) {
+      if (identity.persistent) throw new Error('常驻服务请先由服务管理器停止（systemctl --user stop seudaily），更新后再启动');
       if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.dataRoot !== dataRoot) throw new Error('端口上的服务不属于当前 SEUdaily 数据目录');
       await request('/app/runtime/stop', 'POST');
       for (let attempt=0; attempt<100; attempt++) {
@@ -106,6 +107,15 @@ if (options.command === 'vpn') {
   if (!process.env.SEUDAILY_USERNAME?.trim() || !process.env.SEUDAILY_PASSWORD?.trim()) throw new Error('缺少校园账号或密码；请在数据目录 .env 配置 SEUDAILY_USERNAME 和 SEUDAILY_PASSWORD');
   const python = await ensurePython();
   process.exitCode = await runChild(python, ['-m', 'seudaily.vpn', String(options.vpn)], dataRoot);
+} else if (options.command === 'serve') {
+  const identity = await probe();
+  if (identity) { verify(identity); throw new Error('后端已运行；请先停止现有后端再启动 serve'); }
+  process.env.SEUDAILY_MANAGED = '0';
+  process.env.SEUDAILY_PERSISTENT = '1';
+  if (options.values['with-web']) {
+    process.env.SEUDAILY_WEB_ROOT = join(await ensureComponent('web'), 'assets');
+  }
+  process.exitCode = await runChild(process.execPath, [join(installRoot, 'dist', 'core.mjs')], dataRoot);
 } else {
   const component = await ensureComponent(options.command === 'web' ? 'web' : 'cli');
   const identity = await connect();

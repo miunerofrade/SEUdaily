@@ -49,6 +49,17 @@ jobs:
       - run: uv sync --frozen --group test
       - run: npm run typecheck
       - run: npm run build
+      - name: Validate Linux service unit
+        if: runner.os == 'Linux'
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/seudaily.service" <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          const source = readFileSync('deploy/seudaily.service', 'utf8');
+          const executable = `${process.execPath} ${resolve('bin/seudaily.mjs')}`;
+          writeFileSync(process.argv[2], source.replace('/usr/bin/node /usr/local/lib/node_modules/seudaily/bin/seudaily.mjs', executable));
+          JS
+          systemd-analyze verify "$RUNNER_TEMP/seudaily.service"
       - name: Node regression and isolated npm installation
         timeout-minutes: 8
         run: node --import tsx --test --test-timeout=240000 tests/*.mjs

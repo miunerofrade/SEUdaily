@@ -24,8 +24,8 @@
     "test:python": "uv run --group test pytest",
     "cli": "node bin/seudaily.mjs",
     "build": "node scripts/build.mjs",
-    "test:agent": "node --import tsx --test tests/test_agent_runtime.mjs tests/test_agent_http.mjs tests/test_terminal_attachments.mjs tests/test_sqlite.mjs",
-    "test:distribution": "node --import tsx --test tests/test_distribution.mjs",
+    "test:agent": "node --import tsx --test tests/test_agent_runtime.mjs tests/test_agent_http.mjs tests/test_terminal_attachments.mjs tests/test_sqlite.mjs tests/test_clipboard.mjs tests/test_focus_recovery.mjs tests/test_document_context_security.mjs",
+    "test:distribution": "node --import tsx --test tests/test_distribution.mjs tests/test_serve.mjs",
     "dev:api": "tsx src/server/main.ts",
     "pack:local": "node scripts/pack.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
@@ -83,6 +83,8 @@
     "dist/components.json",
     "dist/skills/",
     "docs/licensing-vpn.md",
+    "docs/service.md",
+    "deploy/",
     "dist/THIRD_PARTY_NOTICES.txt"
   ]
 }

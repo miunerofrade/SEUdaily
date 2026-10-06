@@ -197,10 +197,10 @@ class FocusService:
             return self._default_state()
         try:
             state = json.loads(self.state_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return self._default_state()
+        except (OSError, ValueError) as error:
+            raise ValueError(f"Focus 状态文件无法读取，原文件已保留：{self.state_file}") from error
         if not isinstance(state, dict) or state.get("version") != 1:
-            return self._default_state()
+            raise ValueError(f"Focus 状态格式无效，原文件已保留：{self.state_file}")
         defaults = self._default_state()
         return {
             **defaults,

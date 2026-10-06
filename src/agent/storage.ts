@@ -258,5 +258,5 @@ export class AgentStore {
         const rows = await this.client.execute({ sql: 'SELECT content FROM legacy_memory WHERE threadId=? AND resourceId=?', args: [threadId, resourceId] });
         return rows.rows.flatMap(row => { const data = JSON.parse(String(row.content)); return data.activeObservations ? [String(data.activeObservations)] : []; });
     }
-    close() { this.client.close(); }
+    close() { return this.client.close(); }
 }

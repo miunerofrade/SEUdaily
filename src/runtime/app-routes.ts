@@ -199,7 +199,7 @@ async function fullResultData(result: ToolResult): Promise<unknown> {
 
 type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
 
-const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images")];
+const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents')];
 
 function isWithinDirectory(root: string, target: string, allowRoot = false) {
   const child = relative(root, target);
@@ -640,6 +640,8 @@ export const appRoutes = [
       const imageRoot = resolve(projectRoot, ".seudaily", "uploads", "images");
       const images = await walkFiles(imageRoot);
       files.push(...images.map((file) => ({ ...file, category: "images", course: "临时图片", teacher: "本地上传" })));
+      const documents = await walkFiles(resolve(projectRoot, '.seudaily', 'uploads', 'documents'));
+      files.push(...documents.map(file => ({ ...file, category: 'documents', course: '上传文档', teacher: '本地上传' })));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return c.json({ root, files, count: files.length });
     },
@@ -683,9 +685,9 @@ export const appRoutes = [
       if (!bytes.length || bytes.length > 10 * 1024 * 1024) return c.json({ error: "图片大小必须在 10 MB 以内" }, 400);
       const extension = match[1] === "image/jpeg" ? "jpg" : match[1].slice(6);
       const directory = resolve(projectRoot, ".seudaily", "uploads", "images");
-      await mkdir(directory, { recursive: true });
+      await mkdir(directory, { recursive: true, mode: 0o700 });
       const target = resolve(directory, `${Date.now()}-${randomUUID()}.${extension}`);
-      await writeFile(target, bytes);
+      await writeFile(target, bytes, { flag: 'wx', mode: 0o600 });
       return c.json({ path: target, ref: basename(target), sha256: createHash("sha256").update(bytes).digest("hex"), name: typeof body.name === "string" ? body.name : `image.${extension}`, mediaType: match[1], size: bytes.length });
     },
   }),
@@ -727,12 +729,19 @@ export const appRoutes = [
           return c.json({ error: result.summary || "文档解析失败", warnings: result.warnings }, 422);
         }
         const contextRef = randomUUID();
-        storeDocumentContext(contextRef, data.filename || filename, data.markdown);
+        const documentDirectory = resolve(projectRoot, '.seudaily', 'uploads', 'documents');
+        await mkdir(documentDirectory, { recursive: true, mode: 0o700 });
+        const originalPath = join(documentDirectory, `${contextRef}${extension}`);
+        await writeFile(originalPath, bytes, { flag: 'wx', mode: 0o600 });
+        try { storeDocumentContext(contextRef, data.filename || filename, data.markdown); }
+        catch (error) { await unlink(originalPath).catch(() => undefined); throw error; }
         return c.json({
           filename: data.filename || filename,
           extension: data.extension || extension,
           mediaType: documentMediaTypes[extension],
           contextRef,
+          path: originalPath,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
           markdown: data.markdown,
           charCount: data.charCount ?? data.markdown.length,
         });

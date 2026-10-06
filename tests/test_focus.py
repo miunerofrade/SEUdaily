@@ -511,3 +511,15 @@ def test_focus_permissions_cannot_be_attached_to_an_ordinary_chat(tmp_path: Path
     assert updated["resourceId"] == "seudaily-focus-local"
     generated = service.upsert({"kind": "notice", "title": "无 ID", "description": "关注通知"})["item"]
     assert generated["threadId"] == generated["id"]
+
+
+def test_corrupt_focus_state_is_preserved_instead_of_reset(tmp_path):
+    import pytest
+
+    state_file = tmp_path / "focus.json"
+    original = '{"version": 1, "items": '
+    state_file.write_text(original, encoding="utf-8")
+    service = FocusService(state_file=state_file)
+    with pytest.raises(ValueError, match="原文件已保留"):
+        service.list()
+    assert state_file.read_text(encoding="utf-8") == original

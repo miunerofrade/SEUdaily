@@ -339,7 +339,7 @@ export class Session extends EventEmitter {
   }
   private welcome() {
     this.messages.push({ role: "系统", welcome: true,
-      text: "输入消息或 / 查看命令。\n粘贴图片或文档文件路径可添加附件，方向键移动，Backspace/Delete 删除。\n/schedule 与 /programs 打开交互表格。" });
+      text: "输入消息或 / 查看命令。\nCtrl+V / Alt+V 粘贴剪贴板图片、文本或文件；粘贴文件路径也可添加附件。\n方向键移动，Backspace/Delete 删除。\n/schedule 与 /programs 打开交互表格。" });
     this.changed();
   }
   async authorizeCampus(path: string, complete: (result: any) => Promise<void>, resetSession = true): Promise<void> {
@@ -1047,6 +1047,19 @@ export class Session extends EventEmitter {
       return;
     }
     throw new Error("未知命令；/help 查看命令。");
+  }
+  async attachClipboardImage(bytes: Buffer, mediaType: string) {
+    if (this.attachmentLoading) throw new Error('正在添加附件，请稍候');
+    if (this.documents.length + this.images.length >= MAX_ATTACHMENTS) throw new Error('每轮最多 10 个附件');
+    if (!bytes.length || bytes.length > 10 * 1024 * 1024) throw new Error('图片须为 10 MB 以内');
+    this.attachmentLoading = true;
+    this.changed();
+    try {
+      const name = 'clipboard.png';
+      const image = await this.client.json('/app/images', 'POST', { name, dataUrl: `data:${mediaType};base64,${bytes.toString('base64')}` });
+      this.images.push(image);
+      return { id: image.ref as string, name, kind: '图片' as const };
+    } finally { this.attachmentLoading = false; this.changed(); }
   }
   async attachFile(givenPath: string) {
     if (this.attachmentLoading) throw new Error('正在添加附件，请稍候');

@@ -69,3 +69,8 @@ export function enterKey(value: string, key: import('ink').Key): import('ink').K
   return /^[\r\n]+$/.test(value) || /^\[57414(?:;[\d:]+)*u$/.test(value)
     ? {...key, return: true} : key;
 }
+
+/** Ctrl+V matches Codex CLI; Alt+V is a portable explicit clipboard shortcut. */
+export function isClipboardPaste(value: string, key: import('ink').Key): boolean {
+  return value.toLowerCase() === 'v' && !!(key.ctrl || key.meta || key.super);
+}

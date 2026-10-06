@@ -6,7 +6,7 @@ import { agentRuntime } from "./application.js";
 import { runPythonTool } from "./tools/python-bridge.js";
 import type { ToolResult } from "./tools/tool-result.js";
 
-type RuntimeState = { timer?: NodeJS.Timeout; running: boolean; version: 4; stopped?: boolean };
+type RuntimeState = { timer?: NodeJS.Timeout; running: boolean; version: 4; stopped?: boolean; recovered?: boolean };
 export type FocusAgentItem = {
   id: string;
   kind: "notice" | "course";
@@ -165,6 +165,16 @@ async function runCycle(state: RuntimeState): Promise<void> {
   state.running = true;
   let nextDelay = TWO_HOURS_MS;
   try {
+    if (!state.recovered && process.env.SEUDAILY_PERSISTENT === '1') {
+      // The core lock guarantees the previous backend is gone. Release its notice
+      // leases without replaying interrupted turns or changing the saved cadence.
+      const listed = await runPythonTool<ToolResult>('list-focus', {});
+      const data = await fullData<{ items?: Array<FocusAgentItem & { activeAgentRunId?: string }> }>(listed);
+      for (const item of data.items ?? []) {
+        if (item.activeAgentRunId) await recordFocusAgentRun(item.id, item.activeAgentRunId, 'failed', '后端重启中断了上次检查，将按原计划继续');
+      }
+      state.recovered = true;
+    }
     await runCourseFocusQueue();
   } catch (error) {
     console.error("SEUdaily course Focus queue failed", error);

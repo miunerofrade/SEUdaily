@@ -7,12 +7,13 @@ import { projectRoot } from '../runtime/runtime-paths.js';
 import { ensureComponent } from '../distribution/components.js';
 import { VERSION, PROTOCOL } from '../distribution/config.js';
 const clients = new Map<string, { interface: string; expires: number }>();
-let webRoot: string | undefined;
+let webRoot: string | undefined = process.env.SEUDAILY_WEB_ROOT;
 let startupAt = Date.now();
+const persistent = process.env.SEUDAILY_PERSISTENT === '1';
 const managed = process.env.SEUDAILY_MANAGED === '1';
 export function identity() {
   return { name: 'SEUdaily', runtime: 'agent', processId: process.pid, version: VERSION, protocol: PROTOCOL,
-    dataRoot: projectRoot, managed, web: !!webRoot, clients: clients.size };
+    dataRoot: projectRoot, managed, persistent, web: !!webRoot, clients: clients.size };
 }
 export function installLifecycle(app: Hono) {
   app.post('/app/runtime/clients', async c => {
@@ -56,7 +57,7 @@ export function startClientReaper() {
   startupAt = Date.now();
   const timer = setInterval(() => {
     for (const [id, client] of clients) if (client.expires <= Date.now()) clients.delete(id);
-    if (managed && !clients.size && !queueHasWork() && Date.now() - startupAt > 5000) process.emit('SIGTERM');
+    if (managed && !persistent && !clients.size && !queueHasWork() && Date.now() - startupAt > 5000) process.emit('SIGTERM');
   }, 1000);
   timer.unref(); return () => clearInterval(timer);
 }

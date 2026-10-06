@@ -4,8 +4,8 @@ import { mkdtempSync, writeFileSync, readFileSync, symlinkSync, unlinkSync, rmSy
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { storeDocumentContext, resolveDocumentContexts } from '../src/runtime/document-context.ts';
-const directory=join(tmpdir(),`seudaily-document-context-${process.getuid?.()??'user'}`);
+import { storeDocumentContext, resolveDocumentContexts, contextDirectory } from '../src/runtime/document-context.ts';
+const directory=contextDirectory;
 test('documents resolve normally while references cannot escape their private directory', t=>{
  const outside=mkdtempSync(join(tmpdir(),'seudaily-document-test-'));t.after(()=>rmSync(outside,{recursive:true,force:true}));
  const target=join(outside,'outside.json'), original=JSON.stringify({name:'secret',markdown:'private',expiresAt:Date.now()+100000});writeFileSync(target,original);
@@ -33,4 +33,19 @@ test('all ten document contexts reach the prompt resolver', t => {
  const resolved = resolveDocumentContexts(refs);
  assert.equal(resolved.length, 10);
  assert.equal(resolved.at(-1).markdown, 'content-9');
+});
+
+test('document contexts survive an independent process restart with the same data root', async t => {
+ const {execFile} = await import('node:child_process');
+ const {promisify} = await import('node:util');
+ const {pathToFileURL} = await import('node:url');
+ const root = mkdtempSync(join(tmpdir(),'seudaily-doc-restart-'));
+ t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const moduleUrl = pathToFileURL(join(import.meta.dirname,'../src/runtime/document-context.ts')).href;
+ const env = {...process.env,SEUDAILY_PROJECT_ROOT:root,SEUDAILY_INSTALL_ROOT:join(import.meta.dirname,'..')};
+ const ref=randomUUID();
+ const exec=promisify(execFile);
+ await exec(process.execPath,['--import','tsx','--input-type=module','-e',`import {storeDocumentContext} from ${JSON.stringify(moduleUrl)}; storeDocumentContext(${JSON.stringify(ref)},'课程.pdf','parsed markdown');`],{env});
+ const result=await exec(process.execPath,['--import','tsx','--input-type=module','-e',`import {resolveDocumentContexts} from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(resolveDocumentContexts([${JSON.stringify(ref)}])));`],{env});
+ assert.deepEqual(JSON.parse(result.stdout),[{name:'课程.pdf',markdown:'parsed markdown'}]);
 });

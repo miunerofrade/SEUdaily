@@ -35,6 +35,7 @@ def test_source_launcher_missing_build_does_not_start_backend(monkeypatch, tmp_p
 
 def test_standalone_vpn_missing_credentials_never_starts_core(monkeypatch):
     from seudaily import vpn
+    monkeypatch.setattr(vpn, 'campus_direct', lambda: False)
     monkeypatch.setattr(vpn, 'env_value', lambda *_: '')
     monkeypatch.setattr(vpn, 'manager', lambda: pytest.fail('VPN must not start without credentials'))
     with pytest.raises(RuntimeError, match='缺少校园账号或密码'):
@@ -44,6 +45,7 @@ def test_standalone_vpn_missing_credentials_never_starts_core(monkeypatch):
 def test_standalone_vpn_interrupt_stops_owned_core(monkeypatch):
     from unittest.mock import MagicMock
     from seudaily import vpn
+    monkeypatch.setattr(vpn, 'campus_direct', lambda: False)
     monkeypatch.setattr(vpn, 'env_value', lambda *_: 'test-credential')
     monkeypatch.setattr(vpn, 'campus_proxy', lambda: None)
     monkeypatch.setattr(vpn.socket, 'socket', MagicMock())
