@@ -27,8 +27,17 @@ export function parseWindowsListeners(output:string):Listener[] {
 export async function nodeListeners(): Promise<Listener[]> {
   if(process.platform==='win32') {
     const script = "$nodes=@{}; Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction Stop | ForEach-Object {$nodes[[int]$_.ProcessId]=$_.CommandLine}; $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {$nodes.ContainsKey([int]$_.OwningProcess)} | ForEach-Object {@{pid=[int]$_.OwningProcess;port=[int]$_.LocalPort;command=$nodes[[int]$_.OwningProcess]}}); ConvertTo-Json -InputObject $listeners -Compress";
-    const {stdout}=await exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{timeout:10000,windowsHide:true,maxBuffer:4*1024*1024});
-    return parseWindowsListeners(stdout);
+    // CIM/network providers can initialize slowly on a busy Windows host.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const {stdout}=await exec('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{timeout:30000,windowsHide:true,maxBuffer:4*1024*1024});
+        return parseWindowsListeners(stdout);
+      } catch (error) {
+        if (attempt === 0) continue;
+        const failure = error as { killed?: boolean; stderr?: string; message?: string };
+        throw new Error(`无法查询 Windows 服务端口：${failure.killed ? '系统查询超时，请重试' : failure.stderr?.trim() || failure.message}`);
+      }
+    }
   }
   try {const {stdout}=await exec('lsof',['-nP','-iTCP','-sTCP:LISTEN','-Fpcn'],{timeout:5000,maxBuffer:4*1024*1024});return parseLsofListeners(stdout);}
   catch(error) {
