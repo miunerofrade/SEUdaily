@@ -17,6 +17,7 @@ from .campus_auth import CampusAuthError, CampusSession
 from .cancellation import TaskCancelledError
 from .campus_network import network_category
 from .runtime_paths import env_value
+from .academic_calendar import AcademicCalendar
 
 
 DEFAULT_SCHEDULE_URL = (
@@ -1266,11 +1267,34 @@ class ScheduleService:
         self._write_json_atomic(cache_file, result)
         return {**result, "cacheFile": str(cache_file.resolve())}
 
+    @property
+    def calendar(self) -> AcademicCalendar:
+        return AcademicCalendar(self.cache_file.parent / "calendar")
+
+    @staticmethod
+    def _cache_is_fresh(cached: dict[str, Any]) -> bool:
+        try:
+            fetched = datetime.fromisoformat(str(cached.get("fetchedAt", "")).replace("Z", "+00:00"))
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - fetched).total_seconds()
+            return 0 <= age < 24 * 3600
+        except ValueError:
+            return False
+
+    def get_calendar(self, *, refresh: bool = False, local_only: bool = False) -> dict[str, Any]:
+        cached = self.calendar.view()
+        if not local_only and (refresh or not cached.get("attachments")):
+            cached = self.calendar.sync(self._write_json_atomic)
+        return {**cached, "status": "completed" if cached.get("attachments") else "partial",
+                "message": "学校校历与节假日调课通知" if cached.get("attachments") else "校历暂不可用"}
+
     def get_schedule(
         self,
         *,
         refresh: bool = False,
         local_only: bool = False,
+        auto_refresh: bool = False,
         semester: str | None = None,
         include_available_semesters: bool = False,
         prefetch_available_semesters: bool = True,
@@ -1303,6 +1327,7 @@ class ScheduleService:
             cached is not None
             and not refresh
             and not include_available_semesters
+            and (not auto_refresh or (requested and requested != cached.get("currentSemester")) or self._cache_is_fresh(cached))
         ):
             result = {
                 **cached,
@@ -1311,14 +1336,30 @@ class ScheduleService:
                     self._cache_file_for_semester(requested).resolve()
                 ),
             }
+            if auto_refresh and not self.calendar.view().get("attachments"):
+                result["calendar"] = self.calendar.sync(self._write_json_atomic)
             view = result if requested else self._apply_customizations(result)
             return self._filter_by_date(view, target_date)
 
-        result = self._fetch_remote(
-            semester=semester,
-            include_available_semesters=include_available_semesters,
-            prefetch_available_semesters=prefetch_available_semesters,
-        )
+        try:
+            result = self._fetch_remote(
+                semester=semester,
+                include_available_semesters=include_available_semesters,
+                prefetch_available_semesters=prefetch_available_semesters,
+            )
+        except TaskCancelledError:
+            raise
+        except Exception:
+            if cached is None:
+                raise
+            result = {**cached, "status": "cached", "stale": True,
+                      "message": "课表同步暂时失败，使用上次缓存；数据可能已过期。"}
+        if cached is not None and result.get("status") not in {"fresh", "cached", "completed", "empty", "partial", "auth_required"}:
+            result = {**cached, "status": "cached", "stale": True,
+                      "syncFailure": result.get("status"),
+                      "message": "课表同步失败，使用上次缓存；数据可能已过期。"}
+        if result.get("status") in {"fresh", "cached", "completed", "empty", "partial"}:
+            result["calendar"] = self.calendar.sync(self._write_json_atomic)
         if result.get("status") == "auth_required" and cached is not None:
             fallback = {
                 **result,
@@ -1334,6 +1375,7 @@ class ScheduleService:
     def _filter_by_date(
         self, result: dict[str, Any], target_date: str | None
     ) -> dict[str, Any]:
+        result = {"calendar": self.calendar.view(), **result}
         requested = str(target_date or "").strip()
         if not requested:
             return result

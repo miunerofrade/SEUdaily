@@ -109,6 +109,14 @@ def _collect_citations(
         if citation:
             citations.append(citation)
 
+    calendar = result.get("calendar") if action == "get-schedule" else result if action == "get-academic-calendar" else None
+    if isinstance(calendar, dict):
+        for item in calendar.get("attachments") or []:
+            if isinstance(item, dict) and str(item.get("url", "")).startswith("https://jwc.seu.edu.cn/_upload/article/"):
+                citations.append({"id": "calendar-" + str(item.get("sha256", ""))[:16],
+                                  "type": "web", "title": str(item.get("title", "学校校历")),
+                                  "url": item["url"]})
+
     source_paths = result.get("sources") or []
     for index, path in enumerate(source_paths, start=1):
         if not isinstance(path, str):

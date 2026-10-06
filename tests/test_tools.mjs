@@ -103,9 +103,15 @@ export async function runPythonTool() {
   return { status: "auth_required", taskId: "task-test", summary: "Login required", data: {}, artifacts: [], citations: [], warnings: [], metrics: {} };
 }
 `);
-    const { captureCourseMaterialsTool, auditTrainingPlanTool, getScheduleTool } = await import(pathToFileURL(join(directory, "src/runtime/tools/course-tools.js")));
+    const { captureCourseMaterialsTool, auditTrainingPlanTool, getScheduleTool, getCurrentDateTool } = await import(pathToFileURL(join(directory, "src/runtime/tools/course-tools.js")));
     assert.equal(getScheduleTool.inputSchema.parse({}).prefetchAvailableSemesters, true);
-    assert.equal(getScheduleTool.inputSchema.parse({}).localOnly, true);
+    assert.equal(getScheduleTool.inputSchema.parse({}).localOnly, false);
+    assert.equal(getScheduleTool.inputSchema.parse({}).autoRefresh, true);
+    const current = getCurrentDateTool.outputSchema.parse(await getCurrentDateTool.execute({}, {}));
+    assert.equal(current.status, 'completed');
+    const shanghai = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(current.data.timestamp));
+    assert.equal(current.data.date, shanghai);
+    assert.equal(current.data.weekday, new Date(`${shanghai}T12:00:00+08:00`).getUTCDay() || 7);
     assert.equal(getScheduleTool.inputSchema.parse({ prefetchAvailableSemesters: false }).prefetchAvailableSemesters, false);
     const schema = captureCourseMaterialsTool.inputSchema;
     for (const target of [

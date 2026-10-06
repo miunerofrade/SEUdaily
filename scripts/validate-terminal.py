@@ -112,7 +112,7 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             send('/vpn')
             send(b'\r', .35)
             assert any(r.get('vpn') == {'action': 'connect'} for r in records()), '/vpn must connect without overriding the saved port'
-            assert '正在创建 Python 虚拟环境' in output.decode() and '正在安装 Firefox 浏览器' in output.decode(), 'preparation stages must be visible in the terminal'
+            assert '正在创建 Python 虚拟环境' not in output.decode() and '正在安装 Firefox 浏览器' not in output.decode(), 'completed preparation history must not replay in the terminal'
             send('/vpn connect 11081')
             send(b'\r', .35)
             assert any(r.get('vpn') == {'action': 'connect', 'port': 11081} for r in records()), 'Enter must submit a completed VPN command'

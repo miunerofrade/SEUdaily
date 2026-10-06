@@ -303,10 +303,11 @@ export const getScheduleTool = createTool({
       .boolean()
       .default(false)
       .describe("Re-fetch the selected semester from SEU eHall instead of using that semester's local cache"),
+    autoRefresh: z.boolean().default(true).describe("Automatically synchronize a missing or older-than-24-hours current timetable cache; reuse historical semester caches. Network failures retain cached data. Set false to reuse an existing cache regardless of age."),
     localOnly: z
       .boolean()
-      .default(true)
-      .describe("Read only the local timetable cache and never access SEU eHall. Return an empty status when no local cache exists."),
+      .default(false)
+      .describe("Set true for an explicitly offline read: never access the network and return an empty status when no cache exists. The default automatically maintains the timetable and official calendar caches."),
     includeAvailableSemesters: z
       .boolean()
       .default(false)
@@ -395,6 +396,18 @@ export const proposeLocalActionTool = createTool({
   },
 });
 
+export const getAcademicCalendarTool = createTool({
+  ...pythonToolOutput,
+  id: "get-academic-calendar",
+  description: "Read the official SEU academic calendar and school holiday/makeup-class notice from the fixed JWC calendar page. Reuses downloaded attachments by URL and integrity. Use for holidays and school-specific rescheduling instead of searching old news or assuming national rules. Public documents need no campus login.",
+  inputSchema: z.object({
+    cacheFile: scheduleFields.cacheFile,
+    refresh: z.boolean().default(false).describe("Check the official page for new attachment URLs; never redownload intact cached attachments."),
+    localOnly: z.boolean().default(false),
+  }),
+  execute: async (input, options) => runPythonTool("get-academic-calendar", input, options?.abortSignal),
+});
+
 export const getCurrentDateTool = createTool({
   ...pythonToolOutput,
   id: "get-current-date",
@@ -404,8 +417,8 @@ export const getCurrentDateTool = createTool({
   execute: async () => {
     const now = new Date();
     const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-    const weekday = new Date(`${date}T00:00:00+08:00`).getUTCDay();
-    return { status: 'completed', date, weekday: ((weekday + 1) % 7) || 7, timezone: 'Asia/Shanghai', timestamp: now.toISOString() };
+    const weekday = new Date(`${date}T12:00:00+08:00`).getUTCDay() || 7;
+    return completedResult(`上海时间：${date}，${['周一','周二','周三','周四','周五','周六','周日'][weekday - 1]}`, { date, weekday, timezone: 'Asia/Shanghai', timestamp: now.toISOString() });
   },
 });
 

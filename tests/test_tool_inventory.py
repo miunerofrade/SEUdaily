@@ -25,6 +25,7 @@ def test_course_tool_module_exports_only_public_high_level_tools() -> None:
     exported = set(re.findall(r"^export const (\w+Tool) = createTool", source, re.MULTILINE))
     assert exported == {
         "getScheduleTool",
+        "getAcademicCalendarTool",
         "resolveCourseTool",
         "captureCourseMaterialsTool",
         "proposeLocalActionTool",

@@ -8,6 +8,7 @@ import {
   auditTrainingPlanTool,
   captureCourseMaterialsTool,
   getScheduleTool,
+  getAcademicCalendarTool,
   proposeLocalActionTool,
   queryCampusNoticesTool,
   readCampusNoticeTool,
@@ -27,6 +28,7 @@ const tickets = new Map<string, Ticket>();
 const ticketLifetimeMs = 10 * 60 * 1000;
 
 const staticCapabilities: Capability[] = [
+  { namespace: "schedule", tool: getAcademicCalendarTool, aliases: ["校历", "节假日", "国庆", "调休", "调课", "calendar", "holiday"] },
   { namespace: "schedule", tool: getScheduleTool, aliases: ["课表", "schedule", "timetable", "上课"] },
   { namespace: "local-actions", tool: proposeLocalActionTool, aliases: ["修改课表", "移动课程", "创建关注", "focus", "edit schedule"] },
   { namespace: "course-materials", tool: resolveCourseTool, aliases: ["课程", "课次", "回放", "course", "session"] },

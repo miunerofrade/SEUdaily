@@ -18,9 +18,9 @@ const baseAgentInstructions = `
 
 课程资料专项规则（仅在用户确实要查询课程平台点播/回放、抓取课程内容或整理课程资料时适用）：
 1. 先确认目标课程和所需产物；课程不明确时使用 resolve-course 的 search/sessions/resolve 模式。个人课表、今天/明天上课、指定日期课程必须使用课表工具。普通学习问题不需要执行本流程。
-1.1 用户需要从个人课表选课或定位待修改课程时，调用课表工具并设置 localOnly=true，只读取本地缓存。仅在首次同步、用户明确要求重新同步或更新时才允许 localOnly=false，并按需设置 refresh=true；本地缓存不存在时应说明需要用户主动同步，不得自行联网。返回 auth_required 时等待用户通过界面登录。用户查询往年个人课表或为培养方案整理历年课程时，给 get-course-schedule 传学校课表系统的 semester 代码，格式为 YYYY-YYYY-N。通常 N=1 表示暑期学校、N=2 表示秋季学期、N=3 表示春季学期，例如 2025-2026 学年秋季传 2025-2026-2；但学校动态返回的 availableSemesters 是最终依据，不得丢弃其他数字尾码。省略 semester 才表示当前学期，不要把本地“学期名称”设置当成远端课表学期。联网同步默认抓取从当前上海年份减4年对应学年起的全部可选学期，通过已有登录会话直接请求接口并建立历年缓存；保持 prefetchAvailableSemesters=true。只有用户明确要求仅同步单学期时才设为 false。本地读取仍使用 localOnly=true，不得为普通查询触发同步。
+1.1 查询个人课表时调用课表工具，默认 localOnly=false、autoRefresh=true：缓存不存在或当前学期缓存超过24小时会自动通过已有登录会话同步，顺带缓存教务处固定校历入口的校历和节假日调课通知；不需要用户另行要求刷新。用户明确要求离线查询时设置 localOnly=true；明确要求重新同步时设置 refresh=true。网络失败时可用缓存必须保留，并说明缓存可能过期；返回 auth_required 时等待用户通过界面登录，不自行完成验证码或绕过认证。用户查询往年个人课表或为培养方案整理历年课程时，给 get-course-schedule 传学校课表系统的 semester 代码，格式为 YYYY-YYYY-N。通常 N=1 表示暑期学校、N=2 表示秋季学期、N=3 表示春季学期，例如 2025-2026 学年秋季传 2025-2026-2；但学校动态返回的 availableSemesters 是最终依据，不得丢弃其他数字尾码。省略 semester 才表示当前学期，不要把本地“学期名称”设置当成远端课表学期。联网同步默认抓取从当前上海年份减4年对应学年起的全部可选学期，通过已有登录会话直接请求接口并建立历年缓存；保持 prefetchAvailableSemesters=true。只有用户明确要求仅同步单学期时才设为 false。用户明确要求仅本地读取时才使用 localOnly=true。
 1.2 用户询问今天、明天或指定日期的课程时，相对日期先调用 get-current-date 获取 Asia/Shanghai 日期，再把 YYYY-MM-DD 传给 get-course-schedule 的 date 字段。get-course-schedule 不传 date 时返回完整课表；传入 date 后只返回当天课程。禁止使用终端、Workspace 文件或系统命令获取日期，也不要读取课表 resultRef 来自行筛选。
-1.3 当日期筛选返回 missing_semester_start_date 时，说明需要用户在课表设置中填写学期起始日期；不能把空列表解释成当天无课，也不能声称重新同步会自动补齐起始日期。同步工具只同步排课记录，不设置学期起始日期。
+1.3 当日期筛选返回 missing_semester_start_date 时，说明需要用户在课表设置中填写学期起始日期；不能把空列表解释成当天无课，也不能声称重新同步会自动补齐起始日期。节假日、调休优先调用 get-academic-calendar 或使用课表返回的 calendar 校历及学校通知信息，不用全国调休规则代替学校调课安排。同步工具只同步排课记录，不设置学期起始日期。
 2. 课表内课程使用 source=schedule，并把课表返回的 scheduleId 传给查找或抓取工具，不要重复手写课程信息。若课表工具返回了 selectedSemester，后续课次查找或抓取也要把该值作为 target.semester 传入，避免跨学期同名排课歧义。
 2.1 课表外课程使用 source=manual。你可以从用户自然语言中提取 courseName、teacherName、weeklyPeriods；周内节次是实际的第几节，例如第 3–5 节应传 [3,4,5]。信息不足时询问用户，禁止虚构教师或节次，也绝不能把详情页列表序号当成节次。
 3. 日期是可选项。用户未提供日期时，选择与上述三项匹配的最新日期；用户提供日期时必须严格使用该日期，不能自行替换。

@@ -11,6 +11,12 @@ from seudaily.schedule import DEFAULT_SCHEDULE_LAUNCH_URL, ScheduleService
 import seudaily.schedule as schedule_module
 
 
+@pytest.fixture(autouse=True)
+def offline_calendar(monkeypatch):
+    # Timetable fixtures never access the public web. Calendar IO has separate tests.
+    monkeypatch.setattr(schedule_module.AcademicCalendar, "sync", lambda self, write_json: self.view())
+
+
 @pytest.mark.parametrize("year,earliest", [(2026, 2022), (2027, 2023)])
 def test_sync_year_window_moves_with_shanghai_calendar_year(monkeypatch, year, earliest):
     class Clock(datetime):
@@ -703,3 +709,32 @@ def test_get_schedule_local_only_never_fetches_remote(tmp_path: Path, monkeypatc
     assert result["status"] == "empty"
     assert result["courses"] == []
     assert result["localOnly"] is True
+
+
+def test_automatic_sync_missing_stale_fresh_and_offline_fallback(tmp_path, monkeypatch):
+    from datetime import timezone, timedelta
+    service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
+    calls = []
+    def fetch(**kwargs):
+        calls.append(kwargs)
+        result = {'version':2,'status':'fresh','courses':[{'courseName':'已同步课程'}], 'fetchedAt':datetime.now(timezone.utc).isoformat()}
+        service._write_json_atomic(service.cache_file, result)
+        return result
+    monkeypatch.setattr(service, '_fetch_remote', fetch)
+    assert service.get_schedule(auto_refresh=True)['courses'][0]['courseName'] == '已同步课程'
+    assert len(calls) == 1
+    assert service.get_schedule(auto_refresh=True)['status'] == 'cached'
+    assert len(calls) == 1
+    cached = json.loads(service.cache_file.read_text())
+    cached['fetchedAt'] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    service._write_json_atomic(service.cache_file, cached)
+    assert service.get_schedule(local_only=True, auto_refresh=True)['status'] == 'cached'
+    assert len(calls) == 1
+    service.get_schedule(auto_refresh=True)
+    assert len(calls) == 2
+    service._write_json_atomic(service.cache_file, cached)
+    monkeypatch.setattr(service, '_fetch_remote', lambda **kw: (_ for _ in ()).throw(ConnectionError('offline')))
+    fallback = service.get_schedule(auto_refresh=True)
+    assert fallback['stale'] is True
+    assert fallback['courses'][0]['courseName'] == '已同步课程'
+    assert service.cache_file.exists()
