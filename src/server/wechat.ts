@@ -18,7 +18,11 @@ async function prepareOnce() {
 }
 export async function startWeChatRuntime() {
   await prepare();
-  if ((await wechatRuntime.status()).state !== 'disconnected') { ensurePersistentRuntime(); await wechatRuntime.start(); }
+  if ((await wechatRuntime.status()).state !== 'disconnected') {
+    // Restoring a saved channel is a service boot; recover old Focus leases too.
+    process.env.SEUDAILY_PERSISTENT = '1';
+    ensurePersistentRuntime(); await wechatRuntime.start();
+  }
 }
 export function installWeChatRoutes(app: Hono) {
   app.get('/app/wechat', async c => { await prepare(); return c.json(await wechatRuntime.status()); });

@@ -6,17 +6,18 @@ export function WeChatApp() {
   const {exit} = useApp(), {stdout} = useStdout();
   const [status,setStatus] = useState<WeChatStatus>(), [error,setError] = useState(''), [busy,setBusy] = useState(true), [code,setCode] = useState('');
   const client = useRef(new Client(20)).current;
+  const lifetime = useRef(new AbortController()).current;
   const alive = useRef(true), operation = useRef(false);
   const run = async (path:string,body?:unknown) => {
     if (operation.current) return;
     operation.current = true; setBusy(true); setError('');
-    try { const next = await client.json(path,'POST',body ?? {}); if (alive.current) {setStatus(next);setCode('');} }
+    try { const next = await client.json(path,'POST',body ?? {},lifetime.signal); if (alive.current) {setStatus(next);setCode('');} }
     catch (cause) { if (alive.current) setError(clean((cause as Error).message)); }
     finally { operation.current = false; if (alive.current) setBusy(false); }
   };
   useEffect(() => {
     alive.current = true;
-    const abort = new AbortController(); let polling = false;
+    const abort = lifetime; let polling = false;
     void run('/app/wechat/connect');
     const timer = setInterval(async () => {
       if (polling || operation.current) return; polling = true;

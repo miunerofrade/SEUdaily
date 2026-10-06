@@ -142,3 +142,15 @@ test('WeChat promotes a temporary backend without replacing its process or clien
   web.kill('SIGTERM');await eventually(async () => assert.equal((await f.request('/api')).clients,0),clientExpiryTimeout);
   await delay(6500);assert.equal((await f.request('/api')).processId,initial.processId);
 });
+
+test('ordinary commands restore a saved WeChat binding as a persistent service after restart', {timeout:60000}, async t=>{
+  const f=await fixture(t);const service=f.start(['serve']);await eventually(()=>f.request('/app/wechat'));
+  const initial=await f.request('/api');
+  const db=new DatabaseSync(join(f.directory,'.seudaily','agent.db'));
+  db.prepare('INSERT INTO wechat_account VALUES(1,?)').run(JSON.stringify({token:'fixture-token',botId:'fixture-bot',userId:'fixture-user',base:'https://ilinkai.weixin.qq.com',cursor:'saved-cursor',needsLogin:true}));db.close();
+  await f.request('/app/runtime/stop',{method:'POST'});await eventually(async()=>assert.notEqual(service.exitCode,null));
+  await exec(process.execPath,[cli,'sessions',...f.args],{env:f.env});
+  const restored=await f.request('/api');assert.equal(restored.persistent,true);assert.notEqual(restored.processId,initial.processId);assert.equal(restored.clients,0);
+  assert.equal((await f.request('/app/wechat')).state,'needs_login');
+  await delay(6500);assert.equal((await f.request('/api')).processId,restored.processId);
+});
