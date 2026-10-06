@@ -29,7 +29,7 @@ SEUdaily 微信 demo
 你好 SEUdaily
 ```
 
-固定内部会话 ID 为 `wechat-demo`，资源 ID 为 `seudaily-wechat-demo`。每条消息保存原始微信 message_id（缺失时用 client_id）、发送人、微信 session_id、内部会话和资源 ID。回复携带这条消息的 context_token，to_user_id 指向原发送人；稳定的 client_id 由 Bot、用户、原消息 ID 生成。前端连接窗口展示最近消息和回复状态。
+固定内部会话 ID 为 `wechat-demo`，资源 ID 为 `seudaily-wechat-demo`。接收兼容可选 type/state 字段缺省及 NEW/FINISH 用户消息，过滤生成中消息和 Bot 消息。每条消息保存原始微信 message_id（缺失时用 client_id）、发送人、微信 session_id、内部会话和资源 ID。回复携带这条消息的 context_token，to_user_id 指向原发送人；稳定的 client_id 由 Bot、用户、原消息 ID 生成。前端连接窗口展示最近消息和回复状态。
 
 此阶段尚未连接模型、校园工具或现有 Agent 会话；无需模型 API key 就能验证入站、出站和扫码。只接受绑定时扫码者的个人文本，不接受群消息或其他人的消息。图片、语音和文件不下载、不解密、不进入 RAG；收到带有这些内容的消息时，回复当前仅支持文本。后续会话设计和媒体支持另行实现。
 

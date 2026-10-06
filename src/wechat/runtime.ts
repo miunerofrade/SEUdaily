@@ -113,7 +113,7 @@ export class WeChatRuntime {
   }
   private incoming(account: BotAccount, msg: WeChatMessage) {
     // The first demo is private: accept only the user who enrolled this bot.
-    if (msg.message_type !== 1 || msg.message_state !== 2 || msg.group_id || msg.from_user_id !== account.userId || !msg.context_token || msg.to_user_id && msg.to_user_id !== account.botId) return undefined;
+    if (msg.message_type !== undefined && msg.message_type !== 1 || msg.message_state !== undefined && ![0,2].includes(msg.message_state) || msg.group_id || msg.from_user_id !== account.userId || !msg.context_token || msg.to_user_id && msg.to_user_id !== account.botId) return undefined;
     const sourceId = msg.message_id ?? msg.client_id;
     if (typeof sourceId !== 'string' || typeof msg.context_token !== 'string' || msg.session_id !== undefined && typeof msg.session_id !== 'string') return undefined;
     if (!sourceId || !Array.isArray(msg.item_list)) return undefined;

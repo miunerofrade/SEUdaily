@@ -135,3 +135,14 @@ test('shutdown cancels QR acquisition and lifecycle notification failures do not
   const second=new WeChatRuntime(db,{notify:async(a,event)=>{events.push(event);throw new Error('notification failed');},updates:async(a,signal)=>{events.push('updates');return waiting(signal);}},5);
   t.after(()=>db.close());await second.start();await eventually(async()=>assert.ok(events.includes('updates')));await second.close();assert.deepEqual(events,['start','updates','stop']);
 });
+
+test('incoming optional type/state fields and NEW user messages remain compatible', async t=>{
+  const db=new LocalClient(':memory:');await seed(db);let delivered=false;const replies=[];
+  const runtime=new WeChatRuntime(db,{send:async(a,payload)=>{replies.push(payload);},updates:async(a,signal)=>{
+    if(delivered)return waiting(signal);delivered=true;
+    const optional={...message,message_id:'optional-fields'};delete optional.message_type;delete optional.message_state;
+    return {msgs:[optional,{...message,message_id:'new-user-message',message_state:0},{...message,message_id:'generating',message_state:1},{...message,message_id:'bot-echo',message_type:2}],get_updates_buf:'compatible'};
+  }},5);
+  t.after(async()=>{await runtime.close();await db.close();});await runtime.start();
+  await eventually(async()=>assert.equal(replies.length,2));assert.equal((await db.execute('SELECT COUNT(*) AS n FROM wechat_messages')).rows[0].n,2);
+});
