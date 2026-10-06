@@ -147,13 +147,15 @@ export class Session extends EventEmitter {
   vpnWatching = false;
   vpnState = '';
   preparationMessage = '';
-  private preparationSequence = 0;
+  private preparationSequence: number | null = null;
   async pollPreparation() {
     const state = await this.client.json('/app/runtime/preparation', 'GET', undefined, AbortSignal.timeout(4000));
+    // Start at the current snapshot so a persistent backend does not replay old notices.
+    if (this.preparationSequence === null) this.preparationSequence = Math.max(0, ...(state.events ?? []).map((event: any) => event.id));
     for (const event of state.events ?? []) {
-      if (event.id <= this.preparationSequence) continue;
+      if (event.id <= (this.preparationSequence ?? 0)) continue;
       this.preparationSequence = event.id;
-      if (this.messages.at(-1)?.text !== event.message) this.show(event.message, event.state === 'failed' ? '错误' : '系统');
+      if (event.state === 'failed' && this.messages.at(-1)?.text !== event.message) this.show(event.message, '错误');
     }
     const message = Object.entries(state).filter(([name, item]) => name !== 'events' && (item as any)?.state === 'preparing').map(([, item]) => (item as any).message).join(' · ');
     if (message !== this.preparationMessage) { this.preparationMessage = message; this.changed(); }

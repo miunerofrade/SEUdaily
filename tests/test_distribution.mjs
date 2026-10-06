@@ -236,3 +236,35 @@ test('update finds a newer version and updates the existing global installation'
     await rm(temporary,{recursive:true,force:true});
   }
 });
+
+test('cached Python environments are checked silently in a fresh process', async t => {
+  const cache = await mkdtemp(join(tmpdir(), 'seudaily-prepared-'));
+  t.after(() => rm(cache, { recursive: true, force: true }));
+  const component = join(cache, 'components', 'python');
+  const environment = join(cache, 'python', VERSION);
+  const executable = join(environment, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  const uvVersion = JSON.parse(await readFile(join(root, 'src/distribution/uv-release.json'), 'utf8')).version;
+  const uv = join(cache, 'uv', uvVersion, process.platform === 'win32' ? 'uv.exe' : 'uv');
+  await mkdir(component, { recursive: true });
+  await mkdir(dirname(executable), { recursive: true });
+  await mkdir(dirname(uv), { recursive: true });
+  await writeFile(join(component, 'package.json'), JSON.stringify({ version: VERSION }));
+  await writeFile(join(environment, 'ready.json'), JSON.stringify({ version: VERSION }));
+  await writeFile(executable, '');
+  await writeFile(uv, '');
+  // Empty binaries and PATH make any accidental interpreter execution/install fail.
+  const script = `import {ensurePython,preparationStatus} from './src/distribution/components.ts';
+    const executable = await ensurePython();
+    console.log(JSON.stringify({executable, status:preparationStatus()}));`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await exec(node, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: root, env: freshEnv({ SEUDAILY_CACHE_DIR: cache, SEUDAILY_COMPONENT_DIR: dirname(component), PATH: '' }), timeout: 10_000,
+    });
+    assert.equal(result.stderr, '');
+    const { status, executable: actual } = JSON.parse(result.stdout);
+    assert.equal(actual, executable);
+    assert.equal(status.python.state, 'ready');
+    assert.equal(status.python.message, '');
+    assert.deepEqual(status.events, []);
+  }
+});

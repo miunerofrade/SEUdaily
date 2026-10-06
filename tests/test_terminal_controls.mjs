@@ -79,12 +79,18 @@ test('VPN feedback appears before the request completes and survives queue-histo
  session.queueItems=[{id:'done',state:'running'}];await session.pollQueue();
  assert.equal(session.messages.at(-1).text,'VPN 已连接');
 });
-test('preparation polling retains quick intermediate stages without duplicating them',async()=>{
+test('preparation polling ignores old notices and shows installation only in the status line',async()=>{
  const session=new Session({command:'chat'},'/tmp');
- session.client.json=async()=>({python:{state:'ready'},events:[{id:1,state:'preparing',message:'正在创建虚拟环境'},{id:2,state:'preparing',message:'正在安装 Python 依赖'},{id:3,state:'ready',message:'准备完成'}]});
+ let snapshot={python:{state:'ready'},events:[{id:1,state:'preparing',message:'正在安装 Python 依赖'},{id:2,state:'ready',message:'准备完成'}]};
+ session.client.json=async()=>snapshot;
  await session.pollPreparation();await session.pollPreparation();
- assert.deepEqual(session.messages.map(message=>message.text),['正在创建虚拟环境','正在安装 Python 依赖','准备完成']);
- assert.equal(session.preparationMessage,'');
+ assert.equal(session.messages.length,0);assert.equal(session.preparationMessage,'');
+ snapshot={python:{state:'preparing',message:'正在安装文档依赖'},events:[...snapshot.events,{id:3,state:'preparing',message:'正在安装文档依赖'}]};
+ await session.pollPreparation();assert.equal(session.preparationMessage,'正在安装文档依赖');assert.equal(session.messages.length,0);
+ snapshot={python:{state:'ready'},events:[...snapshot.events,{id:4,state:'ready',message:'准备完成'}]};
+ await session.pollPreparation();assert.equal(session.preparationMessage,'');assert.equal(session.messages.length,0);
+ snapshot={python:{state:'failed'},events:[...snapshot.events,{id:5,state:'failed',message:'安装失败，请重试'}]};
+ await session.pollPreparation();await session.pollPreparation();assert.deepEqual(session.messages.map(message=>message.text),['安装失败，请重试']);
 });
 test('invalid model error points to settings without exposing provider details',async()=>{
  const {DeepSeekProvider}=await import('../src/agent/provider.ts');const original=globalThis.fetch;

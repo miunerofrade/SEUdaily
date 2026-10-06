@@ -131,11 +131,11 @@ type PreparationKind = 'python' | 'browser' | 'documents' | 'summary' | 'asr' | 
 const preparations = Object.fromEntries(['python', 'browser', 'documents', 'summary', 'asr', 'media', 'vpn'].map(name => [name, { state: 'idle', message: '', startedAt: 0 }])) as Record<PreparationKind, {state: string; message: string; startedAt: number}>;
 let preparationSequence = 0;
 const preparationEvents: { id: number; name: string; state: string; message: string }[] = [];
-export function setPreparation(name: PreparationKind, state: string, message: string) {
+export function setPreparation(name: PreparationKind, state: string, message: string, notify = true) {
   const previous = preparations[name];
   const next = { state, message, startedAt: previous.state !== 'preparing' && state === 'preparing' ? Date.now() : previous.startedAt };
   preparations[name] = next;
-  if (state !== previous.state || message !== previous.message) {
+  if (notify && (state !== previous.state || message !== previous.message)) {
     preparationEvents.push({ id: ++preparationSequence, name, state, message });
     if (preparationEvents.length > 30) preparationEvents.shift();
   }
@@ -143,13 +143,14 @@ export function setPreparation(name: PreparationKind, state: string, message: st
 export function preparationStatus() { return { ...preparations, events: [...preparationEvents] }; }
 export function ensurePython(): Promise<string> {
   if (!pythonLoading) {
-    setPreparation('python', 'preparing', '正在准备校园工具运行环境（首次使用需要下载依赖）');
     pythonLoading = preparePython().then(executable => {
-      setPreparation('python', 'ready', '校园工具运行环境已就绪'); return executable;
+      const installed = preparations.python.state === 'preparing';
+      setPreparation('python', 'ready', installed ? '校园工具运行环境已就绪' : '', installed); return executable;
     }).catch(error => {
       pythonLoading = undefined;
       const detail = error.killed ? '下载或安装超过 10 分钟，请检查网络后重试' : String(error.stderr || error.message).trim().split('\n').slice(-6).join('\n');
-      const message = `校园工具运行环境准备失败（${preparations.python.message.replace(/…$/, '')}）：${detail}`;
+      const stage = preparations.python.message.replace(/…$/, '');
+      const message = `校园工具运行环境准备失败${stage ? `（${stage}）` : ''}：${detail}`;
       setPreparation('python', 'failed', message);
       throw new Error(message);
     });
@@ -158,7 +159,6 @@ export function ensurePython(): Promise<string> {
 }
 async function preparePython(): Promise<string> {
   process.env.PLAYWRIGHT_BROWSERS_PATH ??= join(cacheRoot(), 'browsers');
-  setPreparation('python', 'preparing', '正在检查或下载 Python 工具组件…');
   const component = await ensureComponent('python');
   process.env.SEUDAILY_MEDIA_REQUIREMENTS = join(component, 'media-requirements.txt');
   process.env.SEUDAILY_OPTIONAL_REQUIREMENTS_DIR = component;
