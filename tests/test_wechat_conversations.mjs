@@ -35,6 +35,7 @@ async function fixture(t, options={}) {
   t.after(async()=>{await runtime.close();await agent.shutdown();await store.close();});
   return {store,agent,conversations,requests,replies,
     status:()=>runtime.status(),
+    async stop(){await runtime.close();},
     async restart(){await runtime.close();runtime=new WeChatRuntime(store.client,protocol,5,conversations);await runtime.start();},
     send(...texts){const ids=texts.map(text=>{const id=String(++counter);batches.push([{message_id:id,from_user_id:account.userId,to_user_id:account.botId,context_token:'route-'+id,item_list:[{type:1,text_item:{text}}]}]);return id;});return ids;},
     async reply(id){return eventually(()=>{const reply=replies.find(item=>item.context_token==='route-'+id);assert.ok(reply,'reply '+id);return reply.item_list[0].text_item.text;});},
@@ -166,4 +167,72 @@ test('outbound credential expiry pauses the pump durably without losing its curs
   assert.equal(saved.needsLogin,true);assert.equal(saved.cursor,'1');
   await delay(30);assert.equal(attempts,1);
   assert.equal((await f.store.client.execute('SELECT state FROM wechat_messages')).rows[0].state,'pending');
+});
+
+test('delete confirms one session, clears its history atomically and never reuses its number',async t=>{
+  const f=await fixture(t);
+  await f.reply(f.send('要删除的内容')[0]);const first=(await f.status()).currentSession;
+  const selected=await f.store.contextMessages(first.threadId,WECHAT_RESOURCE);
+  await f.store.saveSummary(selected.summaryKey,{throughSequence:1,value:{goals:['待删除摘要']},updatedAt:new Date().toISOString()});
+  await f.reply(f.send('/new 保留的会话')[0]);const second=(await f.status()).currentSession;
+  assert.match(await f.reply(f.send('/delete 1 确认')[0]),/没有有效的删除确认/);
+  assert.ok(await f.store.getThreadById({threadId:first.threadId}));
+  assert.match(await f.reply(f.send('/delete 1')[0]),/5 分钟内发送 \/delete 1 确认/);
+  await f.restart();
+  const confirmationId=f.send('/delete 1 确认')[0];assert.match(await f.reply(confirmationId),/已删除 #1.*当前会话不变/s);
+  assert.equal(await f.store.getThreadById({threadId:first.threadId}),undefined);
+  assert.equal((await f.store.allMessages(first.threadId,WECHAT_RESOURCE)).length,0);
+  assert.equal(await f.store.summary(selected.summaryKey),undefined);
+  assert.equal((await f.status()).currentSession.threadId,second.threadId);
+  assert.match(await f.reply(f.send('/sessions')[0]),/#2 保留的会话/);
+  assert.doesNotMatch(await f.reply(f.send('/sessions')[0]),/#1/);
+  const deletedRows=(await f.store.client.execute("SELECT text,reply,payload FROM wechat_messages WHERE id='1'")).rows;
+  assert.equal(deletedRows[0].text,'');assert.equal(deletedRows[0].reply,'');assert.equal(deletedRows[0].payload,'{}');
+  // Replay of the confirmation ID must not delete any other session.
+  const row=(await f.store.client.execute({sql:'SELECT * FROM wechat_messages WHERE id=?',args:[confirmationId]})).rows[0];
+  await f.conversations.route(row,account);
+  assert.ok(await f.store.getThreadById({threadId:second.threadId}));
+  assert.match(await f.reply(f.send('/delete')[0]),/准备删除 #2/);
+  assert.match(await f.reply(f.send('/delete 2 确认')[0]),/下一条普通消息会新建会话/);
+  assert.equal((await f.status()).currentSession,undefined);
+  assert.equal(await f.reply(f.send('新的内容')[0]),'答：新的内容');
+  assert.equal((await f.status()).currentSession.number,3);
+  assert.equal(f.requests.length,2);
+});
+
+test('delete cancellation, expiry and foreign/missing IDs cannot remove conversations',async t=>{
+  const f=await fixture(t);await f.reply(f.send('/new 保留')[0]);const first=(await f.status()).currentSession;
+  assert.match(await f.reply(f.send('/help')[0]),/\/delete/);
+  await f.reply(f.send('/delete')[0]);assert.match(await f.reply(f.send('/delete 1 取消')[0]),/已取消/);
+  assert.match(await f.reply(f.send('/delete 1 确认')[0]),/没有有效/);
+  await f.reply(f.send('/delete 1')[0]);await f.store.client.execute('UPDATE wechat_delete_confirmations SET expiresAt=0');
+  assert.match(await f.reply(f.send('/delete 1 确认')[0]),/没有有效/);
+  for(const text of ['/delete 999','/delete 0','/delete 9007199254740992','/delete nope'])assert.match(await f.reply(f.send(text)[0]),/没有找到/);
+  assert.ok(await f.store.getThreadById({threadId:first.threadId}));assert.equal(f.requests.length,0);
+});
+
+test('delete refuses running or approval-blocked sessions instead of losing pending work',async t=>{
+  let release;const gate=new Promise(resolve=>release=resolve);t.after(()=>release());
+  const f=await fixture(t,{stream:async function*(messages,tools,signal){await Promise.race([gate,delay(60000,undefined,{signal})]);yield {type:'complete',message:{role:'assistant',content:'完成'},finishReason:'stop'};}});
+  const id=f.send('运行中')[0];await eventually(()=>assert.equal(f.requests.length,1));const first=(await f.status()).currentSession;
+  assert.match(await f.reply(f.send('/delete')[0]),/暂时不能删除/);
+  assert.ok(await f.store.getThreadById({threadId:first.threadId}));release();await f.reply(id);
+  const approval=await fixture(t,{tools:{probe:{id:'probe',description:'write',requireApproval:true,inputSchema:z.object({}),execute:async()=>({})}},stream:async function*(){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'call',type:'function',function:{name:'probe',arguments:'{}'}}]},finishReason:'tool_calls'};}});
+  await approval.reply(approval.send('等待审批')[0]);assert.match(await approval.reply(approval.send('/delete')[0]),/暂时不能删除/);
+});
+
+test('delete rollback restores the thread, history, cursor and confirmation when inbox commit fails',async t=>{
+  const f=await fixture(t);await f.reply(f.send('不能丢的内容')[0]);const first=(await f.status()).currentSession;
+  await f.reply(f.send('/delete 1')[0]);await f.stop();
+  await f.store.client.execute({sql:"INSERT INTO wechat_messages(account,id,peer,session,text,reply,threadId,resourceId,payload,state,createdAt) VALUES(?,?,?,?,?,'','','','{}','received',?)",args:[account.botId,'delete-failure',account.userId,'external','/delete 1 确认',Date.now()]});
+  const row=(await f.store.client.execute("SELECT * FROM wechat_messages WHERE id='delete-failure'")).rows[0];
+  await f.store.client.execute("CREATE TRIGGER rollback_delete BEFORE UPDATE ON wechat_messages WHEN NEW.id='delete-failure' AND NEW.state='command' BEGIN SELECT RAISE(ABORT,'rollback deletion'); END");
+  await assert.rejects(f.conversations.route(row,account),/rollback deletion/);
+  assert.ok(await f.store.getThreadById({threadId:first.threadId}));
+  assert.equal((await f.store.allMessages(first.threadId,WECHAT_RESOURCE)).length,2);
+  assert.equal((await f.conversations.current(account)).threadId,first.threadId);
+  assert.equal((await f.store.client.execute('SELECT * FROM wechat_delete_confirmations')).rows.length,1);
+  assert.equal((await f.store.client.execute("SELECT state FROM wechat_messages WHERE id='delete-failure'")).rows[0].state,'received');
+  await f.store.client.execute('DROP TRIGGER rollback_delete');await f.conversations.route(row,account);
+  assert.equal(await f.store.getThreadById({threadId:first.threadId}),undefined);
 });

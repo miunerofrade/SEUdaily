@@ -9,6 +9,18 @@ export type Summary = {
     value: Record<string, any>;
     updatedAt: string;
 };
+export function threadDeletionStatements(threadId: string): InStatement[] {
+    const statements: InStatement[] = ['messages', 'runs', 'legacy_memory', 'message_queue'].map(table => ({
+        sql: `DELETE FROM ${table} WHERE threadId=?`, args: [threadId],
+    }));
+    const prefix = `${threadId}:branch:`;
+    statements.push(
+        { sql: 'DELETE FROM summaries WHERE threadId=? OR substr(threadId,1,?)=?', args: [threadId, prefix.length, prefix] },
+        { sql: 'DELETE FROM threads WHERE id=?', args: [threadId] },
+    );
+    return statements;
+}
+
 function legacySnapshot(path: string): Record<string, any[]> {
     const database = new DatabaseSync(resolve(path), { readOnly: true });
     try {
@@ -221,14 +233,7 @@ export class AgentStore {
         const thread = await this.getThreadById({ threadId, resourceId });
         if (!thread)
             return;
-        const statements: InStatement[] = ['messages', 'runs', 'legacy_memory', 'message_queue'].map(table => ({
-            sql: `DELETE FROM ${table} WHERE threadId=?`, args: [threadId],
-        }));
-        const prefix = `${threadId}:branch:`;
-        statements.push(
-            { sql: 'DELETE FROM summaries WHERE threadId=? OR substr(threadId,1,?)=?', args: [threadId, prefix.length, prefix] },
-            { sql: 'DELETE FROM threads WHERE id=?', args: [threadId] },
-        );
+        const statements = threadDeletionStatements(threadId);
         await this.client.batch(statements, 'write');
     }
     async saveRun(run: RunState) { await this.saveOwned(run); }

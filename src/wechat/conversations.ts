@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { AgentStore } from '../agent/storage.js';
+import { AgentStore, threadDeletionStatements } from '../agent/storage.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import { inferToolNamespaces } from '../agent/namespaces.js';
 import { redactText } from '../agent/redaction.js';
@@ -12,6 +12,7 @@ export const WECHAT_HELP = `微信聊天
 /new [名称] — 开始新会话
 /sessions [页码] — 查看会话，★ 表示当前
 /use 编号 — 切换会话
+/delete [编号] — 删除会话，需再次确认
 /context — 当前会话的摘要和最近讨论
 /history [页码] — 最近对话，1 为最新
 /help — 查看这些命令
@@ -29,6 +30,7 @@ export class WeChatConversations {
     await this.store.client.batch([
       'CREATE TABLE IF NOT EXISTS wechat_sessions (account TEXT NOT NULL, peer TEXT NOT NULL, number INTEGER NOT NULL, threadId TEXT UNIQUE NOT NULL, PRIMARY KEY(account,peer,number))',
       'CREATE TABLE IF NOT EXISTS wechat_current (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(account,peer))',
+      'CREATE TABLE IF NOT EXISTS wechat_delete_confirmations (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, number INTEGER NOT NULL, expiresAt INTEGER NOT NULL, PRIMARY KEY(account,peer))',
     ]);
   }
   async current(account: BotAccount) {
@@ -93,6 +95,37 @@ export class WeChatConversations {
         else {
           threadId = String(target.threadId);
           await tx.execute({sql:'INSERT INTO wechat_current VALUES(?,?,?) ON CONFLICT(account,peer) DO UPDATE SET threadId=excluded.threadId',args:[account.botId,account.userId,threadId]});
+        }
+      } else if (name === 'delete') {
+        const parsed = argument ? /^([1-9]\d*)(?:\s+(确认|取消))?$/.exec(argument) : null;
+        const number = parsed ? Number(parsed[1]) : undefined;
+        const target = !argument || (parsed && Number.isSafeInteger(number)) ? (await tx.execute({sql:`SELECT s.threadId,s.number,t.title FROM wechat_sessions s JOIN threads t ON t.id=s.threadId WHERE s.account=? AND s.peer=? AND ${!argument ? 's.threadId=?' : 's.number=?'}`,args:[account.botId,account.userId,!argument ? threadId : number!]})).rows[0] : undefined;
+        if (!target) reply = '没有找到这个会话。用 /sessions 查看编号，再发送 /delete 编号；不带编号表示当前会话。';
+        else if (parsed?.[2] === '取消') {
+          await tx.execute({sql:'DELETE FROM wechat_delete_confirmations WHERE account=? AND peer=? AND threadId=?',args:[account.botId,account.userId,String(target.threadId)]});
+          reply = '已取消删除，会话已保留。';
+        } else {
+          const id = String(target.threadId), label = `#${target.number}「${clip(String(target.title || '新对话').replace(/^微信 · /,''),40)}」`;
+          const running = this.agent.isActive(id) || (await tx.execute({sql:"SELECT 1 FROM runs WHERE threadId=? AND status IN ('running','waiting') LIMIT 1",args:[id]})).rows.length > 0;
+          const unsent = (await tx.execute({sql:"SELECT 1 FROM wechat_messages WHERE account=? AND peer=? AND threadId=? AND state IN ('queued','pending') LIMIT 1",args:[account.botId,account.userId,id]})).rows.length > 0;
+          if (running || unsent) reply = `暂时不能删除 ${label}：还有任务、待审批操作或未发送的回复。请等待完成，或在网页／终端处理后再试。`;
+          else if (parsed?.[2] !== '确认') {
+            await tx.execute({sql:'INSERT INTO wechat_delete_confirmations VALUES(?,?,?,?,?) ON CONFLICT(account,peer) DO UPDATE SET threadId=excluded.threadId,number=excluded.number,expiresAt=excluded.expiresAt',args:[account.botId,account.userId,id,Number(target.number),Date.now()+5*60_000]});
+            reply = `准备删除 ${label} 的本地会话记录，删除后无法恢复。\n\n5 分钟内发送 /delete ${target.number} 确认\n取消请发送 /delete ${target.number} 取消`;
+          } else {
+            const confirmation = (await tx.execute({sql:'SELECT threadId,expiresAt FROM wechat_delete_confirmations WHERE account=? AND peer=?',args:[account.botId,account.userId]})).rows[0];
+            if (confirmation?.threadId !== id || Number(confirmation.expiresAt) <= Date.now()) reply = `没有有效的删除确认。请先发送 /delete ${target.number}，核对会话后再确认。`;
+            else {
+              for (const statement of threadDeletionStatements(id)) await tx.execute(statement);
+              await tx.execute({sql:'DELETE FROM wechat_current WHERE account=? AND peer=? AND threadId=?',args:[account.botId,account.userId,id]});
+              await tx.execute({sql:'DELETE FROM wechat_delete_confirmations WHERE account=? AND peer=?',args:[account.botId,account.userId]});
+              // Preserve inbound IDs as deduplication tombstones, but erase deleted text/routes.
+              await tx.execute({sql:"UPDATE wechat_messages SET text='',reply='',payload='{}',threadId='',resourceId='' WHERE account=? AND peer=? AND threadId=? AND state='sent'",args:[account.botId,account.userId,id]});
+              const deletedCurrent = threadId === id;
+              if (deletedCurrent) threadId = '';
+              reply = `已删除 ${label}。${deletedCurrent ? '\n下一条普通消息会新建会话；/use 编号 可切换到其他会话。' : '\n当前会话不变。'}`;
+            }
+          }
         }
       } else if (name !== 'new' && !['context','history'].includes(name!)) reply = `未识别命令 /${clip(name!,40)}。发送 /help 查看用法。`;
       // Store command state first; context/history are resolved below without holding SQLite across Agent reads.

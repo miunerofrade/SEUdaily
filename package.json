@@ -1,6 +1,6 @@
 {
   "name": "seudaily",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "东南大学校园助手：内置终端界面与后端，支持课表、课程资料、培养方案、校园通知、Focus 和 VPN。",
   "private": true,
   "packageManager": "npm@10.9.9",
