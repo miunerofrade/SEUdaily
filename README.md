@@ -284,6 +284,8 @@ npm run build
 node bin/seudaily.mjs --data-dir "$PWD"
 ```
 
+构建后执行 `npm link --ignore-scripts`，即可直接使用 `seudaily` 和所有子命令，无须加 `uv run`。继续使用仓库内的数据时，可在当前终端执行 `export SEUDAILY_DATA_DIR="$PWD"`，或每次传入 `--data-dir "$PWD"`。修改源码后重新执行 `npm run build`。
+
 源码兼容入口 `uv run seudaily` 仍可使用，默认保留仓库数据。独立开发后端与网页可运行 `npm run dev` 和 `npm run dev:web`；Vite 仅用于开发。
 
 ```bash
@@ -303,6 +305,6 @@ SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/
 
 ### 微信接入 demo
 
-执行 `seudaily wechat`（也支持 `wechat`），在 TUI 扫码接入；或运行 `seudaily web`，点击“微信”在浮层扫码和输入手机验证码。命令自动复用或启动常驻后端，退出界面后继续收发。第一版使用固定 `wechat-demo` 会话回显文本与原始微信消息 ID，不需要模型配置；暂未接入模型对话、媒体或 RAG。接入资格及真实账号测试需本人完成。操作、存储与恢复说明见 [docs/wechat.md](docs/wechat.md)。
+执行 `seudaily wechat`，在 TUI 扫码接入；或运行 `seudaily web`，点击“微信”在浮层扫码和输入手机验证码。命令自动复用或启动常驻后端，退出界面后继续收发。第一版使用固定 `wechat-demo` 会话回显文本与原始微信消息 ID，不需要模型配置；暂未接入模型对话、媒体或 RAG。接入资格及真实账号测试需本人完成。操作、存储与恢复说明见 [docs/wechat.md](docs/wechat.md)。
 
-服务管理：`seudaily ps` 列出运行中的 SEUdaily 后端；`seudaily stop --port 4111` 或 `seudaily stop <PID>` 只停止选定的一个服务。旧版后端也可以查看和停止，不要求版本或数据目录与当前 CLI 一致。源码用户可用 `uv run seudaily wechat` 保留仓库中的原有数据。
+服务管理：`seudaily ps` 列出运行中的 SEUdaily 后端；`seudaily stop --port 4111` 或 `seudaily stop <PID>` 只停止选定的一个服务。旧版后端也可以查看和停止，不要求版本或数据目录与当前 CLI 一致。源码用户可用 `seudaily wechat --data-dir "$PWD"` 保留仓库中的原有数据。所有子命令均通过 npm 的 `seudaily` 入口运行。

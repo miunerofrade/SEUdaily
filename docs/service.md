@@ -167,4 +167,4 @@ seudaily stop                # 只处理默认端口 4111，或 SEUDAILY_PORT �
 
 停止管理不要求目标后端与当前 CLI 版本、协议或数据目录相同；普通聊天和 Web 连接仍要求兼容。停止优先调用后端的退出接口。没有该接口的旧版会核实系统监听端口、进程命令与 SEUdaily 身份，再向确切 PID 发送 SIGTERM；不使用 SIGKILL，也不会按名称批量关闭 Node。现代后端通过退出接口执行数据库收尾；旧版进程收到 SIGTERM 后的行为由其旧代码和操作系统决定。PID 不属于可识别的 SEUdaily、PID 与指定端口不符或端口是其他服务时会拒绝操作。
 
-源码目录用户使用 `uv run seudaily wechat`，或者 `node bin/seudaily.mjs wechat --data-dir "$PWD"`，可继续使用仓库中原有的校园配置、数据库和附件；直接使用 Node 入口而不带 `--data-dir` 时，默认数据目录是系统用户数据目录。
+源码目录构建后执行 `npm link --ignore-scripts`，使用 `seudaily wechat --data-dir "$PWD"`，可继续使用仓库中原有的校园配置、数据库和附件；直接使用 Node 入口而不带 `--data-dir` 时，默认数据目录是系统用户数据目录。

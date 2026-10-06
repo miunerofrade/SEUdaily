@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, cp } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, delimiter } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseCommand } from '../src/distribution/arguments.ts';
 import { ensureUv } from '../src/distribution/components.ts';
@@ -51,6 +51,9 @@ test('unified commands and aliases reject removed/conflicting arguments', () => 
   for (const alias of [[], ['chat'], ['--chat'], ['-c']]) assert.equal(parseCommand(alias).command, 'chat');
   for (const alias of [['web'], ['--web'], ['-w']]) assert.equal(parseCommand(alias).command, 'web');
   assert.equal(parseCommand(['vpn', '12081']).vpn, 12081);
+  assert.equal(parseCommand(['vpn', '--help']).vpn, undefined);
+  assert.equal(parseCommand(['vpn', '--version']).vpn, undefined);
+  assert.throws(() => parseCommand(['vpn']), /缺少参数/);
   assert.equal(parseCommand(['--vpn', '12081']).vpn, 12081);
   assert.equal(parseCommand(['chat', '--resume']).values.resume, 'choose');
   for (const args of [['start'], ['exec', 'x'], ['--prompt', 'x'], ['--cwd', '.'], ['--no-start'], ['-c', '-w'], ['web', '--json'], ['vpn', '80']]) assert.throws(() => parseCommand(args));
@@ -96,8 +99,17 @@ test('packed installation runs without source/node_modules, installs only select
   const host = join(install, 'node_modules', 'seudaily', 'bin', 'seudaily.mjs');
   assert.ok(!existsSync(join(install, 'node_modules', 'seudaily', 'node_modules')));
   assert.ok(!existsSync(join(install, 'node_modules', 'seudaily', 'src')));
-  const env = freshEnv({ SEUDAILY_CACHE_DIR: cache, SEUDAILY_NO_OPEN: '1', NPM_CONFIG_REGISTRY: `http://127.0.0.1:${registryPort}`, NPM_CONFIG_CACHE: join(temporary, 'npm-cache') });
-  const command = args => exec(node, [host, ...args, '--data-dir', data, '--port', String(port)], { cwd: temporary, env, timeout: 20_000 });
+  const env = freshEnv({ SEUDAILY_CACHE_DIR: cache, SEUDAILY_NO_OPEN: '1', NPM_CONFIG_REGISTRY: `http://127.0.0.1:${registryPort}`, NPM_CONFIG_CACHE: join(temporary, 'npm-cache'), SEUDAILY_UV_BINARY: join(temporary, 'no-uv'), PATH: join(install, 'node_modules', '.bin') + delimiter + process.env.PATH });
+  // Exercise npm's actual bin registration, rather than bypassing it with `node bin/...`.
+  // npm exec resolves the Windows .cmd shim without custom shell quoting.
+  const installed = args => process.platform === 'win32'
+    ? npm(['exec', '--offline', '--prefix', install, '--', 'seudaily', ...args], { cwd: temporary, env, timeout: 20_000 })
+    : exec('seudaily', args, { cwd: temporary, env, timeout: 20_000 });
+  const command = args => installed([...args, '--data-dir', data, '--port', String(port)]);
+  for (const name of ['chat', 'web', 'serve', 'wechat', 'settings', 'ask', 'vpn', 'ps', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data']) {
+    assert.match((await command([name, '--help'])).stdout, /用法：seudaily/, `${name} is available through the installed npm command`);
+  }
+  assert.match((await command(['completion', 'zsh'])).stdout, /#compdef seudaily/);
   assert.match((await command(['--help'])).stdout, /--web \/ -w/);
   assert.ok(!existsSync(data)); assert.ok(!existsSync(cache));
   assert.match((await command(['status'])).stdout, /未运行/);
@@ -136,7 +148,7 @@ test('packed installation runs without source/node_modules, installs only select
   assert.ok(!counts.has('@miunerofrade/seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
   first.kill('SIGTERM'); await eventually(async () => { assert.ok(first.exitCode !== null || first.signalCode !== null); });
   const surviving = await eventually(async () => { const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 1); return value; }, exitTimeout); assert.equal(surviving.processId, identity.processId);
-  const inspected = await exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary });
+  const inspected = await installed(['status', '--data-dir', join(temporary, 'other'), '--port', String(port)]);
   assert.match(inspected.stdout,/dataRoot/); assert.match(inspected.stdout,/SEUdaily/);
   second.kill('SIGTERM');
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); }, exitTimeout);
@@ -150,6 +162,30 @@ test('packed installation runs without source/node_modules, installs only select
   assert.match((await command(['sessions'])).stdout, /暂无会话/);
   assert.equal((await (await fetch(api + '/api')).json()).processId, manuallyStarted.processId);
   await command(['stop']);
+  await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
+  // serve must also work through npm's executable, with no Python/uv entry point.
+  const serveArgs = ['serve', '--data-dir', data, '--port', String(port)];
+  const serving = process.platform === 'win32'
+    ? spawn(node, [process.env.npm_execpath ?? join(dirname(node), 'node_modules/npm/bin/npm-cli.js'), 'exec', '--offline', '--prefix', install, '--', 'seudaily', ...serveArgs], { cwd: temporary, env, stdio: 'ignore' })
+    : spawn('seudaily', serveArgs, { cwd: temporary, env, stdio: 'ignore' });
+  launchers.push(serving);
+  await eventually(async () => {
+    assert.equal(serving.exitCode, null);
+    const value = await (await fetch(api + '/api')).json(); assert.equal(value.persistent, true);
+  });
+  await command(['stop']);
+  await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
+  await eventually(async () => { assert.equal(serving.exitCode, 0); });
+  // Noninteractive WeChat creates a persistent service without attempting account login.
+  await command(['wechat']);
+  const persistent = await eventually(async () => {
+    const value = await (await fetch(api + '/api')).json();
+    assert.equal(value.persistent, true); return value;
+  });
+  assert.match((await command(['ps'])).stdout, new RegExp(String(persistent.processId)));
+  assert.match((await command(['sessions'])).stdout, /暂无会话/);
+  assert.equal((await (await fetch(api + '/api')).json()).processId, persistent.processId);
+  await command(['stop', String(persistent.processId)]);
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); });
 });
 

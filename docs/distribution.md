@@ -9,13 +9,19 @@
 ```sh
 npm ci
 npm run build
-node bin/seudaily.mjs --data-dir "$PWD"
-node bin/seudaily.mjs web --data-dir "$PWD"
-node bin/seudaily.mjs ask "你好" --data-dir "$PWD"
-node bin/seudaily.mjs --help
+npm link --ignore-scripts
+export SEUDAILY_DATA_DIR="$PWD"  # 继续使用源码仓库的数据；只作用于当前终端
+seudaily
+seudaily web
+seudaily serve
+seudaily wechat
+seudaily ps
+seudaily stop --port 4111
+seudaily ask "你好"
+seudaily --help
 ```
 
-`uv run seudaily` 作为源码兼容入口，转交同一个 Node 启动器并默认保留仓库数据。`start`、`exec`、`--prompt`、`--cwd`、`--no-start` 不再作为公共命令接受。新的动作是 `chat`、`web`、`ask`、`vpn`、`status`、`stop`、`sessions`、`skills`、`completion`、`import-data`；`-c/--chat`、`-w/--web`、`--vpn PORT` 是别名。
+`uv run seudaily` 作为源码兼容入口，转交同一个 Node 启动器并默认保留仓库数据。`start`、`exec`、`--prompt`、`--cwd`、`--no-start` 不再作为公共命令接受。所有动作均支持直接使用 npm 安装后的 `seudaily` 命令：`chat`、`web`、`serve`、`wechat`、`settings`、`ask`、`vpn`、`ps`、`status`、`stop`、`update`、`sessions`、`skills`、`completion`、`import-data`；`-c/--chat`、`-w/--web`、`--vpn PORT` 是别名。
 
 npm 发布后，基础包安装提供 `seudaily` 命令。三个可选组件已公开发布到维护者个人命名空间；CLI 始终使用包内 `dist/cli/`，本地可选组件优先使用 `dist/components/`，打包验收用本地临时注册表验证下载流程。
 
@@ -30,7 +36,7 @@ npm 发布后，基础包安装提供 `seudaily` 命令。三个可选组件已�
 
 构建根据实际打包模块生成 THIRD_PARTY_NOTICES.txt，缺失的 Yoga/remark 许可证从对应上游版本补齐；根包没有运行时 npm 依赖，没有用户数据、源码、Web、Python、浏览器组件或实验产物。内置 CLI 也没有运行时 npm 依赖。浏览器保留必要资源目录，属于按需组件；不能宣称所有功能都只有两个文件。
 
-公共核心与终端通过 HTTP/SSE 通信。Web 静态页面由核心同端口托管，不启动 Vite。启动器检查后端名称、协议、版本和数据目录；数据目录锁在加载数据库前取得。多个界面共用一个核心，连接每 10 秒续租，正常退出立即释放；崩溃租约约 30 秒失效。自动核心在最后一个界面退出后停止，独立开发后端不由租约回收。Web 启动器关闭的入口是终端 Ctrl+C，关闭浏览器标签本身不等于结束启动器。
+公共核心与终端通过 HTTP/SSE 通信。Web 静态页面由核心同端口托管，不启动 Vite。启动器检查后端名称、协议、版本和数据目录；数据目录锁在加载数据库前取得。多个界面共用一个核心，连接每 10 秒续租，正常退出立即释放；崩溃租约约 30 秒失效。临时自动核心在最后一个界面退出后停止；`serve`、微信绑定后恢复的后端，以及 `wechat` 创建或转换的常驻核心持续运行，普通 CLI/Web 优先复用它们。独立开发后端不由租约回收。Web 启动器关闭的入口是终端 Ctrl+C，关闭浏览器标签本身不等于结束启动器。
 
 CLI 不下载、不写入组件缓存。可选组件按当前应用版本安装至私有缓存，用目录锁避免重复安装，npm 校验包 integrity，禁用安装脚本；下载/安装完成后原子发布目录。失败目录清理后可重试。Python 环境先安装锁定 wheel 和 hash 清单，再写就绪标记，不把半成品交给 worker。uv 0.11.1 的下载 URL 和 SHA256 已固定，保留 MIT/Apache 许可证，不修改全局 uv、Python 或 Shell 配置。
 

@@ -57,7 +57,7 @@ export function parseCommand(args: string[]) {
   if (['vpn', 'completion', 'import-data'].includes(command) && !argument && !values.help && !values.version) throw new Error(`${command} 缺少参数`);
   const pid = command === 'stop' && argument !== undefined ? Number(argument) : undefined;
   if (pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) throw new Error('stop 的 PID 必须是正整数');
-  const vpn = command === 'vpn' ? Number(argument) : undefined;
+  const vpn = command === 'vpn' && argument !== undefined ? Number(argument) : undefined;
   if (vpn !== undefined && (!Number.isInteger(vpn) || vpn < 1024 || vpn > 65535)) throw new Error('VPN 端口应为 1024–65535');
   return { values, command: String(command), argument, port, timeout, vpn, pid };
 }
