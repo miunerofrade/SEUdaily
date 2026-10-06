@@ -8,11 +8,17 @@ import { config as dotenv } from 'dotenv';
 import { parseCommand, HELP, completion } from './arguments.js';
 import { VERSION, PROTOCOL, defaultDataRoot } from './config.js';
 import { ensureComponent, ensurePython, cacheRoot } from './components.js';
+import { discoverServices, isServiceIdentity, processDirectory } from './services.js';
 import { acquireLock } from './lock.js';
 const options = parseCommand(process.argv.slice(2));
 if (options.values.help) { console.log(HELP); process.exit(0); }
 if (options.values.version) { console.log(`seudaily ${VERSION}`); process.exit(0); }
 if (options.command === 'completion') { console.log(completion(options.argument!)); process.exit(0); }
+if (options.command === 'stop' && options.pid !== undefined) {
+  const service = (await discoverServices()).find(item => item.pid === options.pid && (!options.values.port || item.port === options.port));
+  if (!service) throw new Error('未找到指定 PID 的 SEUdaily 服务；请用 seudaily ps 查看，PID 与 --port 必须匹配');
+  options.port = service.port;
+}
 const modulePath = fileURLToPath(import.meta.url);
 const installRoot = resolve(dirname(modulePath), modulePath.endsWith('.ts') ? '../..' : '..');
 const dataRoot = resolve(options.values['data-dir'] ?? process.env.SEUDAILY_DATA_DIR ?? defaultDataRoot());
@@ -25,7 +31,7 @@ dotenv({ path: join(dataRoot, '.env') });
 const api = process.env.SEUDAILY_API_URL;
 async function request(path: string, method = 'GET', body?: unknown) {
   const response = await fetch(api + path, { method, ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(3000) });
-  if (!response.ok) throw new Error(`后端请求失败（${response.status}）：${await response.text()}`);
+  if (!response.ok) throw Object.assign(new Error(`后端请求失败（${response.status}）：${await response.text()}`), {status:response.status});
   return response.json();
 }
 async function probe() {
@@ -37,7 +43,7 @@ async function probe() {
   }
 }
 function verify(identity: any) {
-  if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.version !== VERSION || identity.dataRoot !== dataRoot) throw new Error('端口已有其他服务、旧版后端或不同数据目录的 SEUdaily；请选择另一 --port 或先停止对应服务');
+  if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.version !== VERSION || identity.dataRoot !== dataRoot) throw new Error(`端口 ${options.port} 的后端不兼容：版本 ${identity.version ?? '旧版'}，数据目录 ${identity.dataRoot ?? '未知'}；请用 seudaily ps 查看，再用 seudaily stop --port ${options.port} 停止，或选择另一 --port`);
 }
 async function connect(persistent = false) {
   let identity = await probe();
@@ -73,7 +79,15 @@ async function importData(source: string) {
     console.log(`数据已复制到 ${dataRoot}；原件保留。`);
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
-if (options.command === 'import-data') { await importData(options.argument!); }
+if (options.command === 'ps') {
+  const services = await discoverServices();
+  if (!services.length) console.log('未发现运行中的 SEUdaily 服务');
+  else {
+    console.log('PID      PORT   MODE       VERSION    DATA DIR');
+    for (const service of services) console.log(`${String(service.pid).padEnd(9)}${String(service.port).padEnd(7)}${(service.persistent === undefined ? '旧版' : service.persistent ? 'serve' : '临时').padEnd(11)}${service.version.padEnd(11)}${service.dataRoot === '未知（旧版）' ? await processDirectory(service.pid).catch(() => undefined) ?? service.dataRoot : service.dataRoot}`);
+  }
+}
+else if (options.command === 'import-data') { await importData(options.argument!); }
 else if (options.command === 'update') {
   const {prepareUpdate} = await import('./update.js');
   const update = await prepareUpdate(installRoot);
@@ -96,7 +110,35 @@ else if (options.command === 'update') {
 else if (options.command === 'status' || options.command === 'stop') {
   const identity = await probe();
   if (!identity) console.log('未运行');
-  else { verify(identity); console.log(options.command === 'stop' ? await request('/app/runtime/stop', 'POST') : identity); }
+  else {
+    if (!isServiceIdentity(identity)) throw new Error(`端口 ${options.port} 上不是 SEUdaily 服务，不能进行服务管理`);
+    if (options.pid !== undefined && identity.processId !== undefined && identity.processId !== options.pid) throw new Error('端口所属 PID 已变化，未停止任何服务');
+    if (options.command === 'status') console.log(identity);
+    else {
+      try { await request('/app/runtime/stop', 'POST', {processId:identity.processId ?? options.pid}); }
+      catch(error) {
+        if (![404,405].includes((error as {status?:number}).status ?? 0)) throw error;
+        const service = (await discoverServices()).find(service => service.port === options.port);
+        if (!service || options.pid !== undefined && service.pid !== options.pid) throw new Error('旧版后端没有停止接口，且无法验证监听进程；请用 seudaily ps 查看');
+        // Recheck ownership immediately before signalling; never trust an HTTP PID alone.
+        const again = (await discoverServices()).find(item => item.port === options.port && item.pid === service.pid);
+        if (!again) throw new Error('端口所属进程已变化，请重新查看 seudaily ps');
+        process.kill(service.pid,'SIGTERM');
+      }
+      for (let attempt=0;attempt<100;attempt++) {
+        let remaining;
+        try { remaining = await probe(); }
+        catch(error) {
+          const code = (error as {cause?:{code?:string}}).cause?.code;
+          if (!['ECONNRESET','UND_ERR_SOCKET','EPIPE'].includes(code ?? '') || attempt===99) throw error;
+          await delay(150); continue;
+        }
+        if (!remaining || identity.processId && remaining.processId !== identity.processId) {console.log(`SEUdaily 已停止（端口 ${options.port}）`);break;}
+        if (attempt===99) throw new Error(`服务仍在退出；请运行 seudaily ps 查看端口 ${options.port}，未强制终止进程`);
+        await delay(150);
+      }
+    }
+  }
 } else {
 await mkdir(dataRoot, { recursive: true, mode: 0o700 });
 // Seed editable built-in skills once; updates never overwrite user changes.
@@ -118,7 +160,7 @@ if (options.command === 'vpn') {
   process.exitCode = await runChild(process.execPath, [join(installRoot, 'dist', 'core.mjs')], dataRoot);
 } else {
   const component = await ensureComponent(options.command === 'web' ? 'web' : 'cli');
-  const identity = await connect(options.command === 'WeChat');
+  const identity = await connect(options.command === 'wechat');
   const { id } = await request('/app/runtime/clients', 'POST', { interface: options.command === 'web' ? 'web' : 'cli' });
   let heartbeatActive = false;
   const heartbeat = setInterval(() => {

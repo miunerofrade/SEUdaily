@@ -22,7 +22,7 @@ function waiting(signal) {return new Promise((resolve,reject) => {
   signal.addEventListener('abort',() => reject(signal.reason),{once:true});
 });}
 test('WeChat spelling, trusted redirects and QR quiet zone', () => {
-  assert.equal(parseCommand(['WeChat']).command,'WeChat');assert.equal(parseCommand(['wechat']).command,'WeChat');
+  assert.equal(parseCommand(['WeChat']).command,'wechat');assert.equal(parseCommand(['wechat']).command,'wechat');
   assert.equal(trustedWeChatBase('new.weixin.qq.com'),'https://new.weixin.qq.com');
   for (const url of ['http://ilinkai.weixin.qq.com','https://evil.test','https://weixin.qq.com.evil.test','https://user:secret@new.weixin.qq.com','https://new.weixin.qq.com:444','https://new.weixin.qq.com/path']) assert.throws(() => trustedWeChatBase(url));
   const rows = terminalWeChatQR({size:1,modules:'1'}).split('\n');

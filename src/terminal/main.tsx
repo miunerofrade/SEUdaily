@@ -19,11 +19,11 @@ const root = resolve(
 if (options.no_color || process.env.NO_COLOR) process.env.FORCE_COLOR = "0";
 const session = new Session(options, root);
 async function main() {
-  if (options.command === 'WeChat') {
+  if (options.command === 'wechat') {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       const { Client } = await import('./client.js');
       const status = await new Client(5).json('/app/wechat');
-      console.log(`WeChat：${status.state}；请运行交互终端 seudaily WeChat，或打开 seudaily web 扫码。`);
+      console.log(`WeChat：${status.state}；请运行交互终端 seudaily wechat，或打开 seudaily web 扫码。`);
       return 0;
     }
     const [{render}, {WeChatApp}, {default:React}] = await Promise.all([import('ink'),import('./wechat.js'),import('react')]);

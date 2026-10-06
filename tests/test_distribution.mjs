@@ -136,7 +136,8 @@ test('packed installation runs without source/node_modules, installs only select
   assert.ok(!counts.has('@miunerofrade/seudaily-python')); assert.ok(!existsSync(join(cache, 'python')));
   first.kill('SIGTERM'); await eventually(async () => { assert.ok(first.exitCode !== null || first.signalCode !== null); });
   const surviving = await eventually(async () => { const value = await (await fetch(api + '/api')).json(); assert.equal(value.clients, 1); return value; }, exitTimeout); assert.equal(surviving.processId, identity.processId);
-  await assert.rejects(exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary }));
+  const inspected = await exec(node, [host, 'status', '--data-dir', join(temporary, 'other'), '--port', String(port)], { env, cwd: temporary });
+  assert.match(inspected.stdout,/dataRoot/); assert.match(inspected.stdout,/SEUdaily/);
   second.kill('SIGTERM');
   await eventually(async () => { await assert.rejects(fetch(api + '/api')); }, exitTimeout);
   await eventually(async () => { assert.ok(!existsSync(join(data, '.seudaily', 'core.lock'))); });

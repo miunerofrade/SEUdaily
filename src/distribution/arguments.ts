@@ -6,11 +6,13 @@ export const HELP = `SEUdaily ${VERSION}
   chat                 终端聊天（默认）；--chat / -c
   web                  本地网页；--web / -w
   serve                前台常驻后端；--with-web 同时提供 Web
-  WeChat               微信扫码接入 / 连接状态；自动复用或启动常驻后端
+  wechat               微信扫码接入 / 连接状态；自动复用或启动常驻后端
   settings             打开终端设置，配置模型和校园账号
   ask "问题"           单次提问；--stdin 读取管道，--json 输出 JSONL
   vpn PORT             独立校园 VPN；--vpn PORT，使用已保存的账号密码
-  status / stop        查看状态 / 停止本地后端
+  ps                   列出本机运行中的 SEUdaily 服务、端口和 PID
+  status               查看指定端口的后端状态
+  stop [PID]           停止单个服务；也可用 --port PORT 指定端口
   update               检查并安装最新版本
   sessions / skills    会话 / Skill 列表
   completion SHELL     bash、zsh、fish、powershell 补全
@@ -40,11 +42,11 @@ export function parseCommand(args: string[]) {
   const modes = [values.chat && 'chat', values.web && 'web', values.vpn !== undefined && 'vpn'].filter((value): value is string => typeof value === 'string');
   if (modes.length > 1) throw new Error('请只选择一种运行模式');
   const rawCommand = positionals.shift() ?? modes[0] ?? 'chat';
-  const command = rawCommand.toLowerCase() === 'wechat' ? 'WeChat' : rawCommand;
+  const command = rawCommand.toLowerCase() === 'wechat' ? 'wechat' : rawCommand;
   if (modes.length && modes[0] !== command) throw new Error('运行模式与子命令冲突');
-  if (!['chat', 'web', 'serve', 'WeChat', 'settings', 'ask', 'vpn', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
+  if (!['chat', 'web', 'serve', 'wechat', 'settings', 'ask', 'vpn', 'ps', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
   const argument = command === 'vpn' ? values.vpn ?? positionals.shift() : positionals.shift();
-  if (positionals.length || argument && !['ask', 'vpn', 'completion', 'import-data'].includes(command)) throw new Error('额外的位置参数');
+  if (positionals.length || argument && !['ask', 'vpn', 'stop', 'completion', 'import-data'].includes(command)) throw new Error('额外的位置参数');
   const port = Number(values.port ?? process.env.SEUDAILY_PORT ?? 4111), timeout = Number(values.timeout ?? 300);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port 应为 1024–65535');
   if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('--timeout 必须是有限正数');
@@ -53,12 +55,14 @@ export function parseCommand(args: string[]) {
   if ((values.stdin || values.json) && command !== 'ask') throw new Error('--stdin / --json 仅用于 ask');
   if (values.resume && command !== 'chat') throw new Error('--resume 仅用于 chat');
   if (['vpn', 'completion', 'import-data'].includes(command) && !argument && !values.help && !values.version) throw new Error(`${command} 缺少参数`);
+  const pid = command === 'stop' && argument !== undefined ? Number(argument) : undefined;
+  if (pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) throw new Error('stop 的 PID 必须是正整数');
   const vpn = command === 'vpn' ? Number(argument) : undefined;
   if (vpn !== undefined && (!Number.isInteger(vpn) || vpn < 1024 || vpn > 65535)) throw new Error('VPN 端口应为 1024–65535');
-  return { values, command: String(command), argument, port, timeout, vpn };
+  return { values, command: String(command), argument, port, timeout, vpn, pid };
 }
 export function completion(shell: string) {
-  const words = 'chat web serve WeChat wechat settings ask vpn status stop update sessions skills completion import-data --chat --web --with-web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
+  const words = 'chat web serve wechat settings ask vpn ps status stop update sessions skills completion import-data --chat --web --with-web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
   if (shell === 'bash') return `complete -W '${words}' seudaily`;
   if (shell === 'zsh') return `#compdef seudaily\n_arguments '*:command:(${words})'`;
   if (shell === 'fish') return `complete -c seudaily -f -a '${words}'`;

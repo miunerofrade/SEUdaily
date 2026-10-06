@@ -35,7 +35,9 @@ export function installLifecycle(app: Hono) {
     clients.delete(c.req.param('id')); return c.json({ released: true });
   });
   app.post('/app/runtime/persist', c => { ensurePersistentRuntime(); return c.json(identity()); });
-  app.post('/app/runtime/stop', c => {
+  app.post('/app/runtime/stop', async c => {
+    const body = await c.req.json().catch(() => ({}));
+    if (body.processId !== undefined && body.processId !== process.pid) return c.json({error:'端口所属 PID 已变化，未停止服务'},409);
     setTimeout(() => process.emit('SIGTERM'), 50).unref(); return c.json({ stopping: true });
   });
   app.post('/app/runtime/web', async c => {

@@ -154,3 +154,34 @@ test('ordinary commands restore a saved WeChat binding as a persistent service a
   assert.equal((await f.request('/app/wechat')).state,'needs_login');
   await delay(6500);assert.equal((await f.request('/api')).processId,restored.processId);
 });
+
+test('ps lists services and stop PID targets only the selected backend', {timeout:60000},async t=>{
+  const first=await fixture(t),second=await fixture(t);first.start(['serve']);second.start(['serve']);
+  const a=await eventually(()=>first.request('/api')),b=await eventually(()=>second.request('/api'));
+  const listed=await exec(process.execPath,[cli,'ps'],{env:first.env});assert.match(listed.stdout,new RegExp(String(a.processId)));assert.match(listed.stdout,new RegExp(String(b.processId)));
+  const wrongTarget=await fetch('http://127.0.0.1:'+first.args.at(-1)+'/app/runtime/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({processId:b.processId})});
+  assert.equal(wrongTarget.status,409);assert.equal((await first.request('/api')).processId,a.processId);
+  const stopped=await exec(process.execPath,[cli,'stop',String(a.processId)],{env:first.env});assert.match(stopped.stdout,/已停止/);
+  assert.equal((await second.request('/api')).processId,b.processId);
+});
+
+test('stop handles old versions and legacy missing endpoints, and rejects foreign services', {timeout:60000},async t=>{
+  const {mkdir,writeFile}=await import('node:fs/promises');
+  for(const mode of ['legacy','old-version','foreign']) {
+    const f=await fixture(t),script=join(f.directory,'src','server','main.js');await mkdir(join(f.directory,'src','server'),{recursive:true});
+    await writeFile(script,`const http=require('node:http');const mode=${JSON.stringify(mode)};
+      const server=http.createServer((req,res)=>{
+        res.setHeader('Content-Type','application/json');
+        if(req.url==='/api')return res.end(JSON.stringify(mode==='legacy'?{name:'SEUdaily',runtime:'agent'}:{name:mode==='foreign'?'Other':'SEUdaily',runtime:'agent',processId:process.pid,protocol:0,version:'0.0.1',dataRoot:'/different-data'}));
+        if(req.url==='/app/runtime/stop'&&mode==='old-version'){res.end(JSON.stringify({stopping:true}));return setTimeout(()=>server.close(()=>process.exit(0)),30);}
+        res.statusCode=404;res.end('{}');
+      });server.listen(${f.args.at(-1)},'127.0.0.1');process.on('SIGTERM',()=>server.close(()=>process.exit(0)));`);
+    const child=spawn(process.execPath,[script],{cwd:f.directory,stdio:'ignore'}),exited=new Promise(resolve=>child.once('exit',resolve));
+    try {
+      await eventually(()=>f.request('/api'));
+      const outcome=await exec(process.execPath,[cli,'stop',...f.args],{env:f.env}).then(result=>result,error=>error);
+      if(mode==='foreign'){assert.match(outcome.stderr,/不是 SEUdaily/);assert.equal(child.exitCode,null);}
+      else {assert.match(outcome.stdout,/已停止/,outcome.stderr);await exited;}
+    } finally {if(child.exitCode===null)child.kill('SIGTERM');await exited;}
+  }
+});
