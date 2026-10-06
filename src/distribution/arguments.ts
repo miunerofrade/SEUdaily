@@ -6,6 +6,7 @@ export const HELP = `SEUdaily ${VERSION}
   chat                 终端聊天（默认）；--chat / -c
   web                  本地网页；--web / -w
   serve                前台常驻后端；--with-web 同时提供 Web
+  WeChat               微信扫码接入 / 连接状态；自动复用或启动常驻后端
   settings             打开终端设置，配置模型和校园账号
   ask "问题"           单次提问；--stdin 读取管道，--json 输出 JSONL
   vpn PORT             独立校园 VPN；--vpn PORT，使用已保存的账号密码
@@ -38,9 +39,10 @@ export function parseCommand(args: string[]) {
   } });
   const modes = [values.chat && 'chat', values.web && 'web', values.vpn !== undefined && 'vpn'].filter((value): value is string => typeof value === 'string');
   if (modes.length > 1) throw new Error('请只选择一种运行模式');
-  const command = positionals.shift() ?? modes[0] ?? 'chat';
+  const rawCommand = positionals.shift() ?? modes[0] ?? 'chat';
+  const command = rawCommand.toLowerCase() === 'wechat' ? 'WeChat' : rawCommand;
   if (modes.length && modes[0] !== command) throw new Error('运行模式与子命令冲突');
-  if (!['chat', 'web', 'serve', 'settings', 'ask', 'vpn', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
+  if (!['chat', 'web', 'serve', 'WeChat', 'settings', 'ask', 'vpn', 'status', 'stop', 'update', 'sessions', 'skills', 'completion', 'import-data'].includes(command)) throw new Error(`未知命令：${command}；运行 seudaily --help 查看用法`);
   const argument = command === 'vpn' ? values.vpn ?? positionals.shift() : positionals.shift();
   if (positionals.length || argument && !['ask', 'vpn', 'completion', 'import-data'].includes(command)) throw new Error('额外的位置参数');
   const port = Number(values.port ?? process.env.SEUDAILY_PORT ?? 4111), timeout = Number(values.timeout ?? 300);
@@ -56,7 +58,7 @@ export function parseCommand(args: string[]) {
   return { values, command: String(command), argument, port, timeout, vpn };
 }
 export function completion(shell: string) {
-  const words = 'chat web serve settings ask vpn status stop update sessions skills completion import-data --chat --web --with-web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
+  const words = 'chat web serve WeChat wechat settings ask vpn status stop update sessions skills completion import-data --chat --web --with-web --vpn --data-dir --port --resume --skill --timeout --stdin --json --quiet --verbose --no-color --vi --help --version';
   if (shell === 'bash') return `complete -W '${words}' seudaily`;
   if (shell === 'zsh') return `#compdef seudaily\n_arguments '*:command:(${words})'`;
   if (shell === 'fish') return `complete -c seudaily -f -a '${words}'`;

@@ -518,3 +518,12 @@ button { color: inherit; }
 .composer-queue button { background: transparent; color: inherit; border: 0; cursor: pointer; font-size: 12px; padding: 4px 6px; }
 .composer-queue button:disabled { opacity: .4; cursor: default; }
 .composer-queue-progress { font-size: 13px; white-space: pre-wrap; max-height: 90px; overflow: auto; }
+
+.wechat-dialog { max-height: 90vh; overflow: auto; }
+.wechat-qr { display: block; width: min(280px, 100%); height: auto; margin: 16px auto; background: white; }
+.wechat-dialog p { overflow-wrap: anywhere; }
+
+.sidebar-footer { flex-direction: column; align-items: stretch; gap: 2px; }
+.wechat-button small { margin-left: auto; color: #777; font-size: 11px; }
+.sidebar.collapsed .wechat-button small { display: none; }
+.wechat-dialog .campus-sms-actions { gap: 8px; flex-wrap: wrap; }

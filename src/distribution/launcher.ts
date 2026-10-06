@@ -39,20 +39,20 @@ async function probe() {
 function verify(identity: any) {
   if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.version !== VERSION || identity.dataRoot !== dataRoot) throw new Error('端口已有其他服务、旧版后端或不同数据目录的 SEUdaily；请选择另一 --port 或先停止对应服务');
 }
-async function connect() {
+async function connect(persistent = false) {
   let identity = await probe();
-  if (identity) { verify(identity); await request('/app/health'); return identity; }
+  if (identity) { verify(identity); await request('/app/health'); if (persistent && !identity.persistent) return request('/app/runtime/persist', 'POST'); return identity; }
   await mkdir(join(dataRoot, '.seudaily', 'logs'), { recursive: true, mode: 0o700 });
   const log = await open(join(dataRoot, '.seudaily', 'logs', 'core.log'), 'a', 0o600);
   // Windows also needs an independent process group/console so one interface exiting cannot kill the shared core.
-  const child = spawn(process.execPath, [join(installRoot, 'dist', 'core.mjs')], { cwd: dataRoot, stdio: ['ignore', log.fd, log.fd], detached: true, windowsHide: true, env: { ...process.env, SEUDAILY_MANAGED: '1' } });
+  const child = spawn(process.execPath, [join(installRoot, 'dist', 'core.mjs')], { cwd: dataRoot, stdio: ['ignore', log.fd, log.fd], detached: true, windowsHide: true, env: { ...process.env, SEUDAILY_MANAGED: persistent ? '0' : '1', SEUDAILY_PERSISTENT: persistent ? '1' : '0' } });
   let spawnError: Error | undefined;
   child.once('error', error => { spawnError = error; }); child.unref(); await log.close();
   for (let attempt = 0; attempt < 100; attempt++) {
     await delay(100);
     if (spawnError) throw spawnError;
     identity = await probe();
-    if (identity) { verify(identity); await request('/app/health'); return identity; }
+    if (identity) { verify(identity); await request('/app/health'); if (persistent && !identity.persistent) return request('/app/runtime/persist', 'POST'); return identity; }
   }
   throw new Error(`后端启动失败，请检查 ${join(dataRoot, '.seudaily', 'logs', 'core.log')}`);
 }
@@ -118,7 +118,7 @@ if (options.command === 'vpn') {
   process.exitCode = await runChild(process.execPath, [join(installRoot, 'dist', 'core.mjs')], dataRoot);
 } else {
   const component = await ensureComponent(options.command === 'web' ? 'web' : 'cli');
-  const identity = await connect();
+  const identity = await connect(options.command === 'WeChat');
   const { id } = await request('/app/runtime/clients', 'POST', { interface: options.command === 'web' ? 'web' : 'cli' });
   let heartbeatActive = false;
   const heartbeat = setInterval(() => {

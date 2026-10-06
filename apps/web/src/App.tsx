@@ -1,3 +1,4 @@
+import { WeChatPanel } from './wechat';
 import { MAX_ATTACHMENTS } from "../../../src/shared/attachment-limits";
 import { RuntimePreparationNotice } from './runtime-preparation';
 import { CampusSmsDialog } from "./campus-sms";
@@ -1514,6 +1515,7 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
+          <WeChatPanel />
           <button className={`settings-button ${view === "settings" ? "active" : ""}`} onClick={() => openView("settings")}><SidebarIcon kind="settings" /><span>设置</span></button>
         </div>
       </aside>

@@ -149,3 +149,7 @@ WAL 不是备份，也不能承诺损坏的磁盘永远可恢复。数据库应�
 macOS 原生文本粘贴通常用 Command+V，由终端负责；CLI 能收到 Command+V 按键事件时也处理它。图片建议用 Ctrl+V。Option/Alt+V 需要终端把 Option 配成 Meta/Esc；默认输入特殊字符的终端可直接用 Ctrl+V。Windows 使用 PowerShell STA 读取剪贴板；Linux Wayland 需 `wl-clipboard`，X11 需 `xclip` 或 `xsel`（`xsel` 只提供文本回退）。SSH 里的程序读不到你电脑的系统剪贴板，使用终端原生文本粘贴或 Web 上传图片。
 
 OpenAI 官方 [图片输入说明](https://learn.chatgpt.com/docs/image-inputs?surface=cli)确认 CLI 支持粘贴图片；快捷键另外核对了其[官方源码 keymap](https://github.com/openai/codex/blob/main/codex-rs/tui/src/keymap.rs)：固定图片粘贴绑定为 Ctrl+V / Ctrl+Alt+V。本项目额外支持用户要求的 Alt+V。
+
+## 微信渠道
+
+`seudaily WeChat` 首次扫码接入，复用已有后端；缺少后端时启动常驻服务，已有临时后端则转换为常驻。普通 CLI/Web 打开已有微信绑定的数据目录时也会恢复渠道并保持常驻。退出界面后继续收发；开机启动和崩溃恢复仍交给这里的 systemd `serve` 服务。具体步骤、固定文本 demo、凭证和消息存储、重新认证见 [微信接入说明](wechat.md)。

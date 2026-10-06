@@ -5,12 +5,16 @@ import { readFile, realpath } from 'node:fs/promises';
 import { extname, resolve, relative, isAbsolute } from 'node:path';
 import { projectRoot } from '../runtime/runtime-paths.js';
 import { ensureComponent } from '../distribution/components.js';
+import { startFocusRuntime } from '../runtime/focus-runtime.js';
 import { VERSION, PROTOCOL } from '../distribution/config.js';
 const clients = new Map<string, { interface: string; expires: number }>();
 let webRoot: string | undefined = process.env.SEUDAILY_WEB_ROOT;
 let startupAt = Date.now();
-const persistent = process.env.SEUDAILY_PERSISTENT === '1';
+let persistent = process.env.SEUDAILY_PERSISTENT === '1';
 const managed = process.env.SEUDAILY_MANAGED === '1';
+export function ensurePersistentRuntime() {
+  if (!persistent) { persistent = true; startFocusRuntime(); }
+}
 export function identity() {
   return { name: 'SEUdaily', runtime: 'agent', processId: process.pid, version: VERSION, protocol: PROTOCOL,
     dataRoot: projectRoot, managed, persistent, web: !!webRoot, clients: clients.size };
@@ -30,6 +34,7 @@ export function installLifecycle(app: Hono) {
   app.delete('/app/runtime/clients/:id', c => {
     clients.delete(c.req.param('id')); return c.json({ released: true });
   });
+  app.post('/app/runtime/persist', c => { ensurePersistentRuntime(); return c.json(identity()); });
   app.post('/app/runtime/stop', c => {
     setTimeout(() => process.emit('SIGTERM'), 50).unref(); return c.json({ stopping: true });
   });

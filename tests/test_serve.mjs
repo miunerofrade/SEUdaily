@@ -120,3 +120,25 @@ test('ordinary Web without an existing backend keeps its automatic shutdown beha
     throw new Error('temporary backend still running');
   },clientExpiryTimeout);
 });
+
+test('WeChat creates a persistent backend without a TTY and ordinary Web reuses it', {timeout:60000}, async t => {
+  const f = await fixture(t);
+  const result = await exec(process.execPath,[cli,'WeChat',...f.args],{env:f.env});
+  assert.match(result.stdout,/WeChat/);
+  const initial=await f.request('/api');assert.equal(initial.persistent,true);assert.equal(initial.clients,0);
+  const web=f.start(['web']);
+  await eventually(async () => assert.match(f.output(),/SEUdaily Web/));
+  assert.equal((await f.request('/api')).processId,initial.processId);
+  web.kill('SIGTERM');await eventually(async () => assert.equal((await f.request('/api')).clients,0),clientExpiryTimeout);
+  await delay(6500);assert.equal((await f.request('/api')).processId,initial.processId);
+  assert.equal((await f.request('/app/wechat')).state,'disconnected');
+});
+test('WeChat promotes a temporary backend without replacing its process or clients', {timeout:60000}, async t => {
+  const f=await fixture(t);const web=f.start(['web']);
+  await eventually(async () => assert.match(f.output(),/SEUdaily Web/));
+  const initial=await f.request('/api');assert.equal(initial.persistent,false);
+  await exec(process.execPath,[cli,'wechat',...f.args],{env:f.env});
+  const current=await f.request('/api');assert.equal(current.processId,initial.processId);assert.equal(current.persistent,true);assert.equal(current.clients,1);
+  web.kill('SIGTERM');await eventually(async () => assert.equal((await f.request('/api')).clients,0),clientExpiryTimeout);
+  await delay(6500);assert.equal((await f.request('/api')).processId,initial.processId);
+});
