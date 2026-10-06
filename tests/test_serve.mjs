@@ -65,6 +65,18 @@ test('serve arguments are separate from ordinary interfaces', () => {
   assert.throws(() => parseCommand(['web','--with-web']));
   assert.throws(() => parseCommand(['web','--serve']));
 });
+test('a live Web launcher re-registers its lease and restores Web after a compatible backend restart', {timeout:70000}, async t => {
+  const f=await fixture(t);
+  f.start(['serve']);const initial=await eventually(()=>f.request('/api'));
+  const web=f.start(['web']);await eventually(async()=>assert.equal((await f.request('/api')).clients,1));
+  await f.request('/app/runtime/stop',{method:'POST'});
+  await eventually(async()=>{try {process.kill(initial.processId,0);}catch(error){if(error.code==='ESRCH')return;throw error;}throw new Error('old core still exiting');});
+  f.start(['serve']);
+  const replacement=await eventually(()=>f.request('/api'));assert.notEqual(replacement.processId,initial.processId);
+  await eventually(async()=>{const value=await f.request('/api');assert.equal(value.clients,1);assert.equal(value.web,true);},15000);
+  assert.ok(!/界面连接已失效|后端请求失败/.test(f.output()),f.output());
+  web.kill('SIGTERM');await eventually(async()=>assert.equal((await f.request('/api')).clients,0),clientExpiryTimeout);
+});
 test('serve is shared by ordinary commands, survives disconnected clients and restarts after a crash', {timeout:70000}, async t => {
   const f = await fixture(t);
   const service = f.start(['serve']);

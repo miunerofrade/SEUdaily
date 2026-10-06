@@ -10,6 +10,7 @@ import { VERSION, PROTOCOL, defaultDataRoot } from './config.js';
 import { ensureComponent, ensurePython, cacheRoot } from './components.js';
 import { discoverServices, isServiceIdentity, processDirectory } from './services.js';
 import { acquireLock } from './lock.js';
+import { clientLease } from './client-lease.js';
 const options = parseCommand(process.argv.slice(2));
 if (options.values.help) { console.log(HELP); process.exit(0); }
 if (options.values.version) { console.log(`seudaily ${VERSION}`); process.exit(0); }
@@ -161,12 +162,16 @@ if (options.command === 'vpn') {
 } else {
   const component = await ensureComponent(options.command === 'web' ? 'web' : 'cli');
   const identity = await connect(options.command === 'wechat');
-  const { id } = await request('/app/runtime/clients', 'POST', { interface: options.command === 'web' ? 'web' : 'cli' });
+  const lease = await clientLease(request,verify,options.command === 'web' ? 'web' : 'cli');
   let heartbeatActive = false;
+  let heartbeatWarning = false;
   const heartbeat = setInterval(() => {
     if (heartbeatActive) return;
     heartbeatActive = true;
-    void request(`/app/runtime/clients/${id}`, 'POST').catch(error => console.error((error as Error).message)).finally(() => { heartbeatActive = false; });
+    void lease.renew().then(() => {heartbeatWarning = false;}).catch(() => {
+      if (!heartbeatWarning) console.error('后端连接暂时中断，正在重连；若刚更新版本，请退出界面后重新打开。');
+      heartbeatWarning = true;
+    }).finally(() => { heartbeatActive = false; });
   }, 10_000);
   // Keep the Web launcher alive while waiting for a signal; signal listeners alone do not keep Node running.
   try {
@@ -183,7 +188,7 @@ if (options.command === 'vpn') {
     }
   } finally {
     clearInterval(heartbeat);
-    await request(`/app/runtime/clients/${id}`, 'DELETE').catch(() => {});
+    await lease.close();
   }
 }
 }
