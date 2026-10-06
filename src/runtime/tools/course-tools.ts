@@ -302,12 +302,11 @@ export const getScheduleTool = createTool({
     refresh: z
       .boolean()
       .default(false)
-      .describe("Re-fetch the selected semester from SEU eHall instead of using that semester's local cache"),
-    autoRefresh: z.boolean().default(true).describe("Automatically synchronize a missing or older-than-24-hours current timetable cache; reuse historical semester caches. Network failures retain cached data. Set false to reuse an existing cache regardless of age."),
+      .describe("Explicitly re-fetch the timetable and check the official calendar page. Otherwise existing timetable caches never expire; only a missing cache triggers synchronization."),
     localOnly: z
       .boolean()
       .default(false)
-      .describe("Set true for an explicitly offline read: never access the network and return an empty status when no cache exists. The default automatically maintains the timetable and official calendar caches."),
+      .describe("Set true for an explicitly offline read: never access the network and return an empty status when no cache exists. With the default false, a missing timetable is synchronized automatically; an existing cache is reused regardless of age unless refresh=true."),
     includeAvailableSemesters: z
       .boolean()
       .default(false)

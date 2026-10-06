@@ -711,30 +711,25 @@ def test_get_schedule_local_only_never_fetches_remote(tmp_path: Path, monkeypatc
     assert result["localOnly"] is True
 
 
-def test_automatic_sync_missing_stale_fresh_and_offline_fallback(tmp_path, monkeypatch):
-    from datetime import timezone, timedelta
+def test_missing_cache_syncs_automatically_but_old_cache_requires_explicit_refresh(tmp_path, monkeypatch):
     service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
     calls = []
     def fetch(**kwargs):
         calls.append(kwargs)
-        result = {'version':2,'status':'fresh','courses':[{'courseName':'已同步课程'}], 'fetchedAt':datetime.now(timezone.utc).isoformat()}
+        result = {'version':2,'status':'fresh','courses':[{'courseName':'已同步课程'}], 'fetchedAt':'2020-01-01T00:00:00+00:00'}
         service._write_json_atomic(service.cache_file, result)
         return result
     monkeypatch.setattr(service, '_fetch_remote', fetch)
-    assert service.get_schedule(auto_refresh=True)['courses'][0]['courseName'] == '已同步课程'
+    assert service.get_schedule()['courses'][0]['courseName'] == '已同步课程'
     assert len(calls) == 1
-    assert service.get_schedule(auto_refresh=True)['status'] == 'cached'
+    assert service.get_schedule()['status'] == 'cached'
+    assert service.get_schedule(include_available_semesters=True)['status'] == 'cached'
+    assert service.get_schedule(local_only=True, refresh=True)['status'] == 'cached'
     assert len(calls) == 1
-    cached = json.loads(service.cache_file.read_text())
-    cached['fetchedAt'] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-    service._write_json_atomic(service.cache_file, cached)
-    assert service.get_schedule(local_only=True, auto_refresh=True)['status'] == 'cached'
-    assert len(calls) == 1
-    service.get_schedule(auto_refresh=True)
+    service.get_schedule(refresh=True)
     assert len(calls) == 2
-    service._write_json_atomic(service.cache_file, cached)
     monkeypatch.setattr(service, '_fetch_remote', lambda **kw: (_ for _ in ()).throw(ConnectionError('offline')))
-    fallback = service.get_schedule(auto_refresh=True)
+    fallback = service.get_schedule(refresh=True)
     assert fallback['stale'] is True
     assert fallback['courses'][0]['courseName'] == '已同步课程'
     assert service.cache_file.exists()

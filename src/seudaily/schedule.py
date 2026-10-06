@@ -1271,17 +1271,6 @@ class ScheduleService:
     def calendar(self) -> AcademicCalendar:
         return AcademicCalendar(self.cache_file.parent / "calendar")
 
-    @staticmethod
-    def _cache_is_fresh(cached: dict[str, Any]) -> bool:
-        try:
-            fetched = datetime.fromisoformat(str(cached.get("fetchedAt", "")).replace("Z", "+00:00"))
-            if fetched.tzinfo is None:
-                fetched = fetched.replace(tzinfo=timezone.utc)
-            age = (datetime.now(timezone.utc) - fetched).total_seconds()
-            return 0 <= age < 24 * 3600
-        except ValueError:
-            return False
-
     def get_calendar(self, *, refresh: bool = False, local_only: bool = False) -> dict[str, Any]:
         cached = self.calendar.view()
         if not local_only and (refresh or not cached.get("attachments")):
@@ -1294,7 +1283,6 @@ class ScheduleService:
         *,
         refresh: bool = False,
         local_only: bool = False,
-        auto_refresh: bool = False,
         semester: str | None = None,
         include_available_semesters: bool = False,
         prefetch_available_semesters: bool = True,
@@ -1326,8 +1314,6 @@ class ScheduleService:
         if (
             cached is not None
             and not refresh
-            and not include_available_semesters
-            and (not auto_refresh or (requested and requested != cached.get("currentSemester")) or self._cache_is_fresh(cached))
         ):
             result = {
                 **cached,
@@ -1336,8 +1322,6 @@ class ScheduleService:
                     self._cache_file_for_semester(requested).resolve()
                 ),
             }
-            if auto_refresh and not self.calendar.view().get("attachments"):
-                result["calendar"] = self.calendar.sync(self._write_json_atomic)
             view = result if requested else self._apply_customizations(result)
             return self._filter_by_date(view, target_date)
 

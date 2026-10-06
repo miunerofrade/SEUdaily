@@ -106,7 +106,7 @@ export async function runPythonTool() {
     const { captureCourseMaterialsTool, auditTrainingPlanTool, getScheduleTool, getCurrentDateTool } = await import(pathToFileURL(join(directory, "src/runtime/tools/course-tools.js")));
     assert.equal(getScheduleTool.inputSchema.parse({}).prefetchAvailableSemesters, true);
     assert.equal(getScheduleTool.inputSchema.parse({}).localOnly, false);
-    assert.equal(getScheduleTool.inputSchema.parse({}).autoRefresh, true);
+    assert.equal(getScheduleTool.inputSchema.parse({}).refresh, false);
     const current = getCurrentDateTool.outputSchema.parse(await getCurrentDateTool.execute({}, {}));
     assert.equal(current.status, 'completed');
     const shanghai = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(current.data.timestamp));

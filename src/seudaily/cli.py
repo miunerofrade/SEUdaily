@@ -173,7 +173,6 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _schedule_service(payload).get_schedule(
             refresh=payload.get("refresh", False),
             local_only=payload.get("localOnly", False),
-            auto_refresh=payload.get("autoRefresh", True),
             semester=payload.get("semester"),
             include_available_semesters=payload.get(
                 "includeAvailableSemesters", False
