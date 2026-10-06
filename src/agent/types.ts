@@ -37,7 +37,7 @@ export type TurnContext = {
     assistantMessageId?: string;
     regenerateFrom?: string;
     skills?: string[];
-    interface?: 'web' | 'cli';
+    interface?: 'web' | 'cli' | 'wechat';
     focus?: boolean;
     capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
 };

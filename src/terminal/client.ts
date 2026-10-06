@@ -109,7 +109,7 @@ export class Client {
   }
   async threads(): Promise<any[]> {
     const result: any[] = [];
-    for (const resource of [RESOURCE, "cvstream-web-local"])
+    for (const resource of [RESOURCE, "cvstream-web-local", "seudaily-wechat-local"])
       for (let page = 0; ; page++) {
         const data = await this.json(
           `/api/memory/threads?resourceId=${resource}&page=${page}&perPage=100`,

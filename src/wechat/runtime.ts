@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import QRCode from 'qrcode';
 import type { LocalClient } from '../agent/sqlite.js';
+import type { WeChatConversations } from './conversations.js';
+import { redactText } from '../agent/redaction.js';
 import { WeChatProtocol, WeChatError, WECHAT_API, trustedWeChatBase, type BotAccount, type WeChatMessage } from './protocol.js';
 export const DEMO_THREAD = 'wechat-demo';
 export const DEMO_RESOURCE = 'seudaily-wechat-demo';
@@ -17,7 +19,11 @@ export class WeChatRuntime {
   private running?: Promise<void>;
   private changing = Promise.resolve();
   private closed = false;
-  constructor(private db: LocalClient, private protocol = new WeChatProtocol(), private pollDelay = 1000) {}
+  private flushing = false;
+  private nextFlushAt = 0;
+  private flushFailures = 0;
+  private workers = new Map<string, Promise<void>>();
+  constructor(private db: LocalClient, private protocol = new WeChatProtocol(), private pollDelay = 1000, private conversations?: WeChatConversations) {}
   initialize() {
     return this.ready ??= (async () => {
       await this.db.batch([
@@ -26,6 +32,7 @@ export class WeChatRuntime {
         'CREATE INDEX IF NOT EXISTS wechat_pending ON wechat_messages(account,peer,state,createdAt)',
         'CREATE INDEX IF NOT EXISTS wechat_recent ON wechat_messages(account,peer,createdAt DESC)',
       ]);
+      await this.conversations?.initialize();
       const data = (await this.db.execute('SELECT data FROM wechat_account WHERE id=1')).rows[0]?.data;
       if (data) {
         let account;
@@ -56,10 +63,12 @@ export class WeChatRuntime {
   async status() {
     await this.initialize();
     const account = this.account;
+    const currentSession = account ? await this.conversations?.current(account) : undefined;
     const rows = account ? (await this.db.execute({sql:'SELECT id,peer,session,text,reply,threadId,resourceId,state,createdAt FROM wechat_messages WHERE account=? AND peer=? ORDER BY createdAt DESC LIMIT 6',args:[account.botId,account.userId]})).rows : [];
     return { state: this.login?.state ?? (account ? account.needsLogin ? 'needs_login' : 'connected' : 'disconnected'),
       loginId: this.login?.id, qr: this.login ? { size: this.login.size, modules: this.login.modules } : undefined,
-      botId: account?.botId, userId: account?.userId, threadId: DEMO_THREAD, resourceId: DEMO_RESOURCE,
+      botId: account?.botId, userId: account?.userId, threadId: currentSession?.threadId ?? (this.conversations ? '' : DEMO_THREAD), resourceId: this.conversations ? 'seudaily-wechat-local' : DEMO_RESOURCE,
+      currentSession,
       error: this.error, messages: rows };
   }
   connect(refresh = false) {
@@ -91,6 +100,12 @@ export class WeChatRuntime {
     return this.serialize(async () => { await this.halt(); this.login = undefined; this.error = ''; this.resume(); return this.status(); });
   }
   private saveAccount(account: BotAccount) { return this.db.execute({sql:'INSERT INTO wechat_account(id,data) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',args:[JSON.stringify(account)]}); }
+  private async pauseExpired() {
+    if (!this.account) return;
+    this.account = {...this.account,needsLogin:true};
+    await this.db.execute("UPDATE wechat_account SET data=json_set(data,'$.needsLogin',json('true')) WHERE id=1");
+    this.controller?.abort();
+  }
   private async pollLogin(signal: AbortSignal) {
     const login = this.login!;
     if (Date.now() - login.createdAt > 5 * 60_000) { login.state = 'expired'; return; }
@@ -121,21 +136,74 @@ export class WeChatRuntime {
     const unsupported = msg.item_list.some(item => item.type !== 1);
     if (!text && !unsupported) return undefined;
     const id = String(sourceId), peer = msg.from_user_id, session = msg.session_id ?? '';
-    const reply = unsupported ? 'SEUdaily 微信 demo 已收到消息；当前仅支持文本，图片、语音及文件暂未接入。' : `SEUdaily 微信 demo\n会话：${DEMO_THREAD}\n消息：${id}\n${text.slice(0,1200)}`;
+    const reply = unsupported ? '目前支持文字聊天。图片、语音及文件暂未接入，请发送文字。' : this.conversations ? '' : `SEUdaily 微信 demo\n会话：${DEMO_THREAD}\n消息：${id}\n${text.slice(0,1200)}`;
     const clientId = 'seudaily-' + createHash('sha256').update(`${account.botId}\0${peer}\0${id}`).digest('hex').slice(0,40);
     const payload = {from_user_id:'',to_user_id:peer,client_id:clientId,message_type:2,message_state:2,context_token:msg.context_token,item_list:[{type:1,text_item:{text:reply}}]};
-    return {sql:`INSERT OR IGNORE INTO wechat_messages(account,id,peer,session,text,reply,threadId,resourceId,payload,state,createdAt) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)`,args:[account.botId,id,peer,session,text,reply,DEMO_THREAD,DEMO_RESOURCE,JSON.stringify(payload),Date.now()]};
+    return {sql:`INSERT OR IGNORE INTO wechat_messages(account,id,peer,session,text,reply,threadId,resourceId,payload,state,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,args:[account.botId,id,peer,session,text,reply,this.conversations ? '' : DEMO_THREAD,this.conversations ? '' : DEMO_RESOURCE,JSON.stringify(payload),this.conversations && !unsupported ? 'received' : 'pending',Date.now()]};
+  }
+  private async prepareReply(row: any, text: string) {
+    // Keep one reply/client_id per inbound message; complete long answers remain in Agent history.
+    const characters = Array.from(redactText(text));
+    const reply = characters.length > 1800 ? characters.slice(0,1800).join('') + '\n\n（回复较长，完整内容请在网页或终端查看。）' : characters.join('');
+    const payload = JSON.parse(String(row.payload)); payload.item_list = [{type:1,text_item:{text:reply}}];
+    await this.db.execute({sql:"UPDATE wechat_messages SET reply=?,payload=?,state='pending' WHERE account=? AND id=?",args:[reply,JSON.stringify(payload),row.account,row.id]});
   }
   private async flush(account: BotAccount, signal: AbortSignal) {
-    const rows = (await this.db.execute({sql:"SELECT id,payload FROM wechat_messages WHERE account=? AND peer=? AND state='pending' ORDER BY createdAt LIMIT 20",args:[account.botId,account.userId]})).rows;
+    if (this.flushing || signal.aborted || Date.now() < this.nextFlushAt || this.account?.needsLogin) return;
+    this.flushing = true;
+    try {
+    if (this.conversations) {
+      const received = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state='received' ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
+      for (const row of received) { if (signal.aborted) return; await this.conversations.route(row as any,account); }
+      const commands = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state='command' ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
+      for (const row of commands) await this.prepareReply(row,await this.conversations.commandReply(row as any));
+      const queued = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state='queued' ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
+      const seen = new Set<string>();
+      for (const row of queued) {
+        const thread = String(row.threadId);
+        if (signal.aborted || seen.has(thread) || this.workers.has(thread)) continue;
+        seen.add(thread);
+        const worker = (async () => {
+          try {
+            let text = await this.conversations!.answer(row as any,signal);
+            if (!signal.aborted && text !== undefined) {
+              const current = await this.conversations!.current(account);
+              if (current?.threadId !== thread) text = `来自「${await this.conversations!.label(thread)}」\n\n` + text;
+              await this.prepareReply(row,text);
+            }
+          } catch (error) {
+            if (!signal.aborted && (error as any).status !== 409) await this.prepareReply(row,'这次回答未完成，请在网页或终端检查模型配置和会话状态，再重新发送。');
+          }
+        })().catch(() => {this.error = '微信回复保存失败，正在重试';}).finally(() => {this.workers.delete(thread);});
+        this.workers.set(thread,worker);
+      }
+    }
+    const rows = (await this.db.execute({sql:"SELECT id,payload FROM wechat_messages WHERE account=? AND peer=? AND state='pending' ORDER BY rowid LIMIT 20",args:[account.botId,account.userId]})).rows;
     for (const row of rows) {
       if (signal.aborted) return;
       await this.protocol.send(account, JSON.parse(String(row.payload)), AbortSignal.any([signal, AbortSignal.timeout(15000)]));
       await this.db.execute({sql:"UPDATE wechat_messages SET state='sent' WHERE account=? AND id=?",args:[account.botId,row.id]});
     }
+    this.flushFailures = 0; this.nextFlushAt = 0;
+    } catch (error) {
+      this.nextFlushAt = Date.now() + Math.min(60000,1000 * 2 ** Math.min(++this.flushFailures,6));
+      throw error;
+    } finally {this.flushing = false;}
   }
   private async loop(signal: AbortSignal) {
     let failures = 0, timeout = 40000;
+    // Model work and outbound replies must not wait for the next long-poll response.
+    const pump = this.conversations ? setInterval(() => {
+      const account = this.account;
+      if (!this.login && account && !account.needsLogin) void this.flush(account,signal).catch(async error => {
+        if (signal.aborted) return;
+        this.error = error instanceof WeChatError ? error.message : '微信回复暂未送达，正在重试';
+        if (error instanceof WeChatError && error.code === -14 && this.account) {
+          await this.pauseExpired();
+        }
+      }).catch(() => {this.error = '微信状态保存失败，请重启服务后重试';});
+    },Math.max(10,Math.min(500,this.pollDelay))) : undefined;
+    try {
     while (!signal.aborted) {
       try {
         if (this.login) await this.pollLogin(signal);
@@ -149,13 +217,13 @@ export class WeChatRuntime {
           }
           await this.flush(account, signal);
           const result = await this.protocol.updates(account, AbortSignal.any([signal, AbortSignal.timeout(timeout)]));
-          if (signal.aborted) return;
+          if (signal.aborted || this.account?.needsLogin) return;
           if (result.msgs !== undefined && !Array.isArray(result.msgs)) throw new Error('消息列表格式错误');
           const cursor = typeof result.get_updates_buf === 'string' && result.get_updates_buf ? result.get_updates_buf : account.cursor;
-          const next = {...account,cursor};
           const entries = (result.msgs ?? []).map((msg: WeChatMessage) => this.incoming(account,msg)).filter(Boolean);
-          await this.db.batch([...entries,{sql:'UPDATE wechat_account SET data=? WHERE id=1',args:[JSON.stringify(next)]}]);
-          this.account = next;
+          // Only update the cursor: concurrent outbound credential expiry must remain durable.
+          await this.db.batch([...entries,{sql:"UPDATE wechat_account SET data=json_set(data,'$.cursor',?) WHERE id=1",args:[cursor]}]);
+          const next = {...this.account!,cursor}; this.account = next;
           if (Number.isFinite(result.longpolling_timeout_ms)) timeout = Math.min(90000,Math.max(10000,result.longpolling_timeout_ms + 5000));
           await this.flush(next, signal); this.error = '';
         }
@@ -163,12 +231,18 @@ export class WeChatRuntime {
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof WeChatError && error.code === -14 && !this.login && this.account) {
-          const account = {...this.account,needsLogin:true}; await this.saveAccount(account); this.account = account; this.error = error.message; return;
+          this.error = error.message; await this.pauseExpired(); return;
         }
         if (error instanceof Error && error.name === 'TimeoutError') continue;
         this.error = error instanceof WeChatError ? error.message : '微信请求失败；消息和凭证已保留，正在重试'; failures++;
       }
       await delay(failures ? Math.min(60000,1000 * 2 ** Math.min(failures,6)) : this.pollDelay, undefined, {signal}).catch(() => {});
+    }
+    } finally {
+      if (pump) clearInterval(pump);
+      // Abort first (halt/shutdown), then allow Agent to persist its interrupted turn.
+      await Promise.allSettled([...this.workers.values()]);
+      while (this.flushing) await delay(10);
     }
   }
 }

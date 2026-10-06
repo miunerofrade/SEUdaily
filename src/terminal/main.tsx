@@ -23,7 +23,8 @@ async function main() {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       const { Client } = await import('./client.js');
       const status = await new Client(5).json('/app/wechat');
-      console.log(`WeChat：${status.state}；请运行交互终端 seudaily wechat，或打开 seudaily web 扫码。`);
+      const { wechatStateLabel } = await import('../shared/wechat.js');
+      console.log(`${wechatStateLabel[status.state] ?? '微信状态待确认'}。${status.state === 'connected' ? '在微信发送文字开始聊天，/help 查看命令。' : '请在交互终端运行 seudaily wechat，或打开 seudaily web 扫码。'}`);
       return 0;
     }
     const [{render}, {WeChatApp}, {default:React}] = await Promise.all([import('ink'),import('./wechat.js'),import('react')]);

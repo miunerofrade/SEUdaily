@@ -124,7 +124,7 @@ test('ordinary Web without an existing backend keeps its automatic shutdown beha
 test('WeChat creates a persistent backend without a TTY and ordinary Web reuses it', {timeout:60000}, async t => {
   const f = await fixture(t);
   const result = await exec(process.execPath,[cli,'WeChat',...f.args],{env:f.env});
-  assert.match(result.stdout,/WeChat/);
+  assert.match(result.stdout,/尚未连接微信/);
   const initial=await f.request('/api');assert.equal(initial.persistent,true);assert.equal(initial.clients,0);
   const web=f.start(['web']);
   await eventually(async () => assert.match(f.output(),/SEUdaily Web/));

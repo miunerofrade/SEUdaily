@@ -5,8 +5,10 @@ import { z } from 'zod';
 import { agentStore } from '../runtime/storage.js';
 import { runtimeRoot } from '../runtime/runtime-paths.js';
 import { WeChatRuntime } from '../wechat/runtime.js';
+import { WeChatConversations } from '../wechat/conversations.js';
+import { agentRuntime } from '../runtime/application.js';
 import { ensurePersistentRuntime } from './lifecycle.js';
-export const wechatRuntime = new WeChatRuntime(agentStore.client);
+export const wechatRuntime = new WeChatRuntime(agentStore.client,undefined,1000,new WeChatConversations(agentStore,agentRuntime));
 let prepared: Promise<void> | undefined;
 function prepare() { return prepared ??= prepareOnce(); }
 async function prepareOnce() {

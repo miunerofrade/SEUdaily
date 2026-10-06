@@ -4,7 +4,7 @@ import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, 
 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
 export const RESOURCE_ID = "seudaily-web-local";
-const HISTORY_RESOURCES = [RESOURCE_ID, "cvstream-web-local"];
+const HISTORY_RESOURCES = [RESOURCE_ID, "cvstream-web-local", "seudaily-wechat-local"];
 const DOCUMENT_SECTION_MARKER = "\n\n<!-- seudaily:documents -->";
 const LEGACY_DOCUMENT_SECTION_MARKERS = ["\n\n<!-- cvstream:documents -->"];
 

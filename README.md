@@ -303,8 +303,8 @@ npm run test:distribution
 
 SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/main/LICENSE)。发布包保留打包依赖的第三方许可证声明；VPN 核心及其他第三方软件遵循各自许可证，见 [第三方声明](https://github.com/miunerofrade/SEUdaily/blob/main/THIRD_PARTY_NOTICES.md)。
 
-### 微信接入 demo
+### 微信接入与会话
 
-执行 `seudaily wechat`，在 TUI 扫码接入；或运行 `seudaily web`，点击“微信”在浮层扫码和输入手机验证码。命令自动复用或启动常驻后端，退出界面后继续收发。第一版使用固定 `wechat-demo` 会话回显文本与原始微信消息 ID，不需要模型配置；暂未接入模型对话、媒体或 RAG。接入资格及真实账号测试需本人完成。操作、存储与恢复说明见 [docs/wechat.md](docs/wechat.md)。
+执行 `seudaily wechat`，在 TUI 扫码接入；或运行 `seudaily web`，点击“微信”在浮层扫码和输入手机验证码。命令自动复用或启动常驻后端，退出界面后继续收发。普通文字进入当前 Agent 会话；发送 `/help` 查看 `/new`、`/sessions`、`/use`、`/context`、`/history`。会话管理不需要模型配置，文字聊天使用已有模型设置；暂未接入媒体或 RAG。接入资格及真实账号测试需本人完成。操作、存储与恢复说明见 [docs/wechat.md](docs/wechat.md)。
 
 服务管理：`seudaily ps` 列出运行中的 SEUdaily 后端；`seudaily stop --port 4111` 或 `seudaily stop <PID>` 只停止选定的一个服务。旧版后端也可以查看和停止，不要求版本或数据目录与当前 CLI 一致。源码用户可用 `seudaily wechat --data-dir "$PWD"` 保留仓库中的原有数据。所有子命令均通过 npm 的 `seudaily` 入口运行。

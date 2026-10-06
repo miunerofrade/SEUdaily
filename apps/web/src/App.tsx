@@ -1500,7 +1500,7 @@ export default function App() {
           {recentConversations.map(({ kind, conversation }) => (
             <div key={`${kind}-${conversation.id}`} className={`conversation-row ${kind === "focus" ? "focus-conversation" : ""} ${(kind === "chat" && view === "chat" && conversation.id === active.id) || (kind === "focus" && view === "focus" && conversation.focusId === selectedFocusId) ? "active" : ""}`}>
               <button className="conversation-item" onClick={() => kind === "focus" ? openFocusConversation(conversation.focusId || conversation.id) : (() => { setActiveId(conversation.id); setView("chat"); setNavOpen(false); })()}>
-                <span><strong>{conversation.title}</strong><small>{humanTime(conversation.updatedAt)}</small></span>
+                <span><strong>{conversation.title}</strong><small>{conversation.resourceId === 'seudaily-wechat-local' ? '微信 · ' : ''}{humanTime(conversation.updatedAt)}</small></span>
               </button>
               {kind === "chat" && <button
                 type="button"

@@ -17,14 +17,15 @@ test('history list loads every page without fetching every conversation body', a
   globalThis.fetch = async input => {
     const url = new URL(input, 'http://localhost'); requests.push(url);
     assert.equal(url.pathname, '/api/memory/threads');
-    const records = url.searchParams.get('resourceId') !== 'seudaily-web-local' ? []
+    const records = url.searchParams.get('resourceId') === 'seudaily-wechat-local' ? [{...thread('wechat-session'),resourceId:'seudaily-wechat-local',title:'微信 · 复习'}] : url.searchParams.get('resourceId') !== 'seudaily-web-local' ? []
       : url.searchParams.get('page') === '0' ? Array.from({ length: 100 }, (_, i) => thread(`t${i}`)) : [thread('t100')];
     return Response.json({ threads: records });
   };
   try {
     const conversations = await loadServerConversations();
-    assert.equal(conversations.length, 101);
-    assert.equal(requests.length, 3);
+    assert.equal(conversations.length, 102);
+    assert.equal(requests.length, 4);
+    assert.equal(conversations.find(item=>item.id==='wechat-session').resourceId,'seudaily-wechat-local');
     assert.ok(conversations.every(item => item.messagesLoaded === false && item.messages.length === 0));
   } finally { globalThis.fetch = original; }
 });
