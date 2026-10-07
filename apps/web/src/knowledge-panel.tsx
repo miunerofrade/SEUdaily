@@ -8,11 +8,11 @@ async function request(path:string,init?:RequestInit) {
   if(!response.ok) throw new Error(body.error || '知识库请求失败');return body;
 }
 const json=(body:unknown)=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-export function KnowledgePanel({selectedPath}:{selectedPath?:string}) {
+export function KnowledgePanel({selectedPath,onFilesChanged}:{selectedPath?:string;onFilesChanged?:()=>void}) {
   const [documents,setDocuments]=useState<Document[]>([]),[configured,setConfigured]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[query,setQuery]=useState(''),[matches,setMatches]=useState<Match[]>([]);
-  const input=useRef<HTMLInputElement>(null);
+  const input=useRef<HTMLInputElement>(null),knownFiles=useRef('');
   async function load() {const result=await request('');setDocuments(result.documents);setConfigured(result.configured);}
-  useEffect(()=>{let active=true;async function refresh(){try{const result=await request('');if(active){setDocuments(result.documents);setConfigured(result.configured);}}catch(reason){if(active)setError((reason as Error).message);}}void refresh();const timer=setInterval(()=>void refresh(),3000);return()=>{active=false;clearInterval(timer);};},[]);
+  useEffect(()=>{let active=true;async function refresh(){try{const result=await request('');if(active){setError('');setDocuments(result.documents);setConfigured(result.configured);const ids=result.documents.map((item:Document)=>item.id).join(',');if(ids!==knownFiles.current){knownFiles.current=ids;onFilesChanged?.();}}}catch(reason){if(active)setError((reason as Error).message);}}void refresh();const timer=setInterval(()=>void refresh(),3000);return()=>{active=false;clearInterval(timer);};},[onFilesChanged]);
   async function run(action:()=>Promise<void>) {setBusy(true);setError('');setMessage('');try{await action();await load();}catch(reason){setError((reason as Error).message);}finally{setBusy(false);}}
   async function upload(files:FileList|null) {
     if(!files)return;const selected=Array.from(files);if(input.current)input.current.value='';

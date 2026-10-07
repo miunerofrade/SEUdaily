@@ -23,8 +23,9 @@ async function fixture(t) {
 
 test('documents deduplicate before embedding, persist and remain searchable outside the upload session',async t=>{
   const f=await fixture(t),bytes=Buffer.from('课程期末考试占比六成。');
-  const first=await f.service.enqueue('课程.txt',bytes);
-  assert.equal((await f.service.enqueue('改名.txt',bytes)).duplicate,true);
+  const first=await f.service.enqueue('课程.txt',bytes,undefined,join(f.root,'first.txt'));
+  assert.equal((await f.service.enqueue('改名.txt',bytes,undefined,join(f.root,'second.txt'))).duplicate,true);
+  assert.deepEqual(await f.service.sources(first.id),[join(f.root,'first.txt'),join(f.root,'second.txt')]);
   await Promise.all([f.service.tick(),f.service.tick()]);
   assert.equal((await f.service.list())[0].state,'indexed');assert.equal(f.calls.length,1);
   const result=await f.service.search('考试占比');assert.equal(result.matches[0].name,'课程.txt');
@@ -32,7 +33,7 @@ test('documents deduplicate before embedding, persist and remain searchable outs
   await f.service.retry(first.id);await f.service.tick();
   assert.equal(f.calls.length,2,'index retry reuses vectors; only the preceding query needed another call');
   assert.equal(f.rows.size,1);
-  await f.service.remove(first.id);assert.equal((await f.service.list()).length,0);assert.equal(f.rows.size,0);
+  await f.service.remove(first.id);assert.equal((await f.service.list()).length,0);assert.equal(f.rows.size,0);assert.deepEqual(await f.service.sources(first.id),[]);
   assert.equal((await f.service.search('考试')).matches.length,0);
 });
 

@@ -29,8 +29,8 @@ async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   const calls = [];
-  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText,
-    require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
+  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText, resolveDocumentContexts:()=>[],
+    require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{list:async()=>[],sources:async()=>[],enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
     runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
     resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
   vm.runInContext(`${compiled}\nglobalThis.helpers = { safeLibraryTarget, walkFiles, updateEnvFile, routes: exports.appRoutes };`, context);

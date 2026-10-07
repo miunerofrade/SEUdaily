@@ -814,7 +814,7 @@ export function FocusPage({
 
 export function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>([]);
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState("documents");
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LibraryFile | null>(null);
@@ -828,12 +828,12 @@ export function LibraryPage() {
   const [error, setError] = useState("");
   const load = useCallback(async () => { setLoading(true); setError(""); try { setFiles((await fetchLibrary()).files); } catch (reason) { setError(reason instanceof Error ? reason.message : "资料读取失败"); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
-  const categories = [{ id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
+  const categories = [{id:"documents",label:"上传文件"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
   const visible = files.filter((file) => file.category === category);
   const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
   const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
-  const selectedFiles = visible.filter((file) => file.course === course && file.teacher === teacher);
-  const columnCount = 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
+  const selectedFiles = category === "documents" ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
+  const columnCount = category === "documents" ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
 
   function chooseCategory(next: string) { setCategory(next); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
   function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
@@ -858,20 +858,20 @@ export function LibraryPage() {
   }
 
   return <div className="workspace-page library-page">
-    <KnowledgePanel selectedPath={selectedFilePath || undefined} />
+    <KnowledgePanel selectedPath={selectedFilePath || undefined} onFilesChanged={load} />
     <PageHeader title="资料库" description="" action={<button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button>} />
     <PageState loading={loading} error={error}>
       <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
         <div className="browser-column">
           <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
         </div>
-        {category && <div className="browser-column">
+        {category && category !== "documents" && <div className="browser-column">
           <div className="browser-column-list">{courses.length ? courses.map((item) => <button key={item} className={course === item ? "selected" : ""} onClick={() => chooseCourse(item)}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无课程资料</div>}</div>
         </div>}
         {course && <div className="browser-column">
           <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
         </div>}
-        {course && teacher && <div className="browser-column browser-file-column">
+        {((course && teacher) || category === "documents") && <div className="browser-column browser-file-column">
           <div className="browser-column-list">{selectedFiles.length ? selectedFiles.map((file) => <button key={file.path} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}>{file.category === "images" ? <FileImage size={17} /> : <FileText size={17} />}<span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
         </div>}
       </div>
@@ -887,7 +887,7 @@ function FilePreview({ file, text, loading, error, onClose }: { file: LibraryFil
   const video = ["MP4", "WEBM"].includes(file.type);
   const audio = ["MP3", "M4A", "WAV"].includes(file.type);
   const textFile = ["TXT", "MD"].includes(file.type);
-  return <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="file-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title"><header><h2 id="file-preview-title">{friendlyFileName(file)}</h2><a href={url} target="_blank" rel="noreferrer" title="在新窗口打开"><ExternalLink size={16} /></a><button type="button" className="preview-close" aria-label="关闭预览" onClick={onClose}><X size={18} /></button></header><div className="file-preview-content">
+  return <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="file-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title"><header><h2 id="file-preview-title">{friendlyFileName(file)}</h2><a className="preview-download" href={url + "&download=1&name=" + encodeURIComponent(file.name)} download={file.name}>下载原文件</a><a href={url} target="_blank" rel="noreferrer" title="在新窗口打开"><ExternalLink size={16} /></a><button type="button" className="preview-close" aria-label="关闭预览" onClick={onClose}><X size={18} /></button></header><div className="file-preview-content">
     {loading ? <div className="preview-state"><LoaderCircle className="spin" size={22} />正在读取文件…</div> : error ? <div className="preview-state error">{error}</div> : image ? <img src={url} alt={file.name} /> : video ? <video src={url} controls /> : audio ? <audio src={url} controls /> : file.type === "PDF" ? <iframe src={url} title={file.name} /> : textFile ? (file.type === "MD" ? <div className="preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(text)}</ReactMarkdown></div> : <pre>{text}</pre>) : <div className="preview-state">该格式暂不支持内嵌预览，可点击右上角在新窗口打开。</div>}
   </div></div></div>;
 }

@@ -49,6 +49,7 @@ export class KnowledgeService {
   private async initialize() {
     await mkdir(join(this.root,'files'),{recursive:true,mode:0o700});
     await this.db.execute(`CREATE TABLE IF NOT EXISTS knowledge_documents (id TEXT PRIMARY KEY,name TEXT NOT NULL,path TEXT NOT NULL,extension TEXT NOT NULL,state TEXT NOT NULL,error TEXT NOT NULL,space TEXT NOT NULL,chunkCount INTEGER NOT NULL,createdAt INTEGER NOT NULL)`);
+    await this.db.execute("CREATE TABLE IF NOT EXISTS knowledge_sources (path TEXT PRIMARY KEY, documentId TEXT NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE)");
     await this.db.execute("UPDATE knowledge_documents SET state='queued',error='' WHERE state='processing'");
   }
   private serialize<T>(operation:()=>Promise<T>): Promise<T> {
@@ -71,7 +72,7 @@ export class KnowledgeService {
     const result=await this.db.execute('SELECT * FROM knowledge_documents ORDER BY createdAt DESC');
     return result.rows.map(row=>({...row,state:row.state === 'indexed' && row.space !== space ? 'outdated' : row.state})) as unknown as KnowledgeDocument[];
   }
-  async enqueue(name: string, bytes: Buffer, markdown?: string) {
+  async enqueue(name: string, bytes: Buffer, markdown?: string, sourcePath?: string) {
     await this.ready;
     if (!bytes.length || bytes.length > 50*1024*1024) throw new Error('文件大小必须在 50 MB 以内');
     const extension=extname(name).toLowerCase();
@@ -80,13 +81,22 @@ export class KnowledgeService {
     if (['.docx','.xlsx','.pptx'].includes(extension) && (bytes[0] !== 0x50 || bytes[1] !== 0x4b)) throw new Error('Office 文件内容无效');
     return this.serialize(async()=>{
       const id=hash(bytes), existing=(await this.db.execute({sql:'SELECT id,state FROM knowledge_documents WHERE id=?',args:[id]})).rows[0];
-      if (existing) return {id,state:String(existing.state),duplicate:true};
+      if (existing) {
+        if (sourcePath) await this.db.execute({sql:'INSERT OR IGNORE INTO knowledge_sources VALUES(?,?)',args:[sourcePath,id]});
+        return {id,state:String(existing.state),duplicate:true};
+      }
       const path=join(this.root,'files',id+extension);await this.atomic(path,bytes);
       if (markdown) await this.atomic(join(this.root,id+'.text.json'),JSON.stringify({hash:id,text:markdown}));
       const state=this.config().key ? 'queued' : 'waiting_config';
       await this.db.execute({sql:'INSERT INTO knowledge_documents VALUES(?,?,?,?,?,?,?,0,?)',args:[id,name,path,extension,state,'','',Date.now()]});
+      if (sourcePath) await this.db.execute({sql:'INSERT OR IGNORE INTO knowledge_sources VALUES(?,?)',args:[sourcePath,id]});
       return {id,state,duplicate:false};
     });
+  }
+  async sources(id?: string): Promise<string[]> {
+    await this.ready;
+    const result=await this.db.execute(id ? {sql:'SELECT path FROM knowledge_sources WHERE documentId=?',args:[id]} : 'SELECT path FROM knowledge_sources');
+    return result.rows.map(row=>String(row.path));
   }
   async retry(id: string) {
     await this.ready;

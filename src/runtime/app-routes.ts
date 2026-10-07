@@ -6,7 +6,7 @@ import { z } from "zod";
 import { registerApiRoute } from "../server/routes.js";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { envValue, projectRoot, agentInstructionsPath } from "./runtime-paths.js";
@@ -16,7 +16,7 @@ import { agentStore } from "./storage.js";
 import { agentRuntime } from "./application.js";
 import { runCourseFocusQueue, runFocusAgentCycle, sendFocusAgentMessage, startFocusRuntime, type FocusAgentItem } from "./focus-runtime.js";
 import { isFullAccessEnabled, isFullAccessExtraEnabled, setFullAccessEnabled, setFullAccessExtraEnabled } from "./permission-state.js";
-import { storeDocumentContext } from "./document-context.js";
+import { storeDocumentContext, resolveDocumentContexts } from "./document-context.js";
 import { activateActionRequest, claimActionRequest, completeActionRequest, failActionRequest } from "./action-request-store.js";
 import { localActionExecutionPayload, localActionProposalSchema } from "./local-action-schema.js";
 import { executeAuthResume } from "./auth-resume-store.js";
@@ -598,7 +598,15 @@ export const appRoutes = [
       const images = await walkFiles(imageRoot);
       files.push(...images.map((file) => ({ ...file, category: "images", course: "临时图片", teacher: "本地上传" })));
       const documents = await walkFiles(resolve(projectRoot, '.seudaily', 'uploads', 'documents'));
-      files.push(...documents.map(file => ({ ...file, category: 'documents', course: '上传文档', teacher: '本地上传' })));
+      const {knowledge} = await import('./knowledge/index.js');
+      const sources = new Set(await knowledge.sources());
+      files.push(...documents.filter(file=>!sources.has(file.path)).map(file => ({ ...file, name:resolveDocumentContexts([basename(file.path,extname(file.path))])[0]?.name || file.name, category:'documents',course:'上传文件',teacher:'本地文件' })));
+      const indexed = new Map((await knowledge.list()).map(document=>[document.path,document]));
+      const originals = await walkFiles(resolve(projectRoot,'.seudaily','knowledge','files'));
+      files.push(...originals.flatMap(file=>{
+        const document=indexed.get(file.path);
+        return document ? [{...file,name:document.name,category:'documents',course:'上传文件',teacher:'本地文件'}] : [];
+      }));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return c.json({ root, files, count: files.length });
     },
@@ -615,7 +623,7 @@ export const appRoutes = [
       if (!details?.isFile()) return c.json({ error: "文件不存在" }, 404);
       if (details.size > 50 * 1024 * 1024) return c.json({ error: "文件超过 50 MB，无法在线预览" }, 413);
       const bytes = await readFile(target);
-      return new Response(new Uint8Array(bytes), { headers: { "Content-Type": previewContentType(target), "Content-Disposition": "inline", "Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff" } });
+      return new Response(new Uint8Array(bytes), { headers: { "Content-Type": previewContentType(target), "Content-Disposition": c.req.query("download") === "1" ? "attachment; filename*=UTF-8\'\'" + encodeURIComponent(basename(c.req.query("name") || target)) : "inline", "Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff" } });
     },
   }),
   registerApiRoute("/app/library", {
@@ -626,12 +634,18 @@ export const appRoutes = [
       if (typeof body.path !== "string") return c.json({ error: "缺少文件路径" }, 400);
       const target = await safeLibraryTarget(body.path);
       if (!target) return c.json({ error: "只能删除资料库内的文件" }, 403);
-      const knowledgeFiles = resolve(projectRoot, '.seudaily', 'knowledge', 'files');
-      if (target.startsWith(knowledgeFiles + sep)) {
+      const knowledgeFiles = await realpath(resolve(projectRoot, '.seudaily', 'knowledge', 'files')).catch(() => null);
+      if (knowledgeFiles && isWithinDirectory(knowledgeFiles, target)) {
         const { knowledge } = await import('./knowledge/index.js');
-        const document = (await knowledge.list()).find(item => item.path === target);
+        const document = (await knowledge.list()).find(item => resolve(item.path) === resolve(body.path as string));
         if (!document) return c.json({ error: "知识库文件未登记，请通过知识库管理" }, 409);
+        const sources = await knowledge.sources(document.id);
+        const uploads = await realpath(resolve(projectRoot,'.seudaily','uploads','documents')).catch(() => null);
         await knowledge.remove(document.id);
+        for (const source of sources) {
+          const safe = await safeLibraryTarget(source);
+          if (safe && uploads && isWithinDirectory(uploads, safe)) await unlink(safe).catch(error=>{if(error.code !== 'ENOENT') throw error;});
+        }
       } else await unlink(target);
       return c.json({ deleted: true, path: target });
     },
@@ -705,7 +719,7 @@ export const appRoutes = [
         let knowledgeIndex: {id:string;state:string;duplicate:boolean} | {state:string;error:string};
         try {
           const {knowledge} = await import('./knowledge/index.js');
-          knowledgeIndex = await knowledge.enqueue(data.filename || filename, bytes, data.markdown);
+          knowledgeIndex = await knowledge.enqueue(data.filename || filename, bytes, data.markdown, originalPath);
         } catch (error) {
           // Keep the uploaded attachment usable even when local indexing fails.
           knowledgeIndex = {state:'failed',error:redactText((error as Error).message)};
