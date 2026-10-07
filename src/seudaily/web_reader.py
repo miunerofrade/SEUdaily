@@ -296,6 +296,22 @@ def read_web_page(
 ) -> dict[str, Any]:
     if include_attachments not in {"none", "auto", "all"}:
         raise ValueError("includeAttachments 必须是 none、auto 或 all")
+    # The official calendar uses the existing reader, backed by persistent attachments.
+    from .academic_calendar import CALENDAR_URL
+    if url.rstrip("/") == CALENDAR_URL:
+        from .schedule import ScheduleService
+        from .runtime_paths import runtime_root, env_value
+        import os
+        root = runtime_root(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
+        calendar = ScheduleService(cache_file=root / "schedule.json").get_calendar()
+        attachments = calendar.get("attachments", [])
+        content = "\n\n".join(item.get("text", "") for item in attachments if item.get("text"))
+        warnings = list(calendar.get("warnings", []))
+        if any(Path(item.get("file", "")).suffix.lower() == ".pdf" and not item.get("text") for item in attachments):
+            warnings.append("PDF 没有可用的提取文本，不能据此推断通知内容。")
+        return {**calendar, "status": "completed" if content else "partial",
+                "url": CALENDAR_URL, "title": "东南大学校历与学校节假日通知",
+                "content": content, "warnings": warnings}
     safe_url = validate_public_url(url)
     opener = campus_opener(_SafeRedirectHandler())
     request = Request(safe_url, headers={"User-Agent": "Mozilla/5.0 (SEUdaily local web reader)", "Accept": "text/html,application/xhtml+xml"})

@@ -93,17 +93,44 @@ test("capability discovery exposes transformed input schemas and rejects incompl
     process.env.SEUDAILY_PROJECT_ROOT = directory;
     await compileSource("src/agent/tool.ts", directory);
     for (const module of [
-      "runtime-paths", "process-tree", "action-request-store", "auth-resume-store", "local-action-schema", "permission-state", "vpn-state",
+      "runtime-paths", "images", "process-tree", "action-request-store", "auth-resume-store", "local-action-schema", "permission-state", "vpn-state",
       "tools/course-tools", "tools/python-bridge", "tools/tool-result", "tools/tool-broker",
       "tools/browser-tools", "tools/browser-config", "tools/web-reader", "tools/web-fetch", "tools/web-search", "tools/public-url",
     ]) await compileSource(`src/runtime/${module}.ts`, directory);
     await writeFile(join(directory, 'src/runtime/tools/browser-catalog.json'), await readFile(join(root, 'src/runtime/tools/browser-catalog.json')));
     await writeFile(join(directory, "src/runtime/tools/python-bridge.js"), `
-export async function runPythonTool() {
+export let pageResult;
+export function setPageResult(result) {pageResult = result;}
+export async function runPythonTool(action, payload) {
+  if (action === "read-web-page" && pageResult) return pageResult;
+  if (action === "apply-agent-schedule-change") return {status:"completed",summary:"本地设置已更新",data:{change:payload},artifacts:[],citations:[],warnings:[],metrics:{}};
   return { status: "auth_required", taskId: "task-test", summary: "Login required", data: {}, artifacts: [], citations: [], warnings: [], metrics: {} };
 }
 `);
-    const { captureCourseMaterialsTool, auditTrainingPlanTool, getScheduleTool, getCurrentDateTool } = await import(pathToFileURL(join(directory, "src/runtime/tools/course-tools.js")));
+    const {setPageResult} = await import(pathToFileURL(join(directory,"src/runtime/tools/python-bridge.js")));
+    const {runtimeRoot} = await import(pathToFileURL(join(directory,"src/runtime/runtime-paths.js")));
+    const {hydrateImages} = await import(pathToFileURL(join(directory,"src/runtime/images.js")));
+    const {readWebPageTool} = await import(pathToFileURL(join(directory,"src/runtime/tools/web-reader.js")));
+    const {createHash} = await import("node:crypto");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfLkAAAAASUVORK5CYII=", "base64");
+    const calendarDir = join(runtimeRoot,"calendar");
+    await mkdir(calendarDir,{recursive:true}); await writeFile(join(calendarDir,"calendar.png"),png);
+    const calendarData = {sourceUrl:"https://jwc.seu.edu.cn/xl/list.htm",content:"通知正文",attachments:[{file:"calendar.png",text:"通知正文",sha256:createHash("sha256").update(png).digest("hex")}]};
+    setPageResult({status:"completed",summary:"校历",taskId:"page",data:calendarData,artifacts:[],citations:[],warnings:[],metrics:{}});
+    const visual = await readWebPageTool.execute(readWebPageTool.inputSchema.parse({url:calendarData.sourceUrl}),{});
+    const visualView = await readWebPageTool.toModelOutput(visual);
+    assert.equal(visualView.type,"content");
+    assert.equal(visualView.value[0].text.split("通知正文").length - 1,1);
+    const hydrated = await hydrateImages([{role:"user",content:visualView.value}]);
+    assert.equal(hydrated[0].content.at(-1).image_url.url,`data:image/png;base64,${png.toString("base64")}`);
+    assert.equal(JSON.stringify(visual).includes(png.toString("base64")),false);
+    await writeFile(join(calendarDir,"calendar.png"),Buffer.from("corrupted"));
+    const invalid = await readWebPageTool.execute(readWebPageTool.inputSchema.parse({url:calendarData.sourceUrl}),{});
+    assert.equal(invalid.data.modelImages.length,0);
+    assert.match(invalid.warnings.join(" "),/校验失败/);
+    assert.equal(readWebPageTool.toModelOutput(invalid).type,"text");
+    setPageResult(undefined);
+    const { captureCourseMaterialsTool, auditTrainingPlanTool, getScheduleTool, getCurrentDateTool, proposeLocalActionTool } = await import(pathToFileURL(join(directory, "src/runtime/tools/course-tools.js")));
     assert.equal(getScheduleTool.inputSchema.parse({}).prefetchAvailableSemesters, true);
     assert.equal(getScheduleTool.inputSchema.parse({}).localOnly, false);
     assert.equal(getScheduleTool.inputSchema.parse({}).refresh, false);
@@ -130,6 +157,26 @@ export async function runPythonTool() {
     const result = await searchCapabilitiesTool.execute({ query: "修改课表", namespace: "local-actions" }, options);
     assert.equal(result.count, 1);
     const capability = result.results[0];
+    const {setFullAccessEnabled, setFullAccessExtraEnabled} = await import(pathToFileURL(join(directory, "src/runtime/permission-state.js")));
+    setFullAccessEnabled(false); setFullAccessExtraEnabled(false);
+    const apply = proposeLocalActionTool.inputSchema.parse({kind:"set_semester",mode:"apply",schedule:{semester:{startDate:"2026-09-21"}}});
+    assert.equal(proposeLocalActionTool.requireApproval(apply, options), true);
+    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:apply}, options), true);
+    const applied = await invokeCapabilityTool.execute({ticket:capability.ticket,arguments:apply},options);
+    assert.deepEqual(applied.data.change, {operation:"semester",semester:{startDate:"2026-09-21"}});
+    assert.match((await invokeCapabilityTool.toModelOutput(applied)).value, /本地设置已更新/);
+    const preview = {...apply, mode:"preview"};
+    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:preview}, options), false);
+    setFullAccessEnabled(true);
+    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:apply}, options), false);
+    setFullAccessEnabled(false);
+    assert.equal(proposeLocalActionTool.inputSchema.safeParse({kind:"add_schedule",schedule:{course:{courseName:"周期课",startPeriod:1,endPeriod:2}}}).success, false);
+    assert.equal(proposeLocalActionTool.inputSchema.safeParse({kind:"add_schedule_once",schedule:{date:"2026-10-07",course:{courseName:"单次课",startPeriod:1,endPeriod:2}}}).success, true);
+    await assert.rejects(proposeLocalActionTool.execute(apply, {requestContext:{get:key=>key === "seudailyFocus"}}), /Focus/);
+    const modelView = JSON.parse(getScheduleTool.toModelOutput({status:"completed",summary:"课表",data:{calendar:{attachments:[{text:"long calendar"}]},courses:[]},warnings:[]}).value);
+    assert.equal(modelView.calendar, undefined);
+    assert.match(proposeLocalActionTool.toModelOutput({status:"failed",summary:"写入失败",data:{},warnings:[]}).value, /写入失败/);
+    assert.equal((await searchCapabilitiesTool.execute({query:"get-academic-calendar",namespace:"schedule"},options)).results.some(item=>item.name === "get-academic-calendar"), false);
     assert.ok(capability.inputSchema.properties.kind);
     assert.ok(capability.inputSchema.properties.schedule.properties.course.properties.weeks);
     await assert.rejects(invokeCapabilityTool.execute({ ticket: capability.ticket, arguments: { kind: "create_focus" } }, options), /focus/);

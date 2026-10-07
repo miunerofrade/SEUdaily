@@ -8,7 +8,6 @@ import {
   auditTrainingPlanTool,
   captureCourseMaterialsTool,
   getScheduleTool,
-  getAcademicCalendarTool,
   proposeLocalActionTool,
   queryCampusNoticesTool,
   readCampusNoticeTool,
@@ -28,7 +27,6 @@ const tickets = new Map<string, Ticket>();
 const ticketLifetimeMs = 10 * 60 * 1000;
 
 const staticCapabilities: Capability[] = [
-  { namespace: "schedule", tool: getAcademicCalendarTool, aliases: ["校历", "节假日", "国庆", "调休", "调课", "calendar", "holiday"] },
   { namespace: "schedule", tool: getScheduleTool, aliases: ["课表", "schedule", "timetable", "上课"] },
   { namespace: "local-actions", tool: proposeLocalActionTool, aliases: ["修改课表", "移动课程", "创建关注", "focus", "edit schedule"] },
   { namespace: "course-materials", tool: resolveCourseTool, aliases: ["课程", "课次", "回放", "course", "session"] },
@@ -142,11 +140,20 @@ export const searchCapabilitiesTool = createTool({
 
 export const invokeCapabilityTool = createTool({
   id: "invoke-capability",
+  toModelOutput: async (output: any) => {
+    const name = output?.data?.brokerCapability?.name;
+    const tool = staticCapabilities.find(item => item.tool.id === name)?.tool;
+    if (tool?.toModelOutput) return tool.toModelOutput(output);
+    return {type: "text", value: JSON.stringify(output)};
+  },
   description: "使用 search-capabilities 在当前运行中签发的 ticket 调用对应能力。不接受工具名，ticket 与线程、运行和具体能力绑定。",
   inputSchema: z.object({ ticket: z.string().startsWith("cap-"), arguments: z.record(z.string(), z.unknown()).default({}) }).strict(),
-  requireApproval: async ({ ticket }: { ticket: string }, options) => {
+  requireApproval: async ({ ticket, arguments: input }: { ticket: string; arguments: Record<string, unknown> }, options) => {
     const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
-    return Boolean(entry?.capability.approvalRequired && !isUnapprovedAccessEnabled(options));
+    const tool = entry.capability.tool;
+    const parsed = await validateInput(tool, input);
+    const required = typeof tool.requireApproval === "function" ? await tool.requireApproval(parsed, options) : tool.requireApproval;
+    return Boolean(required || (entry.capability.approvalRequired && !isUnapprovedAccessEnabled(options)));
   },
   execute: async ({ ticket, arguments: input }, options) => {
     const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);

@@ -6,6 +6,7 @@ import { consumeActionRequest, issueActionRequest } from "../action-request-stor
 import { issueAuthResume, type AuthTarget } from "../auth-resume-store.js";
 import { localActionExecutionPayload, localActionProposalSchema } from "../local-action-schema.js";
 import { runPythonTool } from "./python-bridge.js";
+import { isUnapprovedAccessEnabled } from "../permission-state.js";
 import { pythonToolOutput, type ToolResult } from "./tool-result.js";
 
 const commonPortalFields = {
@@ -104,7 +105,7 @@ function trainingPlanAuditModelOutput(output: ToolResult) {
 
 function scheduleModelOutput(output: ToolResult) {
   const data = objectValue(output.data);
-  const { cacheFile: _cacheFile, customizations: _customizations, ...visibleData } = data;
+  const { cacheFile: _cacheFile, customizations: _customizations, calendar: _calendar, ...visibleData } = data;
   const modelView = {
     status: output.status,
     summary: output.summary,
@@ -381,10 +382,26 @@ export const captureCourseMaterialsTool = createTool({
 });
 
 export const proposeLocalActionTool = createTool({
-  ...pythonToolOutput, toModelOutput: deferredRequestModelOutput, id: "propose-local-action",
-  description: "提出一个需要用户点击后才执行的本地写操作；此工具不会直接修改数据。",
+  ...pythonToolOutput,
+  toModelOutput: (output: ToolResult) => {
+    const data = objectValue(output.data);
+    if (data.actionRequest) return deferredRequestModelOutput();
+    return {type: "text" as const, value: JSON.stringify({status: output.status, summary: output.summary, change: data.change, warnings: output.warnings})};
+  },
+  id: "propose-local-action",
+  description: "管理本地课表或创建关注。preview 只提出方案；apply 按现有权限执行，普通模式需审批，完全访问模式可直接执行。支持学期设置、周期/单日增课、改单日课程、停课与移动单次课，不能修改学校远端课表。",
+  requireApproval: (input, options) => input.mode === "apply" && !isUnapprovedAccessEnabled(options),
   inputSchema: localActionProposalSchema,
-  execute: async (input) => {
+  execute: async (input, options) => {
+    if (input.mode === "apply") {
+      if (options?.requestContext?.get("seudailyFocus") === true) throw new Error("Focus 任务不能自行修改课表或创建其他关注");
+      const payload = localActionExecutionPayload(input);
+      if (input.kind !== "create_focus") return runPythonTool("apply-agent-schedule-change", payload, options?.abortSignal);
+      const id = `focus-${randomUUID()}`;
+      const result = await runPythonTool<ToolResult>("upsert-focus", {item:{...payload,id,threadId:id,resourceId:'seudaily-focus-local',enabled:true}}, options?.abortSignal);
+      if (result.status === 'completed') (await import('../focus-runtime.js')).startFocusRuntime();
+      return result;
+    }
     const kind = input.kind === "create_focus" ? "create-focus" : "modify-schedule";
     const text = input.kind === "create_focus" ? `替我创建“${input.focus!.title}”的关注` : `替我修改课表`;
     const actionRequest = await issueActionRequest(kind, text, {
@@ -393,18 +410,6 @@ export const proposeLocalActionTool = createTool({
     });
     return completedResult("已生成待执行的本地操作。", { actionRequest, proposal: input });
   },
-});
-
-export const getAcademicCalendarTool = createTool({
-  ...pythonToolOutput,
-  id: "get-academic-calendar",
-  description: "Read the official SEU academic calendar and school holiday/makeup-class notice from the fixed JWC calendar page. Reuses downloaded attachments by URL and integrity. Use for holidays and school-specific rescheduling instead of searching old news or assuming national rules. Public documents need no campus login.",
-  inputSchema: z.object({
-    cacheFile: scheduleFields.cacheFile,
-    refresh: z.boolean().default(false).describe("Check the official page for new attachment URLs; never redownload intact cached attachments."),
-    localOnly: z.boolean().default(false),
-  }),
-  execute: async (input, options) => runPythonTool("get-academic-calendar", input, options?.abortSignal),
 });
 
 export const getCurrentDateTool = createTool({

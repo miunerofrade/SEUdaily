@@ -73,6 +73,7 @@ export type RunState = {
     messages: ModelMessage[];
     parts: ContentPart[];
     pendingCalls: ToolCall[];
+    pendingToolImages?: ContentPart[];
     cursor: number;
     approval?: {
         id: string;

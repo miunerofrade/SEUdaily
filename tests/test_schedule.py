@@ -733,3 +733,50 @@ def test_missing_cache_syncs_automatically_but_old_cache_requires_explicit_refre
     assert fallback['stale'] is True
     assert fallback['courses'][0]['courseName'] == '已同步课程'
     assert service.cache_file.exists()
+
+
+def test_agent_semester_patch_preserves_other_settings_and_rejects_invalid_dates(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
+    service.apply_agent_change({'operation':'semester','semester':{'name':'秋季','totalWeeks':18}})
+    saved = service.apply_agent_change({'operation':'semester','semester':{'startDate':'2026-09-21'}})['customizations']['semester']
+    assert saved == {'name':'秋季','startDate':'2026-09-21','totalWeeks':18}
+    before = service.customization_file.read_bytes()
+    for patch in [{'startDate':'2026-02-30'}, {'totalWeeks':31}, {'unknown':True}]:
+        with pytest.raises(ValueError):
+            service.apply_agent_change({'operation':'semester','semester':patch})
+        assert service.customization_file.read_bytes() == before
+
+
+def test_agent_one_day_course_can_be_edited_and_cancelled_without_semester_or_remote_cache(tmp_path, monkeypatch):
+    service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
+    monkeypatch.setattr(service, '_fetch_remote', lambda **kw: pytest.fail('local edit must not access campus'))
+    service.apply_agent_change({'operation':'add_once','date':'2026-10-07','course':{'courseName':'临时课程','startPeriod':3,'endPeriod':4}})
+    def day(value):
+        return service.get_schedule(local_only=True, target_date=value)
+    first = day('2026-10-07')
+    assert first['status'] == 'partial' and first['count'] == 1
+    assert day('2026-10-08')['count'] == 0
+    service.apply_agent_change({'operation':'move','sourceKey':first['courses'][0]['sourceKey'],'fromDate':'2026-10-07','toDate':'2026-10-07','changes':{'classroom':'教一101','startPeriod':5,'endPeriod':6}})
+    changed = day('2026-10-07')['courses']
+    assert len(changed) == 1 and changed[0]['classroom'] == '教一101'
+    assert changed[0]['weeklyPeriods'] == [5,6]
+    service.apply_agent_change({'operation':'cancel_once','sourceKey':changed[0]['sourceKey'],'date':'2026-10-07'})
+    assert day('2026-10-07')['count'] == 0
+    assert not service.cache_file.exists()
+    before = service.customization_file.read_bytes()
+    with pytest.raises(ValueError):
+        service.apply_agent_change({'operation':'cancel_once','sourceKey':changed[0]['sourceKey'],'date':'2026-10-08'})
+    assert service.customization_file.read_bytes() == before
+
+
+def test_agent_cancelling_recurring_course_only_changes_requested_day(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
+    service._write_json_atomic(service.cache_file, {'version':2,'courses':[{'courseName':'原课程','weekday':3,'startPeriod':1,'endPeriod':2,'weeks':[1,2,3,4]}]})
+    service._load_cache()  # Initialize stable course IDs before checking edit isolation.
+    before = service.cache_file.read_bytes()
+    service.apply_agent_change({'operation':'semester','semester':{'startDate':'2026-09-21'}})
+    source = service.get_schedule(local_only=True, target_date='2026-10-07')['courses'][0]['sourceKey']
+    service.apply_agent_change({'operation':'cancel_once','sourceKey':source,'date':'2026-10-07'})
+    assert service.get_schedule(local_only=True, target_date='2026-10-07')['count'] == 0
+    assert service.get_schedule(local_only=True, target_date='2026-10-14')['count'] == 1
+    assert service.cache_file.read_bytes() == before

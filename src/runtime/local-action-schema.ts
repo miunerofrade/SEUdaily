@@ -20,10 +20,10 @@ export const focusActionSchema = z.object({
 const scheduleCourseSchema = z.object({
   courseName: z.string().trim().min(1).max(200),
   teacherName: z.string().trim().max(100).default(""),
-  weekday: z.number().int().min(1).max(7),
+  weekday: z.number().int().min(1).max(7).optional(),
   startPeriod: z.number().int().min(1).max(13),
   endPeriod: z.number().int().min(1).max(13),
-  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30).transform((weeks) => [...new Set(weeks)].sort((a, b) => a - b)),
+  weeks: z.array(z.number().int().min(1).max(30)).max(30).default([]).transform((weeks) => [...new Set(weeks)].sort((a, b) => a - b)),
   classroom: z.string().trim().max(200).default(""),
   courseCode: z.string().trim().max(100).default(""),
 }).strict().refine((value) => value.endPeriod >= value.startPeriod, {
@@ -42,6 +42,8 @@ const scheduleChangesSchema = z.object({
 }).strict();
 
 export const scheduleActionSchema = z.object({
+  semester: z.object({name:z.string().trim().max(100).optional(),startDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),totalWeeks:z.number().int().min(1).max(30).optional()}).strict().refine(value=>Object.keys(value).length>0, "至少提供一项学期设置").optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   course: scheduleCourseSchema.optional(),
   sourceKey: z.string().trim().min(1).optional(),
   changes: scheduleChangesSchema.optional(),
@@ -50,7 +52,8 @@ export const scheduleActionSchema = z.object({
 }).strict();
 
 export const localActionProposalSchema = z.object({
-  kind: z.enum(["create_focus", "add_schedule", "update_schedule", "move_schedule"]),
+  kind: z.enum(["create_focus", "add_schedule", "update_schedule", "move_schedule", "set_semester", "add_schedule_once", "cancel_schedule_once"]),
+  mode: z.enum(["preview", "apply"]).default("preview"),
   focus: focusActionSchema.optional(),
   schedule: scheduleActionSchema.optional(),
 }).strict().superRefine((value, context) => {
@@ -76,6 +79,11 @@ export const localActionProposalSchema = z.object({
     if (!value.schedule.fromDate) context.addIssue({ code: "custom", path: ["schedule", "fromDate"], message: "move_schedule 必须提供 fromDate" });
     if (!value.schedule.toDate) context.addIssue({ code: "custom", path: ["schedule", "toDate"], message: "move_schedule 必须提供 toDate" });
   }
+  if (value.kind === "set_semester" && !value.schedule.semester) context.addIssue({code:"custom",path:["schedule","semester"],message:"缺少学期设置"});
+  if (["add_schedule_once","cancel_schedule_once"].includes(value.kind) && !value.schedule.date) context.addIssue({code:"custom",path:["schedule","date"],message:"缺少单次课程日期"});
+  if (value.kind === "add_schedule_once" && !value.schedule.course) context.addIssue({code:"custom",path:["schedule","course"],message:"缺少课程信息"});
+  if (value.kind === "cancel_schedule_once" && !value.schedule.sourceKey) context.addIssue({code:"custom",path:["schedule","sourceKey"],message:"缺少 sourceKey"});
+  if (value.kind === "add_schedule" && (!value.schedule.course?.weekday || !value.schedule.course.weeks.length)) context.addIssue({code:"custom",path:["schedule","course"],message:"周期课程需提供 weekday 和 weeks"});
   const changes = value.schedule.changes;
   if (changes?.startPeriod !== undefined && changes.endPeriod !== undefined && changes.endPeriod < changes.startPeriod) {
     context.addIssue({ code: "custom", path: ["schedule", "changes", "endPeriod"], message: "endPeriod 不能早于 startPeriod" });
@@ -86,6 +94,7 @@ export type LocalActionProposal = z.infer<typeof localActionProposalSchema>;
 
 export function localActionExecutionPayload(proposal: LocalActionProposal) {
   if (proposal.kind === "create_focus") return proposal.focus!;
-  const operation = proposal.kind === "add_schedule" ? "add" : proposal.kind === "update_schedule" ? "update" : "move";
+  const operations = {add_schedule:"add",update_schedule:"update",move_schedule:"move",set_semester:"semester",add_schedule_once:"add_once",cancel_schedule_once:"cancel_once"};
+  const operation = operations[proposal.kind];
   return { ...proposal.schedule!, operation };
 }

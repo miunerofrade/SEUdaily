@@ -102,3 +102,37 @@ test('resolved attachment text is persisted as user content, never system instru
  assert.ok(JSON.stringify(f.provider.requests[1].filter(m=>m.role==='user')).includes('attachment body'));
  assert.ok(!JSON.stringify(f.provider.requests[1].filter(m=>m.role==='system')).includes('attachment body'));
 });
+
+test('tool images survive approval and follow all tool replies as visual input', async t => {
+  const store = new AgentStore(':memory:'); t.after(() => store.close());
+  const messagesSeen = [];
+  const image = {type:'image_url',image_url:{url:'seudaily-image-ref:calendar.png'},mediaType:'image/png'};
+  const provider = {
+    async *stream(messages) {
+      messagesSeen.push(messages);
+      const message = messagesSeen.length === 1 ? {
+        role:'assistant',content:null,tool_calls:[call('image','page').tool_calls[0],call('approval','write').tool_calls[0]],
+      } : {role:'assistant',content:'已读到校历'};
+      yield {type:'complete',message};
+    },
+  };
+  const runtime = new AgentRuntime({store,provider,instructions:async()=>'',tools:async()=>({
+    page:{id:'page',description:'read',inputSchema:z.object({}),execute:async()=>result('校历'),toModelOutput:()=>({type:'content',value:[{type:'text',text:'学校通知 PDF 正文'},image]})},
+    write:{id:'write',description:'write',inputSchema:z.object({}),requireApproval:true,execute:async()=>result('已确认')},
+  })});
+  const context = ctx('visual');
+  const first = await events(runtime.runTurn(user('读校历'),context));
+  const approval = first.find(item=>item.type === 'tool-approval-request');
+  assert.ok(approval);
+  assert.equal((await store.getRun(context.runToken)).pendingToolImages.at(-1).image_url.url,image.image_url.url);
+  await events(runtime.resumeApproval({approvalId:approval.payload.approvalId,approved:true},context));
+  const messages = messagesSeen.at(-1);
+  const start = messages.findIndex(item=>item.tool_calls?.[0]?.id === 'image');
+  assert.deepEqual(messages.slice(start+1,start+3).map(item=>[item.role,item.tool_call_id]), [['tool','image'],['tool','approval']]);
+  assert.equal(messages[start+1].content,'学校通知 PDF 正文');
+  assert.equal(messages[start+3].role,'user');
+  assert.deepEqual(messages[start+3].content.at(-1),image);
+  const saved = await store.getRun(context.runToken);
+  assert.equal(saved.pendingToolImages,undefined);
+  assert.equal(saved.messages.some(item=>Array.isArray(item.content) && item.content.some(part=>part.type === 'image_url')),true);
+});

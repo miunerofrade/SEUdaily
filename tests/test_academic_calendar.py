@@ -66,3 +66,27 @@ def test_concurrent_calendar_sync_reuses_cache_without_starting_download(tmp_pat
     # Lock is available again after the first worker closes it.
     with calendar._lock() as acquired:
         assert acquired
+
+
+def test_existing_web_reader_uses_offline_calendar_cache(tmp_path, monkeypatch):
+    import hashlib
+    from seudaily.web_reader import read_web_page
+    from seudaily.runtime_paths import runtime_root
+    monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
+    calendar = AcademicCalendar(runtime_root(tmp_path) / 'calendar')
+    calendar.directory.mkdir(parents=True, exist_ok=True)
+    content = b'%PDF-1.7 fixture'
+    (calendar.directory / 'notice.pdf').write_bytes(content)
+    ScheduleService._write_json_atomic(calendar.manifest, {'sourceUrl':CALENDAR_URL,'attachments':[{'title':'学校通知','url':'https://jwc.seu.edu.cn/_upload/article/files/notice.pdf','file':'notice.pdf','sha256':hashlib.sha256(content).hexdigest(),'text':'学校补课安排'}]})
+    monkeypatch.setattr(httpx, 'Client', lambda **kw: (_ for _ in ()).throw(AssertionError('cached calendar must not download')))
+    result = read_web_page(CALENDAR_URL)
+    assert result['content'] == '学校补课安排'
+    assert result['attachments'][0]['file'] == 'notice.pdf'
+
+
+def test_calendar_reader_reports_image_only_as_unreadable_text(tmp_path, monkeypatch):
+    from seudaily.web_reader import read_web_page
+    monkeypatch.setattr(ScheduleService, 'get_calendar', lambda self: {'status':'completed','sourceUrl':CALENDAR_URL,'attachments':[{'file':'calendar.jpg','url':'https://jwc.seu.edu.cn/_upload/article/images/calendar.jpg'}]})
+    result = read_web_page(CALENDAR_URL)
+    assert result['status'] == 'partial' and result['content'] == ''
+    assert result['attachments'][0]['file'] == 'calendar.jpg'

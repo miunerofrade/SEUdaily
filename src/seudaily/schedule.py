@@ -610,6 +610,29 @@ class ScheduleService:
     def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
         operation = str(payload.get("operation") or "").strip()
         current = self._load_customizations()
+        if operation == "semester":
+            changes = payload.get("semester")
+            if not isinstance(changes, dict) or not changes or set(changes) - {"name", "startDate", "totalWeeks"}:
+                raise ValueError("学期设置需提供 name、startDate 或 totalWeeks")
+            result = self.save_customizations({**current, "semester": {**current["semester"], **changes}})
+            return {**result, "message": "学期设置已更新。", "change": {"operation": operation, "semester": changes}}
+        if operation in {"add_once", "cancel_once"}:
+            target_date = self._valid_iso_date(payload.get("date"), "date")
+            identity = f"agent-{uuid.uuid4()}"
+            if operation == "add_once":
+                raw = payload.get("course")
+                if not isinstance(raw, dict):
+                    raise ValueError("单日增课缺少 course")
+                course = self._normalize_editable_course({**raw, "customId":identity,"weekday":date.fromisoformat(target_date).isoweekday(),"weeks":[]}, custom=True)
+                override = {"id":identity,"date":target_date,"action":"add","course":course}
+            else:
+                key = str(payload.get("sourceKey") or "")
+                visible = self._filter_by_date(self._apply_customizations(self._load_cache() or {"courses": []}), target_date)
+                if not key or not any(course.get("sourceKey") == key for course in visible.get("courses", [])):
+                    raise ValueError("要停课的课程不存在，请先读取本地课表")
+                override = {"id":identity,"date":target_date,"action":"cancel","targetSourceKey":key}
+            result = self.save_customizations({**current,"dateOverrides":[*current["dateOverrides"],override]})
+            return {**result,"message":f"已更新 {target_date} 的单次课程。","change":{"operation":operation,"date":target_date}}
         if operation == "add":
             raw_course = payload.get("course")
             if not isinstance(raw_course, dict):
@@ -695,9 +718,7 @@ class ScheduleService:
             if not source_key or not isinstance(changes, dict):
                 raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
             cached = self._load_cache()
-            if cached is None:
-                raise ValueError("当前课表缓存不存在，请先读取课表")
-            visible = self._apply_customizations(cached)
+            visible = self._filter_by_date(self._apply_customizations(cached or {"courses": []}), from_date)
             target = next(
                 (
                     course
@@ -747,7 +768,7 @@ class ScheduleService:
                 },
             }
 
-        raise ValueError("课表操作仅支持 add、update 或 move")
+        raise ValueError("课表操作仅支持 semester、add、update、move、add_once 或 cancel_once")
 
     def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
         customizations = self._load_customizations()
@@ -1296,13 +1317,12 @@ class ScheduleService:
         )
         if local_only:
             if cached is None:
-                return {
-                    "status": "empty",
-                    "message": "本地没有可用的课表缓存。",
-                    "count": 0,
-                    "courses": [],
-                    "localOnly": True,
-                }
+                result = {"status": "empty", "message": "本地没有可用的课表缓存。",
+                          "count": 0, "courses": [], "localOnly": True}
+                customizations = self._load_customizations()
+                if not requested and (customizations["customCourses"] or customizations["dateOverrides"]):
+                    return self._filter_by_date(self._apply_customizations(result), target_date)
+                return result
             result = {
                 **cached,
                 "status": "cached",
@@ -1376,33 +1396,16 @@ class ScheduleService:
             "weekday": target.isoweekday(),
             "applied": False,
         }
-        if not start_text:
-            return {
-                **result,
-                "status": "partial",
-                "message": "课表已读取，但未配置学期起始日期，无法按日期筛选。",
-                "count": 0,
-                "courses": [],
-                "dateFilter": {
-                    **filter_info,
-                    "reason": "missing_semester_start_date",
-                },
-            }
-
-        week = self.week_for_date(start_text, target)
-        filter_info.update({
-            "applied": True,
-            "semesterStartDate": start_text,
-            "week": week,
-        })
+        week = self.week_for_date(start_text, target) if start_text else None
+        if start_text:
+            filter_info.update({"applied": True, "semesterStartDate": start_text, "week": week})
+        else:
+            filter_info["reason"] = "missing_semester_start_date"
         courses = [
             dict(course)
             for course in result.get("courses") or []
-            if int(course.get("weekday") or 0) == target.isoweekday()
-            and (
-                not course.get("weeks")
-                or week in {int(item) for item in course.get("weeks") or []}
-            )
+            if start_text and int(course.get("weekday") or 0) == target.isoweekday()
+            and (not course.get("weeks") or week in {int(item) for item in course.get("weeks") or []})
         ]
         course_by_source = {
             str(course.get("sourceKey") or course.get("scheduleId") or f"course-{index}"): course
@@ -1432,7 +1435,8 @@ class ScheduleService:
         )
         return {
             **result,
-            "status": "completed" if filtered else "empty",
+            "status": ("completed" if filtered else "empty") if start_text else "partial",
+            **({"message": "未配置学期起始日期，仅展示明确指定日期的课程，周期课程无法按日期筛选。"} if not start_text else {}),
             "count": len(filtered),
             "courses": filtered,
             "dateFilter": {**filter_info, "matchedCount": len(filtered)},

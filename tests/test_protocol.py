@@ -104,7 +104,7 @@ def test_protocol_keeps_all_schedule_courses_in_model_data(tmp_path, monkeypatch
 def test_official_calendar_attachments_are_cited_in_schedule_and_calendar_results(tmp_path, monkeypatch):
     monkeypatch.setenv('SEUDAILY_PROJECT_ROOT', str(tmp_path))
     calendar = {'attachments':[{'title':'学校节假日通知','url':'https://jwc.seu.edu.cn/_upload/article/files/holiday.pdf','sha256':'a'*64,'text':'校内补课安排'}]}
-    for action, raw in [('get-schedule', {'status':'cached','calendar':calendar}), ('get-academic-calendar', {'status':'completed',**calendar})]:
+    for action, raw in [('get-schedule', {'status':'cached','calendar':calendar}), ('get-academic-calendar', {'status':'completed',**calendar}), ('read-web-page', {'status':'completed','sourceUrl':'https://jwc.seu.edu.cn/xl/list.htm',**calendar})]:
         result = normalize_tool_result(action, raw)
         assert result['citations'][0]['url'] == calendar['attachments'][0]['url']
         assert result['citations'][0]['title'] == '学校节假日通知'

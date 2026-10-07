@@ -109,7 +109,7 @@ def _collect_citations(
         if citation:
             citations.append(citation)
 
-    calendar = result.get("calendar") if action == "get-schedule" else result if action == "get-academic-calendar" else None
+    calendar = result.get("calendar") if action == "get-schedule" else result if action == "get-academic-calendar" or (action == "read-web-page" and result.get("sourceUrl") == "https://jwc.seu.edu.cn/xl/list.htm") else None
     if isinstance(calendar, dict):
         for item in calendar.get("attachments") or []:
             if isinstance(item, dict) and str(item.get("url", "")).startswith("https://jwc.seu.edu.cn/_upload/article/"):
