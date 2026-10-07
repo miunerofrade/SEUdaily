@@ -1,3 +1,4 @@
+import { KnowledgePanel } from './knowledge-panel';
 import { VpnSettings } from './vpn-panel';
 import { useImeComposition } from "./ime";
 import { conversationPath, withParents, latestDescendant } from "../../../src/shared/conversation-tree";
@@ -857,6 +858,7 @@ export function LibraryPage() {
   }
 
   return <div className="workspace-page library-page">
+    <KnowledgePanel selectedPath={selectedFilePath || undefined} />
     <PageHeader title="资料库" description="" action={<button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button>} />
     <PageState loading={loading} error={error}>
       <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
@@ -904,7 +906,7 @@ export function NoticesPage() {
   return <div className="workspace-page"><PageHeader title="教务通知" description="东南大学教务处的最新动态、教务信息与讲座预告。" action={<button className="page-action" disabled={loading} onClick={() => void load(true)}><RefreshCw size={15} />刷新</button>} /><PageState loading={loading} error={error}>{items.length ? <div className="notice-list">{items.map((item) => <a href={item.url} target="_blank" rel="noreferrer" className="notice-row" key={item.id}><div><strong>{item.title}</strong><span>{item.category ?? "教务处"}</span></div><time>{item.publishedAt ?? ""}</time><ExternalLink size={15} /></a>)}</div> : <div className="page-empty"><FileText size={28} /><h2>暂时没有通知</h2><p>可以稍后刷新，或检查网络连接。</p></div>}</PageState></div>;
 }
 
-const fieldLabels: Record<string, string> = { DEEPSEEK_API_KEY: "DeepSeek API Key", DEEPSEEK_MODEL: "模型", TAVILY_API_KEY: "Tavily API Key", SEUDAILY_USERNAME: "统一身份认证账号", SEUDAILY_PASSWORD: "统一身份认证密码", SEUDAILY_ASR_API_KEY: "语音转写 API Key", SEUDAILY_WHISPER_MODEL: "本地 Whisper 模型" };
+const fieldLabels: Record<string, string> = { DASHSCOPE_API_KEY: "阿里云百炼 API Key", SEUDAILY_EMBEDDING_MODEL: "知识库向量模型（默认 qwen3.7-text-embedding）", SEUDAILY_EMBEDDING_BASE_URL: "向量服务地址（默认阿里云百炼）",  DEEPSEEK_API_KEY: "DeepSeek API Key", DEEPSEEK_MODEL: "模型", TAVILY_API_KEY: "Tavily API Key", SEUDAILY_USERNAME: "统一身份认证账号", SEUDAILY_PASSWORD: "统一身份认证密码", SEUDAILY_ASR_API_KEY: "语音转写 API Key", SEUDAILY_WHISPER_MODEL: "本地 Whisper 模型" };
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsPayload | null>(null); const [values, setValues] = useState<Record<string, string>>({}); const [agentInstructions, setAgentInstructions] = useState(""); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [message, setMessage] = useState(""); const [error, setError] = useState("");

@@ -1,5 +1,6 @@
 export function inferToolNamespaces(text: string): string[] {
     const selected = new Set<string>();
+    if (/知识库|(?:之前|以前|上次|上传过|发过).*(?:文件|资料|文档|PDF)|上传.*(?:文件|资料|文档)|我的.*(?:文件|资料|文档)|文档检索|knowledge|\brag\b/i.test(text)) selected.add('knowledge');
     if (/课表|上课|今天.*课|明天.*课|timetable|schedule/i.test(text)) selected.add('schedule');
     if (/修改课表|调课|停课|增课|学期.*(?:起始|开始|周数|设置)|(?:起始|开始).*日期|移动.*课|新增.*课|创建.*关注|新建.*关注|focus/i.test(text)) selected.add('local-actions');
     if (/课程回放|课次|字幕|课件|幻灯片|\bppt\b|录播|转写|subtitle|course material/i.test(text)) selected.add('course-materials');

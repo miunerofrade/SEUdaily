@@ -127,12 +127,13 @@ export async function ensureUv(): Promise<string> {
   } finally { await release(); }
 }
 let pythonLoading: Promise<string> | undefined;
-type PreparationKind = 'python' | 'browser' | 'documents' | 'summary' | 'asr' | 'media' | 'vpn';
-const preparations = Object.fromEntries(['python', 'browser', 'documents', 'summary', 'asr', 'media', 'vpn'].map(name => [name, { state: 'idle', message: '', startedAt: 0 }])) as Record<PreparationKind, {state: string; message: string; startedAt: number}>;
+type PreparationKind = 'python' | 'browser' | 'documents' | 'summary' | 'asr' | 'media' | 'vpn' | 'knowledge';
+const preparations = Object.fromEntries(['python', 'browser', 'documents', 'summary', 'asr', 'media', 'vpn', 'knowledge'].map(name => [name, { state: 'idle', message: '', startedAt: 0 }])) as Record<PreparationKind, {state: string; message: string; startedAt: number}>;
 let preparationSequence = 0;
 const preparationEvents: { id: number; name: string; state: string; message: string }[] = [];
 export function setPreparation(name: PreparationKind, state: string, message: string, notify = true) {
   const previous = preparations[name];
+  if (!previous) return;
   const next = { state, message, startedAt: previous.state !== 'preparing' && state === 'preparing' ? Date.now() : previous.startedAt };
   preparations[name] = next;
   if (notify && (state !== previous.state || message !== previous.message)) {

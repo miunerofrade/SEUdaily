@@ -64,8 +64,11 @@ export class PythonWorkerClient {
     createInterface({ input: child.stderr }).on('line', async line => {
       const prefix = 'SEUDAILY_PREPARATION ';
       if (!line.startsWith(prefix)) return;
-      const event = JSON.parse(line.slice(prefix.length));
-      (await import('../../distribution/components.js')).setPreparation(event.name, event.state, event.message);
+      try {
+        const event = JSON.parse(line.slice(prefix.length));
+        if (typeof event.name !== 'string' || typeof event.state !== 'string' || typeof event.message !== 'string') return;
+        (await import('../../distribution/components.js')).setPreparation(event.name, event.state, event.message);
+      } catch { /* Dependency progress must not terminate the backend. */ }
     });
     createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
     child.stdin.on("error", (error) => { if (this.child === child) this.failAll(error); });

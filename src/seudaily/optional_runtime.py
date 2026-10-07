@@ -15,13 +15,14 @@ from .subprocess_utils import hidden_process_options
 
 _install_lock = threading.RLock()
 _modules = {
+    "knowledge": ("lancedb", "langchain_text_splitters"),
     "browser": ("playwright",),
     "documents": ("pypdfium2", "docx", "openpyxl", "pptx"),
     "summary": ("openai",),
     "asr": ("dashscope",),
     "media": ("cv2", "numpy", "img2pdf"),
 }
-_labels = {"browser": "Playwright 浏览器驱动", "documents": "文档解析", "summary": "课程摘要", "asr": "云端转写", "media": "视频幻灯片处理"}
+_labels = {"knowledge": "知识库分块与索引", "browser": "Playwright 浏览器驱动", "documents": "文档解析", "summary": "课程摘要", "asr": "云端转写", "media": "视频幻灯片处理"}
 
 
 def preparation(state: str, message: str, *, name: str = "python") -> None:

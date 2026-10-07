@@ -102,3 +102,13 @@ test('images accept and hydrate 6MB, reject over 10MB and unsafe refs', async ()
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test('selected history recovers after a brief backend restart without losing saved messages',async()=>{
+ const original=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>++calls===1 ? new Response('restarting',{status:500}) : Response.json({messages:[{id:'answer',role:'assistant',createdAt:stamp,content:{content:'已恢复的历史'}}],hasMore:false});
+ try {
+  const restored=await loadConversationMessages({...thread('t'),createdAt:0,updatedAt:0,messages:[]});
+  assert.equal(calls,2);assert.equal(restored.messages[0].content,'已恢复的历史');
+ } finally {globalThis.fetch=original;}
+});

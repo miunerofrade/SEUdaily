@@ -1,3 +1,4 @@
+import { redactText } from '../agent/redaction.js';
 import { parseEnv, readEnvFile, updateEnvFile } from "./environment-settings.js";
 import { existsSync } from 'node:fs';
 import { diskSize } from '../shared/disk-size.js';
@@ -5,7 +6,7 @@ import { z } from "zod";
 import { registerApiRoute } from "../server/routes.js";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 import { envValue, projectRoot, agentInstructionsPath } from "./runtime-paths.js";
@@ -26,6 +27,9 @@ const editableEnvironment = [
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_MODEL",
   "TAVILY_API_KEY",
+  "DASHSCOPE_API_KEY",
+  "SEUDAILY_EMBEDDING_MODEL",
+  "SEUDAILY_EMBEDDING_BASE_URL",
   "SEUDAILY_VPN_BINARY",
   "SEUDAILY_VPN_DNS_SERVER",
   "SEUDAILY_USERNAME",
@@ -36,9 +40,11 @@ const editableEnvironment = [
   "SEUDAILY_FULL_ACCESS_EXTRA",
 ] as const;
 
-const secretEnvironment = new Set(["DEEPSEEK_API_KEY", "TAVILY_API_KEY", "SEUDAILY_PASSWORD", "SEUDAILY_ASR_API_KEY"]);
-const supportedDocumentExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
+const secretEnvironment = new Set(["DASHSCOPE_API_KEY", "DEEPSEEK_API_KEY", "TAVILY_API_KEY", "SEUDAILY_PASSWORD", "SEUDAILY_ASR_API_KEY"]);
+const supportedDocumentExtensions = new Set([".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"]);
 const documentMediaTypes: Record<string, string> = {
+  ".txt": "text/plain",
+  ".md": "text/markdown",
   ".pdf": "application/pdf",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -200,14 +206,14 @@ async function fullResultData(result: ToolResult): Promise<unknown> {
 
 type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
 
-const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents')];
+const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents'), resolve(projectRoot, '.seudaily', 'knowledge', 'files')];
 
 function isWithinDirectory(root: string, target: string, allowRoot = false) {
   const child = relative(root, target);
   return (allowRoot || Boolean(child)) && child !== ".." && !child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(child);
 }
 
-async function safeLibraryTarget(path: string) {
+export async function safeLibraryTarget(path: string) {
   const target = resolve(path);
   for (const root of libraryRoots) {
     if (!isWithinDirectory(root, target)) continue;
@@ -620,7 +626,13 @@ export const appRoutes = [
       if (typeof body.path !== "string") return c.json({ error: "缺少文件路径" }, 400);
       const target = await safeLibraryTarget(body.path);
       if (!target) return c.json({ error: "只能删除资料库内的文件" }, 403);
-      await unlink(target);
+      const knowledgeFiles = resolve(projectRoot, '.seudaily', 'knowledge', 'files');
+      if (target.startsWith(knowledgeFiles + sep)) {
+        const { knowledge } = await import('./knowledge/index.js');
+        const document = (await knowledge.list()).find(item => item.path === target);
+        if (!document) return c.json({ error: "知识库文件未登记，请通过知识库管理" }, 409);
+        await knowledge.remove(document.id);
+      } else await unlink(target);
       return c.json({ deleted: true, path: target });
     },
   }),
@@ -652,16 +664,17 @@ export const appRoutes = [
       const filename = upload.name || "document";
       const extension = extname(filename).toLowerCase();
       if (!supportedDocumentExtensions.has(extension)) {
-        return c.json({ error: "仅支持 PDF、DOCX、XLSX、PPTX；不支持旧版 DOC、XLS、PPT" }, 400);
+        return c.json({ error: "仅支持 PDF、DOCX、XLSX、PPTX、TXT、MD；不支持旧版 DOC、XLS、PPT" }, 400);
       }
       if (upload.size <= 0 || upload.size > 50 * 1024 * 1024) {
         return c.json({ error: "文档大小必须在 50 MB 以内" }, 413);
       }
 
       const bytes = Buffer.from(await upload.arrayBuffer());
-      const validSignature = extension === ".pdf"
+      const plainText = [".txt", ".md"].includes(extension);
+      const validSignature = plainText || (extension === ".pdf"
         ? bytes.subarray(0, 5).toString("ascii") === "%PDF-"
-        : bytes[0] === 0x50 && bytes[1] === 0x4b;
+        : bytes[0] === 0x50 && bytes[1] === 0x4b);
       if (!validSignature) return c.json({ error: "文件内容与扩展名不匹配或文件已损坏" }, 400);
 
       const temporaryDirectory = await mkdtemp(join(tmpdir(), "seudaily-document-"));
@@ -670,7 +683,10 @@ export const appRoutes = [
         await writeFile(temporaryPath, bytes);
         let result: ToolResult;
         try {
-          result = await runPythonTool<ToolResult>("parse-document", { path: temporaryPath, filename });
+          if (plainText) {
+            const markdown = new TextDecoder('utf-8', {fatal:true}).decode(bytes);
+            result = {status:'completed',taskId:randomUUID(),summary:'文档已读取',data:{filename,extension,markdown,charCount:markdown.length},artifacts:[],citations:[],warnings:[],metrics:{}};
+          } else result = await runPythonTool<ToolResult>("parse-document", { path: temporaryPath, filename });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return c.json({ error: `文档解析失败：${message}` }, 422);
@@ -686,7 +702,16 @@ export const appRoutes = [
         await writeFile(originalPath, bytes, { flag: 'wx', mode: 0o600 });
         try { storeDocumentContext(contextRef, data.filename || filename, data.markdown); }
         catch (error) { await unlink(originalPath).catch(() => undefined); throw error; }
+        let knowledgeIndex: {id:string;state:string;duplicate:boolean} | {state:string;error:string};
+        try {
+          const {knowledge} = await import('./knowledge/index.js');
+          knowledgeIndex = await knowledge.enqueue(data.filename || filename, bytes, data.markdown);
+        } catch (error) {
+          // Keep the uploaded attachment usable even when local indexing fails.
+          knowledgeIndex = {state:'failed',error:redactText((error as Error).message)};
+        }
         return c.json({
+          knowledge: knowledgeIndex,
           filename: data.filename || filename,
           extension: data.extension || extension,
           mediaType: documentMediaTypes[extension],
@@ -781,7 +806,7 @@ export const appRoutes = [
       }
       const agentInstructionsSaved = typeof body.agentInstructions === "string";
       if (agentInstructionsSaved) await writeFile(agentInstructionsPath, body.agentInstructions as string, "utf8");
-      const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA"].includes(name));
+      const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA", "DASHSCOPE_API_KEY", "SEUDAILY_EMBEDDING_MODEL", "SEUDAILY_EMBEDDING_BASE_URL"].includes(name));
       return c.json({ saved: Object.keys(values), agentInstructionsSaved, restartRequired });
     },
   }),

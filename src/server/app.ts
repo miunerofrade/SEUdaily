@@ -1,3 +1,4 @@
+import { installKnowledgeRoutes } from './knowledge.js';
 import { installWeChatRoutes } from './wechat.js';
 import { identity, installLifecycle } from './lifecycle.js';
 import { installMessageQueue } from './message-queue.js';
@@ -27,6 +28,7 @@ app.onError((error, c) => c.json({ error: redactText(error.message) }, ((error a
 app.get('/api', c => c.json(identity()));
 const installStaticPages = installLifecycle(app);
 installWeChatRoutes(app);
+installKnowledgeRoutes(app);
 app.get('/api/agents', async (c) => { await agentStore.ready; return c.json({ 'seudaily-agent': { id: 'seudaily-agent', name: 'SEUdaily' } }); });
 app.get('/app/health', async (c) => { await agentStore.ready; await agentStore.client.execute('SELECT 1'); return c.json({ status: 'ready' }); });
 app.get('/app/agent-info', c => c.json({ model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash', effort: DEFAULT_REASONING_EFFORT }));

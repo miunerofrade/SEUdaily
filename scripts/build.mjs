@@ -39,7 +39,7 @@ for (const name of ['web', 'python', 'browser']) {
   if (name === 'python') {
     execFileSync('uv', ['build', '--wheel', '--out-dir', directory], { cwd: root, stdio: 'inherit' });
     execFileSync('uv', ['export', '--frozen', '--no-dev', '--no-emit-project', '--output-file', resolve(directory, 'requirements.txt')], { cwd: root, stdio: 'ignore' });
-    for (const extra of ['browser', 'documents', 'summary', 'asr', 'media']) {
+    for (const extra of ['browser', 'documents', 'summary', 'asr', 'media', 'knowledge']) {
       execFileSync('uv', ['export', '--frozen', '--no-dev', '--no-emit-project', '--extra', extra, '--output-file', resolve(directory, `${extra}-requirements.txt`)], { cwd: root, stdio: 'ignore' });
     }
   }

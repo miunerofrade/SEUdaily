@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
+import {redactText} from '../src/agent/redaction.ts';
 import { z } from 'zod';
 const diskSource = await fs.readFile(new URL('../src/shared/disk-size.ts', import.meta.url), 'utf8');
 const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
@@ -28,7 +29,8 @@ async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   const calls = [];
-  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize,
+  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText,
+    require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
     runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
     resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
   vm.runInContext(`${compiled}\nglobalThis.helpers = { safeLibraryTarget, walkFiles, updateEnvFile, routes: exports.appRoutes };`, context);

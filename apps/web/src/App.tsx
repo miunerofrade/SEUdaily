@@ -1370,11 +1370,11 @@ export default function App() {
     if (attachmentUploadRef.current) { setAttachmentError("附件正在上传，请稍候。"); return; }
     const remaining = MAX_ATTACHMENTS - pendingImages.length - pendingDocuments.length;
     if (remaining <= 0) { setAttachmentError("每轮最多 10 个附件，请删除不需要的附件。"); return; }
-    const allowed = new Set([".pdf", ".docx", ".xlsx", ".pptx"]);
+    const allowed = new Set([".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"]);
     const accepted = files.filter(file => file.type.startsWith("image/")
       ? file.size <= 10 * 1024 * 1024
       : allowed.has(file.name.slice(file.name.lastIndexOf(".")).toLowerCase()) && file.size <= 50 * 1024 * 1024).slice(0, remaining);
-    if (!accepted.length) { setAttachmentError("支持 10 MB 以内的图片，以及 50 MB 以内的 PDF、DOCX、XLSX、PPTX。"); return; }
+    if (!accepted.length) { setAttachmentError("支持 10 MB 以内的图片，以及 50 MB 以内的 PDF、DOCX、XLSX、PPTX、TXT、MD。"); return; }
     const upload = {};
     attachmentUploadRef.current = upload;
     setUploadingAttachments(true); setAttachmentError("");
@@ -1386,6 +1386,7 @@ export default function App() {
           return { image: { ...image, path: stored.path, ref: `seudaily-image-ref:${stored.ref}` } };
         }
         const parsed = await uploadDocument(file);
+        if (parsed.knowledge?.error) setAttachmentError("文档已添加，但自动入库失败：" + parsed.knowledge.error);
         return { document: { id: uid(), name: parsed.filename, mediaType: parsed.mediaType, contextRef: parsed.contextRef, markdown: parsed.markdown, charCount: parsed.charCount } satisfies DocumentAttachment };
       }));
       if (attachmentUploadRef.current !== upload) return;
@@ -1447,7 +1448,7 @@ export default function App() {
             {(Object.keys(accessModeInfo) as AccessMode[]).map((mode) => <button type="button" role="menuitemradio" aria-checked={accessMode === mode} className={accessMode === mode ? "selected" : ""} key={mode} onClick={() => void setAccessMode(mode)}><span className={`composer-permission-mode-icon mode-${mode}`}>{accessModeIcons[mode]}</span><span><strong>{accessModeInfo[mode].label}</strong><small>{accessModeInfo[mode].description}</small></span></button>)}
           </div>}
         </div>
-        <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx" multiple onChange={onImageInput} />
+        <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx,.txt,.md" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
         <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
         {(sending || queueState.active) && <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'}><CircleStop size={19} /></button>}
@@ -1515,8 +1516,8 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <WeChatPanel />
           <button className={`settings-button ${view === "settings" ? "active" : ""}`} onClick={() => openView("settings")}><SidebarIcon kind="settings" /><span>设置</span></button>
+          <WeChatPanel />
         </div>
       </aside>
 

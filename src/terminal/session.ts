@@ -41,6 +41,7 @@ export const commands: Record<string, string> = {
   notices: "校园通知",
   focus: "关注任务",
   settings: "编辑环境变量和 AGENT.md",
+  knowledge: '知识库：list / add "路径" / search 问题 / retry ID / remove ID',
   queue: "查看待发送消息；resume 继续暂停的队列",
   vpn: "连接校园 VPN（使用已保存端口）；status / disconnect / verify / resend",
   ramdisk: "内存盘：/ramdisk 512 MB；status / unmount / reveal",
@@ -1022,6 +1023,28 @@ export class Session extends EventEmitter {
       this.confirm("apply", id, request.text + (["create-focus", "create_focus"].includes(request.kind) ? "\n创建即授权此关注完全访问，不含 extra。" : ""));
       return;
     }
+    if (name === "knowledge") {
+      const [action='list', ...rest] = args;
+      if(action==='add') {
+        if(rest.length!==1)throw new Error('/knowledge add "文件路径"');
+        const path=resolve(this.options.cwd || process.cwd(),rest[0]),info=await stat(path);
+        if(!info.isFile() || info.size>50*1024*1024)throw new Error('请选择 50 MB 以内的文件');
+        const form=new FormData();form.append('file',new File([await readFile(path)],path.split(/[\\/]/).at(-1) || 'document'));
+        const result=await (await this.client.request('/app/knowledge/documents',{method:'POST',body:form})).json();
+        this.show(result.duplicate ? '文件已在知识库中。' : '已保存文件，后台将建立索引；/knowledge 查看进度。');
+      } else if(action==='list') {
+        const result=await this.client.json('/app/knowledge');
+        this.show((result.configured ? '' : '请在 /settings 填写 DASHSCOPE_API_KEY。\n') + (result.documents.map((document:any)=>`${document.name} · ${document.state} · ${document.chunkCount} 个片段\n${document.id}${document.error ? '\n'+document.error : ''}`).join('\n\n') || '知识库暂无文件。粘贴文件路径添加文档后会自动入库。'));
+      } else if(action==='search') {
+        const result=await this.client.json('/app/knowledge/search','POST',{query:rest.join(' ')});
+        this.show(result.summary+'\n'+result.matches.map((match:any)=>`${match.name} · ${match.page ? '第 '+match.page+' 页' : '片段 '+(match.ordinal+1)}\n${match.text}`).join('\n\n'));
+      } else if(action==='retry' && rest.length===1) {
+        await this.client.json('/app/knowledge/documents/'+rest[0]+'/retry','POST',{});this.show('已重新排队。');
+      } else if(action==='remove' && rest.length===1) {
+        await this.client.json('/app/knowledge/documents/'+rest[0],'DELETE');this.show('已移除知识库文件及索引，聊天附件保留。');
+      } else throw new Error('/knowledge [list|add "路径"|search 问题|retry ID|remove ID]');
+      return;
+    }
     if (name === "permission") {
       if (!args.length) {
         const data = await this.client.json('/app/settings');
@@ -1082,8 +1105,8 @@ export class Session extends EventEmitter {
     const path = isAbsolute(given) ? given : resolve(this.options.cwd ?? this.root, given);
     const extension = extname(path).toLowerCase();
     const mediaType = imageMediaTypes[extension];
-    if (!mediaType && !['.pdf', '.docx', '.xlsx', '.pptx'].includes(extension))
-      throw new Error('支持 PNG/JPEG/WebP/GIF 图片和 PDF/DOCX/XLSX/PPTX 文档；暂不支持此格式');
+    if (!mediaType && !['.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.md'].includes(extension))
+      throw new Error('支持 PNG/JPEG/WebP/GIF 图片和 PDF/DOCX/XLSX/PPTX/TXT/MD 文档；暂不支持此格式');
     this.attachmentLoading = true;
     this.changed();
     try {
@@ -1102,6 +1125,7 @@ export class Session extends EventEmitter {
         form.set('file', new Blob([bytes]), name);
         const document = await (await this.client.request('/app/documents', { method: 'POST', body: form })).json();
         this.documents.push(document);
+        if (document.knowledge?.error) this.show("文档已添加，但自动入库失败：" + document.knowledge.error);
         return { id: document.contextRef as string, name, kind: '文档' as const };
       }
     } finally {

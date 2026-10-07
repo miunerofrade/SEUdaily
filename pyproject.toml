@@ -1,6 +1,6 @@
 [project]
 name = "seudaily-core"
-version = "1.1.12"
+version = "1.1.14"
 description = "Python automation and media runtime for the SEUdaily assistant"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,10 @@ media = [
     "img2pdf>=0.6.3",
     "numpy>=2.4.3",
     "opencv-python>=4.13.0.92",
+]
+knowledge = [
+    "lancedb>=0.39.0",
+    "langchain-text-splitters>=1.1.3",
 ]
 
 [project.scripts]

@@ -20,6 +20,23 @@ function events(text){return text.split('\n\n').filter(block=>block.startsWith('
 
 test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async t=>{
  t.after(async()=>{await agentRuntime.shutdown();await agentStore.close();await rm(root,{recursive:true,force:true});});
+ // The normal chat upload endpoint must index automatically, without /knowledge add.
+ const upload=async()=>{
+  const form=new FormData();form.append('file',new File(['考试占比为百分之六十。'],'课程说明.txt'));
+  return app.request('http://127.0.0.1:4111/app/documents',{method:'POST',headers:{host:'127.0.0.1:4111'},body:form});
+ };
+ const uploaded=await upload();assert.equal(uploaded.status,200);
+ const document=await uploaded.json();assert.match(document.markdown,/百分之六十/);
+ assert.equal(document.knowledge.duplicate,false);
+ const again=await (await upload()).json();assert.equal(again.knowledge.duplicate,true);
+ assert.equal(again.knowledge.id,document.knowledge.id);
+ const library=await (await request('/app/knowledge')).json();assert.equal(library.documents.length,1);
+ const cached=JSON.parse(await readFile(join(root,'.seudaily','knowledge',document.knowledge.id+'.text.json'),'utf8'));
+ assert.equal(cached.text,document.markdown);
+ const invalidForm=new FormData();invalidForm.append('file',new File([new Uint8Array([0xff])],'invalid.txt'));
+ const invalid=await app.request('http://127.0.0.1:4111/app/documents',{method:'POST',headers:{host:'127.0.0.1:4111'},body:invalidForm});
+ assert.equal(invalid.status,422);
+ assert.equal((await (await request('/app/knowledge')).json()).documents.length,1);
  assert.equal((await (await request('/app/skills')).json()).skills[0].name,'training-plan-audit');
  const saved=await request('/app/settings',{agentInstructions:'FIXTURE_AGENT_RULE'});
  assert.equal(saved.status,200);

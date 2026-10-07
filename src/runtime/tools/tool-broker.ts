@@ -14,9 +14,10 @@ import {
   resolveCourseTool,
 } from "./course-tools.js";
 import { readWebPageTool } from "./web-reader.js";
+import { searchKnowledgeTool } from "./knowledge-tools.js";
 import { webSearchTool } from "./web-search.js";
 
-export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace"]);
+export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace", "knowledge"]);
 export type ToolNamespace = z.infer<typeof toolNamespaceSchema>;
 
 type AnyTool = any;
@@ -27,6 +28,7 @@ const tickets = new Map<string, Ticket>();
 const ticketLifetimeMs = 10 * 60 * 1000;
 
 const staticCapabilities: Capability[] = [
+  { namespace: "knowledge", tool: searchKnowledgeTool, aliases: ["知识库", "上传资料", "我的文件", "文档检索", "knowledge", "rag"] },
   { namespace: "schedule", tool: getScheduleTool, aliases: ["课表", "schedule", "timetable", "上课"] },
   { namespace: "local-actions", tool: proposeLocalActionTool, aliases: ["修改课表", "移动课程", "创建关注", "focus", "edit schedule"] },
   { namespace: "course-materials", tool: resolveCourseTool, aliases: ["课程", "课次", "回放", "course", "session"] },

@@ -327,11 +327,25 @@ function legacyStoredDocuments(messageId: string, content: string): DocumentAtta
   }));
 }
 
+async function fetchHistoryPage(url: string): Promise<Response> {
+  for (let attempt=0; ; attempt++) {
+    let response: Response;
+    try { response=await fetch(url); }
+    catch (error) {
+      if (attempt >= 3) throw error;
+      await new Promise(resolve=>setTimeout(resolve,500 * 2 ** attempt));
+      continue;
+    }
+    if (attempt >= 3 || ![500,502,503,504].includes(response.status)) return response;
+    await new Promise(resolve=>setTimeout(resolve,500 * 2 ** attempt));
+  }
+}
+
 async function fetchThreadMessages(thread: StoredThread): Promise<Conversation | null> {
   const records: StoredMessage[] = [];
   for (let page = 0; ; page++) {
     const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "1000", page: String(page) });
-    const response = await fetch(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
+    const response = await fetchHistoryPage(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
     if (!response.ok) throw new Error(`加载会话历史失败（${response.status}）`);
     const data = await response.json() as { messages?: StoredMessage[]; hasMore?: boolean };
     if (!Array.isArray(data.messages)) throw new Error("无效会话历史响应");
@@ -759,7 +773,7 @@ export async function uploadDocument(file: File) {
     const detail = await response.json().catch(() => ({})) as { error?: string };
     throw new Error(detail.error || `文档解析失败（${response.status}）`);
   }
-  return await response.json() as { filename: string; extension: string; mediaType: string; contextRef: string; markdown: string; charCount: number };
+  return await response.json() as { filename: string; extension: string; mediaType: string; contextRef: string; markdown: string; charCount: number; knowledge?: {state:string;error?:string} };
 }
 
 export function fetchNotices(refresh = true) {

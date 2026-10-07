@@ -1,5 +1,4 @@
 import { createPortal } from 'react-dom';
-import { MessageCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { wechatStateLabel, type WeChatStatus } from '../../../src/shared/wechat';
 import { useImeComposition } from './ime';
@@ -35,7 +34,7 @@ export function WeChatPanel() {
   const close = () => {dismissed.current = status?.loginId ?? '';setOpen(false);};
   const qr = status?.qr;
   return <>
-    <button className="settings-button wechat-button" type="button" aria-label="微信接入与连接状态" title="微信接入与连接状态" onClick={() => {setOpen(true);if (status?.state === 'disconnected' || status?.state === 'needs_login') void run('/connect',{});}}><MessageCircle size={20}/><span>微信</span><small>{status?.state === 'connected' ? '已连接' : '接入 / 状态'}</small></button>
+    <button className="settings-button wechat-button" type="button" aria-label="微信接入与连接状态" title={status?.state === "connected" ? "微信已连接 · 点击查看" : "微信接入与连接状态"} onClick={() => {setOpen(true);if (status?.state === 'disconnected' || status?.state === 'needs_login') void run('/connect',{});}}><svg className="wechat-icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.3 3C4.7 3 1 6 1 9.8c0 2.1 1.1 4 3 5.3l-.8 2.7 3-1.5c.9.3 2 .4 3.1.4h.6a6.8 6.8 0 0 1-1.5-4.2c0-3.6 3.2-6.5 7.3-6.5h.7C15 4.2 12.4 3 9.3 3Z"/><path fill="currentColor" d="M15.8 7.4c-3.9 0-7 2.5-7 5.5s3.1 5.5 7 5.5c.9 0 1.7-.1 2.5-.4l2.5 1.3-.6-2.2c1.6-1 2.5-2.5 2.5-4.2 0-3-3-5.5-6.9-5.5Z"/><g fill="white"><circle cx="6.3" cy="8.1" r=".9"/><circle cx="11.6" cy="8.1" r=".9"/><circle cx="13.2" cy="11.8" r=".8"/><circle cx="18.1" cy="11.8" r=".8"/></g></svg><span>微信</span></button>
     {open && createPortal(<div className="campus-sms-overlay" onKeyDown={event => {if (event.key === 'Escape') close();}}>
       <section className="campus-sms-dialog wechat-dialog" role="dialog" aria-modal="true" aria-labelledby="wechat-title">
         <h2 id="wechat-title">微信</h2>

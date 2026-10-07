@@ -46,7 +46,7 @@ jobs:
           python-version: ${{ matrix.runtime.python }}
           enable-cache: true
       - run: npm ci
-      - run: uv sync --frozen --group test
+      - run: uv sync --frozen --group test --extra knowledge
       - run: npm run typecheck
       - run: npm run build
       - name: Validate Linux service unit
@@ -64,7 +64,7 @@ jobs:
         timeout-minutes: 8
         run: node --import tsx --test --test-timeout=240000 tests/*.mjs
       - name: Python regression
-        run: uv run --group test pytest -q
+        run: uv run --group test --extra knowledge pytest -q
       - name: Build fixed terminal/browser fixtures
         run: node scripts/build-fixtures.mjs
       - name: POSIX terminal input, cancellation and exit
