@@ -10,7 +10,7 @@ function within(root: string, path: string) {
 }
 
 type Source = {id:string; name:string};
-type Entry = {name:string; sources:string[]};
+type Entry = {name:string; sources:string[]; sections:{source:string;label:string}[]};
 function sourceIdentity(item: any): Source {
   if(item.source && typeof item.source.id==='string' && /^[a-z0-9][a-z0-9.-]*$/.test(item.source.id)
       && typeof item.source.name==='string' && item.source.name.trim())return {
@@ -51,6 +51,8 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
     if(!within(await realpath(files),await realpath(directory)))throw new Error('网页来源目录越界');
     return directory;
   }
+  const obsoleteBodies=new Map<string,string>();
+  const articleSections=new Map<string,{source:string;label:string}>();
   for(const site of ['jwc','cse']) {
     const directory=resolve(project,'.seudaily',site,'articles');
     const canonicalDirectory=await realpath(directory).catch(()=>null);
@@ -59,17 +61,24 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       if(!entry.isFile() || !entry.name.endsWith('.json'))continue;
       try {
         const article=JSON.parse(await readFile(resolve(directory,entry.name),'utf8'));
-        if(typeof article.content!=='string' || !article.content.trim() || typeof article.url!=='string')continue;
+        if(typeof article.url!=='string' || (!String(article.content || '').trim() && !article.attachments?.length))continue;
+        const section={source:sourceIdentity({url:article.url}).name,label:String(article.categoryLabel || (noticeSources as any)[site]?.categories?.[article.category]?.[0] || '其他资料')};
+        articleSections.set(article.url,section);
+        for(const attachment of article.attachments || [])if(typeof attachment.url==='string')articleSections.set(attachment.url,section);
         const title=String(article.title || '通知正文');
-        const bytes=Buffer.from('# '+title+'\n\n来源：'+article.url+'\n\n'+article.content);
+        const links=(article.attachments || []).filter((item:any)=>/\.pdf(?:$|[?#])/i.test(item.url || '')).map((item:any)=>`- [${item.name}](${item.url})`).join('\n');
+        const bytes=Buffer.from('# '+title+'\n\n来源：'+article.url+'\n\n'+String(article.content || '')+(links?'\n\n## 附件\n\n'+links:''));
         const digest=createHash('sha256').update(bytes).digest('hex');
         const record=resolve(metadata,createHash('sha256').update(article.url).digest('hex')+'.json');
         // Preserve deletion intent: a record with a missing original is not recreated.
-        if(await lstat(record).catch(()=>null))continue;
+        const old=await readFile(record,'utf8').then(JSON.parse).catch(()=>null);
+        if(old && !(await lstat(old.path).catch(()=>null)))continue;
+        if(old?.sha256===digest)continue;
         const source=sourceIdentity({url:article.url});
         const path=resolve(await sourceDirectory(source),digest+'.md');
         try {await writeFile(path,bytes,{flag:'wx',mode:0o600});} catch(error:any){if(error.code!=='EEXIST')throw error;}
         await atomicMetadata(record,{url:article.url,name:title+'.md',path,sha256:digest,sizeBytes:bytes.length,sourceUrl:article.url,source});
+        if(old && old.path!==path && typeof old.path==='string' && within(files,resolve(old.path)))obsoleteBodies.set(old.path,old.sha256);
       } catch { /* A damaged older cache must not hide the other library files. */ }
     }
   }
@@ -105,7 +114,9 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       } else if(item.source?.id!==source.id || item.source?.name!==source.name)await atomicMetadata(record,{...item,source});
       if(path===oldPath && dirname(path)===files)remaining.add(path);
       const previous=entries.get(path);
-      entries.set(path,{name:previous?.name || item.name,sources:[...new Set([...(previous?.sources || []),source.name])].sort()});
+      const section=articleSections.get(item.url) || articleSections.get(item.sourceUrl) || item.noticeSection || {source:source.name,label:'其他资料'};
+      if(JSON.stringify(item.noticeSection)!==JSON.stringify(section))await atomicMetadata(record,{...item,path,source,noticeSection:section});
+      entries.set(path,{name:previous?.name || item.name,sources:[...new Set([...(previous?.sources || []),source.name])].sort(),sections:[...(previous?.sections || []).filter(value=>value.source!==section.source || value.label!==section.label),section]});
     } catch {
       if(oldPath)remaining.add(oldPath);
       brokenMetadata=true;
@@ -125,6 +136,7 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
     if(!Buffer.from(await readFile(oldPath)).equals(await readFile(path)))continue;
     await unlink(oldPath);
   }
+  if(!brokenMetadata)for(const [path,digest] of obsoleteBodies)if(!entries.has(path) && createHash('sha256').update(await readFile(path)).digest('hex')===digest)await unlink(path);
   return entries;
 }
 

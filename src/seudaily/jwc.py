@@ -539,7 +539,10 @@ class JwcService:
 
         from .saved_web_files import cached, save
         existing=cached(url)
-        if existing and existing.get('parsed') and not refresh:
+        if existing and not refresh:
+            if not existing.get('parsed'):
+                parsed = parse_document(existing['path'], filename=name)
+                existing = save(url,name,Path(existing['path']).read_bytes(),extension,markdown=parsed['markdown'],source_url=str(article.get('url','')),source_name=self.config.name)
             return {'status':'completed','message':f'已读取{site_label}附件：{name}','article':article,'attachment':{**existing,'number':attachment_number,'extension':extension,'extractionMode':'text_layer' if extension=='.pdf' else 'document_structure'},'warnings':[]}
         sha256 = hashlib.sha256()
         size_bytes = 0
@@ -939,7 +942,8 @@ class JwcService:
             },
         })
         from .saved_web_files import body
-        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or ''),source_name=self.config.name)
+        links = '\n\n## 附件\n\n' + '\n'.join(f"- [{item['name']}]({item['url']})" for item in attachments if not item['url'].endswith('.gif')) if attachments else ''
+        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or '') + links,source_name=self.config.name)
         article["lastCheckedAt"] = _iso_now()
         return changed
 

@@ -270,6 +270,11 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         return _jwc_service(payload).get_article(
             payload["articleId"], refresh=payload.get("refresh", True)
         )
+    if action == "sync-notice-pdf":
+        payload["site"] = payload.get("site", "jwc")
+        return _jwc_service(payload).read_attachment(
+            payload["articleId"], attachment_number=payload["attachmentNumber"], refresh=False
+        )
     if action == "read-web-page":
         return read_web_page(
             payload["url"],

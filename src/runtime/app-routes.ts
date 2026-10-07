@@ -602,7 +602,10 @@ export const appRoutes = [
       const {knowledge} = await import('./knowledge/index.js');
       const sources = new Set(await knowledge.sources());
       files.push(...documents.filter(file=>!sources.has(file.path)).map(file => ({ ...file, name:resolveDocumentContexts([basename(file.path,extname(file.path))])[0]?.name || file.name, category:'documents',course:'上传文件',teacher:'本地文件' })));
-      const indexed = new Map((await knowledge.list()).map(document=>[document.path,document]));
+      const knowledgeDocuments=await knowledge.list();
+      const webRoot=resolve(projectRoot,'.seudaily','web-files','files');
+      const webDocumentIds=new Set((await Promise.all(knowledgeDocuments.map(async document=>(await knowledge.sources(document.id)).some(path=>isWithinDirectory(webRoot,resolve(path)))?document.id:null))).filter(Boolean));
+      const indexed = new Map(knowledgeDocuments.filter(document=>!webDocumentIds.has(document.id)).map(document=>[document.path,document]));
       const builtinIds=await knowledge.builtinIds();
       const originals = await walkFiles(resolve(projectRoot,'.seudaily','knowledge','files'));
       files.push(...originals.flatMap(file=>{
@@ -611,7 +614,7 @@ export const appRoutes = [
       }));
       const webEntries=await webLibraryEntries(projectRoot);
       const webFiles=await walkFiles(resolve(projectRoot,'.seudaily','web-files','files'));
-      files.push(...webFiles.map(file=>({...file,name:webEntries.get(file.path)?.name || file.name,sources:webEntries.get(file.path)?.sources || ['未分类'],category:'web',course:'网页与通知',teacher:'本地缓存'})));
+      files.push(...webFiles.map(file=>({...file,name:webEntries.get(file.path)?.name || file.name,sources:webEntries.get(file.path)?.sources || ['未分类'],sections:webEntries.get(file.path)?.sections || [],category:'web',course:'网页与通知',teacher:'本地缓存'})));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return c.json({ root, files, count: files.length });
     },

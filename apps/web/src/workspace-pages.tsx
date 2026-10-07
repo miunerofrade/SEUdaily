@@ -817,6 +817,7 @@ export function LibraryPage() {
   const [category, setCategory] = useState("");
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [source, setSource] = useState("");
+  const [section, setSection] = useState("");
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LibraryFile | null>(null);
@@ -836,10 +837,12 @@ export function LibraryPage() {
   const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
   const flatCategory = ["documents","references","web"].includes(category);
   const sources = [...new Set(visible.flatMap(file => file.sources?.length ? file.sources : ["未分类"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
-  const selectedFiles = category === "web" ? visible.filter(file => (file.sources?.length ? file.sources : ["未分类"]).includes(source)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
-  const columnCount = category === "web" ? (source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
+  const sourceFiles=visible.filter(file=>(file.sources?.length ? file.sources : ["未分类"]).includes(source));
+  const sections=[...new Set(sourceFiles.flatMap(file=>file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
+  const selectedFiles = category === "web" ? sourceFiles.filter(file=>(file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]).includes(section)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
+  const columnCount = category === "web" ? (section ? 4 : source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
 
-  function chooseCategory(next: string) { setCategory(next); setSource(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
+  function chooseCategory(next: string) { setCategory(next); setSource(""); setSection(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
   function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
   function chooseTeacher(next: string) { setTeacher(next); setSelectedFilePath(""); }
   async function openPreview(file: LibraryFile) {
@@ -870,15 +873,16 @@ export function LibraryPage() {
           <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
         </div>
         {category === "web" && <div className="browser-column">
-          <div className="browser-column-list">{sources.length ? sources.map(item => <button key={item} className={source === item ? "selected" : ""} onClick={() => { setSource(item); setSelectedFilePath(""); }}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无网页资料</div>}</div>
+          <div className="browser-column-list">{sources.length ? sources.map(item => <button key={item} className={source === item ? "selected" : ""} onClick={() => { setSource(item); setSection(""); setSelectedFilePath(""); }}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无网页资料</div>}</div>
         </div>}
+        {category === "web" && source && <div className="browser-column"><div className="browser-column-list">{sections.map(item=><button key={item} className={section===item?"selected":""} onClick={()=>{setSection(item);setSelectedFilePath("");}}><Folder size={17}/><span>{item}</span><ChevronRight size={15}/></button>)}</div></div>}
         {category && !flatCategory && <div className="browser-column">
           <div className="browser-column-list">{courses.length ? courses.map((item) => <button key={item} className={course === item ? "selected" : ""} onClick={() => chooseCourse(item)}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无课程资料</div>}</div>
         </div>}
-        {course && <div className="browser-column">
+        {course && category !== "web" && <div className="browser-column">
           <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
         </div>}
-        {((course && teacher) || (flatCategory && (category !== "web" || source))) && <div className="browser-column browser-file-column">
+        {((course && teacher) || (flatCategory && (category !== "web" || (source && section)))) && <div className="browser-column browser-file-column">
           <div className="browser-column-list">{selectedFiles.length ? selectedFiles.map((file) => <button key={file.path} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}>{file.category === "images" ? <FileImage size={17} /> : <FileText size={17} />}<span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
         </div>}
       </div>
