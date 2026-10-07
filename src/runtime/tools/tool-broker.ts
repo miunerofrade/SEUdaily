@@ -103,7 +103,9 @@ async function ticketFor(id: string, runToken: string, options: any) {
   let ticket = tickets.get(id);
   if (!ticket) {
     const saved = options?.requestContext?.get?.("seudailyCapabilityTickets")?.find((entry: any) => entry.id === id);
-    if (saved && saved.expiresAt > Date.now()) {
+    // A durable, explicitly approved pending call may outlive its discovery ticket.
+    // Only AgentRuntime supplies this binding after validating the persisted approval.
+    if (saved && (saved.expiresAt > Date.now() || requestValue(options, "seudailyApprovedCapabilityTicket") === id)) {
       const capability = (await allCapabilities(saved.namespace === "browser", requestValue(options, "seudailyThreadId"))).find(item => item.tool.id === saved.name && item.namespace === saved.namespace);
       if (capability) ticket = { id, runToken, capability, expiresAt: saved.expiresAt };
     }

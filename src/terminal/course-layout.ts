@@ -240,7 +240,7 @@ export function currentWeek(schedule: any, date = new Date()) {
         Math.max(
           1,
           Math.min(
-            schedule.customizations.semester.totalWeeks || 20,
+            schedule.customizations.semester.totalWeeks || 16,
             Math.floor((date.getTime() - startMs) / 604800000) + 1,
           ),
         ),

@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { AgentStore, threadDeletionStatements } from '../agent/storage.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import { inferToolNamespaces } from '../agent/namespaces.js';
-import { redactText } from '../agent/redaction.js';
+import { getPermissionMode, setPermissionMode, permissionModes, permissionHelp, type PermissionMode } from '../runtime/permission-state.js';
+import { redactText, redactValue } from '../agent/redaction.js';
 import type { BotAccount } from './protocol.js';
 
 export const WECHAT_RESOURCE = 'seudaily-wechat-local';
@@ -15,6 +16,9 @@ export const WECHAT_HELP = `微信聊天
 /delete [编号] — 删除会话，需再次确认
 /context — 当前会话的摘要和最近讨论
 /history [页码] — 最近对话，1 为最新
+/permission [normal|full|extra] — 查看或切换权限
+/approve 编号 — 确认操作（也可回复“确认 编号”）
+/deny 编号 — 拒绝操作（也可回复“取消 编号”）
 /help — 查看这些命令
 
 完整记录也可在 SEUdaily 网页或终端查看。`;
@@ -22,13 +26,45 @@ type Inbox = { account: string; id: string; peer: string; text: string; threadId
 const clip = (value: string, limit = 200) => value.length > limit ? value.slice(0, limit) + '…' : value;
 const visible = (message: any) => String(message.content?.content || message.content?.parts?.filter((part: any) => part.type === 'text').map((part: any) => part.text ?? '').join('') || '');
 
+const approvalCode = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 8).toUpperCase();
+function approvalText(run: any) {
+  const call = run.pendingCalls?.find((call: any) => call.id === run.approval?.callId);
+  if (!run.approval || !call) return '当前没有待审批操作。';
+  let args: any;
+  try {args = JSON.parse(call.function.arguments);} catch {args = {};}
+  const input = args.arguments ?? args;
+  const schedule = input.schedule ?? {};
+  const labels: Record<string,string> = {set_semester:'设置学期',add_schedule:'新增周期课程',update_schedule:'修改课程',move_schedule:'调整单次课程',add_schedule_once:'单日增课',cancel_schedule_once:'单日停课',create_focus:'创建关注'};
+  const lines = [`待确认：${labels[input.kind] ?? call.function.name}`];
+  if (input.kind === 'set_semester') {
+    const semester = schedule.semester ?? {};
+    if (semester.name !== undefined) lines.push(`学期名称：${semester.name}`);
+    if (semester.startDate !== undefined) lines.push(`起始日期：${semester.startDate}`);
+    if (semester.totalWeeks !== undefined) lines.push(`总周数：${semester.totalWeeks}`);
+  } else if (input.kind === 'create_focus') lines.push(`关注：${input.focus?.title ?? ''}`, clip(String(input.focus?.description ?? ''),300));
+  else if (labels[input.kind]) {
+    const course = schedule.course;
+    const existing = run.parts?.flatMap((part: any) => part.toolInvocation?.result?.data?.courses ?? []).find((course: any) => course.sourceKey === schedule.sourceKey);
+    if (course?.courseName || existing?.courseName) lines.push(`课程：${course?.courseName ?? existing.courseName}`);
+    if (schedule.date) lines.push(`日期：${schedule.date}`);
+    if (schedule.fromDate) lines.push(`原日期：${schedule.fromDate}`);
+    if (schedule.toDate) lines.push(`目标日期：${schedule.toDate}`);
+    const fields: Record<string,string> = {courseName:'课程名',teacherName:'教师',classroom:'教室',weekday:'星期',startPeriod:'开始节次',endPeriod:'结束节次',weeks:'周次'};
+    for (const [key,value] of Object.entries(schedule.changes ?? course ?? {})) if (fields[key]) lines.push(`${fields[key]}：${Array.isArray(value) ? value.join(',') : value}`);
+  } else lines.push(clip(JSON.stringify(redactValue(args)),700));
+  const code = approvalCode(run.approval.id);
+  return redactText(lines.join('\n')) + `\n\n确认请回复：确认 ${code}\n拒绝请回复：取消 ${code}\n也可用 /approve ${code} 或 /deny ${code}。`;
+}
+type PermissionControls = {get: () => PermissionMode; set: (mode: PermissionMode) => Promise<void>};
+
 /** The channel cursor is separate from threads.metadata.activeLeaf (conversation branches). */
 export class WeChatConversations {
-  constructor(private store: AgentStore, private agent: Pick<AgentRuntime, 'runTurn' | 'isActive'>) {}
+  constructor(private store: AgentStore, private agent: Pick<AgentRuntime, 'runTurn' | 'isActive' | 'resumeApproval'>, private permission: PermissionControls = {get:getPermissionMode,set:setPermissionMode}) {}
   async initialize() {
     await this.store.ready;
     await this.store.client.batch([
       'CREATE TABLE IF NOT EXISTS wechat_sessions (account TEXT NOT NULL, peer TEXT NOT NULL, number INTEGER NOT NULL, threadId TEXT UNIQUE NOT NULL, PRIMARY KEY(account,peer,number))',
+      'CREATE TABLE IF NOT EXISTS wechat_approval_decisions (account TEXT NOT NULL, id TEXT NOT NULL, threadId TEXT NOT NULL, runToken TEXT NOT NULL, approvalId TEXT NOT NULL, approved INTEGER NOT NULL, PRIMARY KEY(account,id))',
       'CREATE TABLE IF NOT EXISTS wechat_current (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(account,peer))',
       'CREATE TABLE IF NOT EXISTS wechat_delete_confirmations (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, number INTEGER NOT NULL, expiresAt INTEGER NOT NULL, PRIMARY KEY(account,peer))',
     ]);
@@ -63,7 +99,8 @@ export class WeChatConversations {
     const tx = await this.store.client.transaction();
     let threadId = '', reply = '', state = 'command';
     const text = row.text.trim();
-    const command = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+    const approvalReply = /^(确认|同意|取消|拒绝)\s+([a-f0-9]{8})$/i.exec(text);
+    const command = approvalReply ? [text, ['确认','同意'].includes(approvalReply[1]) ? 'approve' : 'deny', approvalReply[2]] : /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
     const name = command?.[1]?.toLowerCase(), argument = command?.[2]?.trim() ?? '';
     try {
       const existing = (await tx.execute({sql:"SELECT state FROM wechat_messages WHERE account=? AND id=?",args:[row.account,row.id]})).rows[0];
@@ -82,6 +119,18 @@ export class WeChatConversations {
       }
       if (!command) state = 'queued';
       else if (name === 'help') reply = WECHAT_HELP;
+      else if (name === 'permission') reply = '@permission:' + argument;
+      else if (name === 'approve' || name === 'deny') {
+        const saved = (await tx.execute({sql:"SELECT state FROM runs WHERE threadId=? AND resourceId=? AND status='waiting' LIMIT 1",args:[threadId,WECHAT_RESOURCE]})).rows[0];
+        const run = saved ? JSON.parse(String(saved.state)) : undefined;
+        if (!run?.approval) reply = '当前会话没有待审批操作。/sessions 和 /use 可切换会话。';
+        else if (!argument) reply = approvalText(run);
+        else if (argument.toUpperCase() !== approvalCode(run.approval.id)) reply = '审批编号已失效或不属于当前会话，未执行操作。\n\n' + approvalText(run);
+        else {
+          await tx.execute({sql:'INSERT INTO wechat_approval_decisions VALUES(?,?,?,?,?,?)',args:[row.account,row.id,threadId,run.id,run.approval.id,name === 'approve' ? 1 : 0]});
+          state = 'queued';
+        }
+      }
       else if (name === 'sessions') {
         const page = argument ? Number(argument) : 1;
         if (!Number.isSafeInteger(page) || page < 1) reply = '用法：/sessions [页码]，例如 /sessions 2';
@@ -117,6 +166,7 @@ export class WeChatConversations {
             if (confirmation?.threadId !== id || Number(confirmation.expiresAt) <= Date.now()) reply = `没有有效的删除确认。请先发送 /delete ${target.number}，核对会话后再确认。`;
             else {
               for (const statement of threadDeletionStatements(id)) await tx.execute(statement);
+              await tx.execute({sql:'DELETE FROM wechat_approval_decisions WHERE threadId=?',args:[id]});
               await tx.execute({sql:'DELETE FROM wechat_current WHERE account=? AND peer=? AND threadId=?',args:[account.botId,account.userId,id]});
               await tx.execute({sql:'DELETE FROM wechat_delete_confirmations WHERE account=? AND peer=?',args:[account.botId,account.userId]});
               // Preserve inbound IDs as deduplication tombstones, but erase deleted text/routes.
@@ -129,7 +179,7 @@ export class WeChatConversations {
         }
       } else if (name !== 'new' && !['context','history'].includes(name!)) reply = `未识别命令 /${clip(name!,40)}。发送 /help 查看用法。`;
       // Store command state first; context/history are resolved below without holding SQLite across Agent reads.
-      if (command && !reply) reply = '@' + name + ':' + argument;
+      if (command && state !== 'queued' && !reply) reply = '@' + name + ':' + argument;
       await tx.execute({sql:'UPDATE wechat_messages SET threadId=?,resourceId=?,reply=?,state=? WHERE account=? AND id=?',args:[threadId,WECHAT_RESOURCE,reply,state,row.account,row.id]});
       await tx.commit();
     } catch (error) { await tx.rollback(); throw error; }
@@ -137,6 +187,13 @@ export class WeChatConversations {
   }
   async commandReply(row: Inbox & {reply:string}) {
     if (!row.reply.startsWith('@')) return row.reply;
+    if (row.reply.startsWith('@permission:')) {
+      const mode = row.reply.slice('@permission:'.length).toLowerCase();
+      if (!mode) return `当前权限：${this.permission.get()}\n\n${permissionHelp}\n\n切换：/permission normal|full|extra\n权限与 Web、终端共享，切换结果保存后保留。`;
+      if (!permissionModes.includes(mode as PermissionMode)) return '用法：/permission [normal|full|extra]，不带参数查看说明。';
+      await this.permission.set(mode as PermissionMode);
+      return `权限已切换为 ${mode}，与 Web、终端共享。已有待审批操作仍需确认或取消。`;
+    }
     const thread = await this.store.getThreadById({threadId:row.threadId,resourceId:WECHAT_RESOURCE});
     if (!thread) return '这个会话已在网页或终端删除。发送 /new 开始新会话。';
     const number = (await this.store.client.execute({sql:'SELECT number FROM wechat_sessions WHERE threadId=?',args:[row.threadId]})).rows[0]?.number;
@@ -155,10 +212,19 @@ export class WeChatConversations {
   }
   async answer(row: Inbox, signal: AbortSignal) {
     const runToken = 'wechat-' + createHash('sha256').update(row.account + '\0' + row.peer + '\0' + row.id).digest('hex');
-    let run = await this.store.getRun(runToken);
-    if (!run) {
+    const decision = (await this.store.client.execute({sql:'SELECT * FROM wechat_approval_decisions WHERE account=? AND id=? AND threadId=?',args:[row.account,row.id,row.threadId]})).rows[0];
+    let run = await this.store.getRun(decision ? String(decision.runToken) : runToken);
+    if (decision) {
+      if (!run || run.context.resourceId !== WECHAT_RESOURCE || run.context.threadId !== row.threadId) return '审批不存在或不属于当前会话，未执行操作。';
       if (this.agent.isActive(row.threadId)) return undefined;
-      if (await this.store.waitingRun(row.threadId)) return '这个会话有待确认的操作，请在网页或终端打开同一会话完成确认，再继续聊天。';
+      if (run.status !== 'waiting' || run.approval?.id !== decision.approvalId) return '审批已处理或已失效，未重复执行操作。';
+      const events = await this.agent.resumeApproval({approvalId:String(decision.approvalId),approved:Number(decision.approved) === 1},run.context,signal);
+      for await (const event of events) {if (signal.aborted) return undefined;}
+      run = await this.store.getRun(String(decision.runToken));
+    } else if (!run) {
+      if (this.agent.isActive(row.threadId)) return undefined;
+      const waiting = await this.store.waitingRun(row.threadId);
+      if (waiting) return approvalText(waiting);
       if (!await this.store.getThreadById({threadId:row.threadId,resourceId:WECHAT_RESOURCE})) return '这个会话已被删除。发送 /new 开始新会话。';
       const events = await this.agent.runTurn([{role:'user',content:row.text}],{threadId:row.threadId,resourceId:WECHAT_RESOURCE,runToken,userMessageId:runToken+'-user',assistantMessageId:runToken+'-assistant',interface:'wechat',namespaces:inferToolNamespaces(row.text)},signal);
       for await (const event of events) { if (signal.aborted) return undefined; }
@@ -167,7 +233,7 @@ export class WeChatConversations {
     if (signal.aborted) return undefined;
     if (run?.status === 'running') return undefined;
     const text = run?.parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('') || '';
-    if (run?.status === 'waiting') return `${text ? clip(text,1300)+'\n\n' : ''}需要确认操作，请在网页或终端打开同一会话处理。微信不会自动批准。`;
+    if (run?.status === 'waiting') return `${text ? clip(text,700)+'\n\n' : ''}${approvalText(run)}`;
     if (run?.status === 'cancelled' || run?.status === 'interrupted') return '上一次回答已中断，已有记录保留，未重复执行工具。请重新发消息继续。';
     if (run?.status === 'failed') {
       if (run.parts.some(part => part.type === 'error' && /未配置 DEEPSEEK_API_KEY/.test(part.error?.message ?? ''))) return '还没有配置模型。请在 SEUdaily 网页或终端的设置中配置模型，然后重新发送。会话管理命令仍可使用。';

@@ -29,3 +29,19 @@ export function setFullAccessExtraEnabled(enabled: boolean) {
 }
 
 export function isUnapprovedAccessEnabled(options?: PermissionOptions) { return isFullAccessEnabled(options) || isFullAccessExtraEnabled(options); }
+
+export type PermissionMode = "normal" | "full" | "extra";
+export const permissionModes = ["normal", "full", "extra"] as const;
+export const permissionHelp = `normal — 普通：需要审批的操作逐项确认
+full — 完全访问：业务和浏览器操作免审批
+extra — 完全访问，并启用工作区文件和终端能力`;
+export function getPermissionMode(): PermissionMode {
+  return isFullAccessExtraEnabled() ? "extra" : isFullAccessEnabled() ? "full" : "normal";
+}
+export async function setPermissionMode(mode: PermissionMode) {
+  if (!permissionModes.includes(mode)) throw new Error("权限模式应为 normal、full 或 extra");
+  const {updateEnvFile} = await import("./environment-settings.js");
+  await updateEnvFile({SEUDAILY_FULL_ACCESS: String(mode !== "normal"), SEUDAILY_FULL_ACCESS_EXTRA: String(mode === "extra")});
+  setFullAccessEnabled(mode !== "normal");
+  setFullAccessExtraEnabled(mode === "extra");
+}

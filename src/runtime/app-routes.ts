@@ -1,3 +1,4 @@
+import { parseEnv, readEnvFile, updateEnvFile } from "./environment-settings.js";
 import { existsSync } from 'node:fs';
 import { diskSize } from '../shared/disk-size.js';
 import { z } from "zod";
@@ -280,56 +281,6 @@ async function walkFiles(root: string, directory = root, output: LibraryFile[] =
     });
   }
   return output;
-}
-
-function parseEnv(content: string) {
-  const values: Record<string, string> = {};
-  for (const line of content.split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-    if (!match) continue;
-    let value = match[2];
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
-    values[match[1]] = value;
-  }
-  return values;
-}
-
-async function readEnvFile() {
-  try {
-    return await readFile(resolve(projectRoot, ".env"), "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function encodeEnvValue(value: string) {
-  return /^[A-Za-z0-9_./:@-]*$/.test(value) ? value : JSON.stringify(value);
-}
-
-let envWriteQueue: Promise<void> = Promise.resolve();
-
-async function persistEnvFile(updates: Record<string, string>) {
-  const target = resolve(projectRoot, ".env");
-  let content = await readEnvFile();
-  for (const [key, value] of Object.entries(updates)) {
-    const line = `${key}=${encodeEnvValue(value)}`;
-    const pattern = new RegExp(`^\\s*${key}\\s*=.*$`, "m");
-    content = pattern.test(content) ? content.replace(pattern, () => line) : `${content.trimEnd()}${content.trim() ? "\n" : ""}${line}\n`;
-  }
-  const temporary = `${target}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    await rename(temporary, target);
-    for (const [key, value] of Object.entries(updates)) process.env[key] = value;
-  } finally {
-    await unlink(temporary).catch(() => undefined);
-  }
-}
-
-function updateEnvFile(updates: Record<string, string>) {
-  const operation = envWriteQueue.then(() => persistEnvFile(updates));
-  envWriteQueue = operation.catch(() => undefined);
-  return operation;
 }
 
 function legacyEnvironmentName(name: string) {
@@ -821,13 +772,13 @@ export const appRoutes = [
         const value = body.values?.[name] ?? (legacyName ? body.values?.[legacyName] : undefined);
         if (typeof value === "string" && value.trim()) values[name] = value.trim();
       }
+      await updateEnvFile(values);
       if (Object.hasOwn(values, "SEUDAILY_FULL_ACCESS")) {
         setFullAccessEnabled(values.SEUDAILY_FULL_ACCESS === "true" || values.SEUDAILY_FULL_ACCESS === "1" || values.SEUDAILY_FULL_ACCESS === "yes" || values.SEUDAILY_FULL_ACCESS === "on");
       }
       if (Object.hasOwn(values, "SEUDAILY_FULL_ACCESS_EXTRA")) {
         setFullAccessExtraEnabled(values.SEUDAILY_FULL_ACCESS_EXTRA === "true" || values.SEUDAILY_FULL_ACCESS_EXTRA === "1" || values.SEUDAILY_FULL_ACCESS_EXTRA === "yes" || values.SEUDAILY_FULL_ACCESS_EXTRA === "on");
       }
-      await updateEnvFile(values);
       const agentInstructionsSaved = typeof body.agentInstructions === "string";
       if (agentInstructionsSaved) await writeFile(agentInstructionsPath, body.agentInstructions as string, "utf8");
       const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA"].includes(name));

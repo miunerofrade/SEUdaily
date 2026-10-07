@@ -27,14 +27,14 @@ export async function permissionForm(s:Session):Promise<Form> {
 }
 export function semesterForm(s:Session):Form {
  const semester=s.schedule.customizations?.semester ?? {};
- return {title:'学期设置',fields:[field('name','学期名称',semester.name),field('startDate','起始日期 YYYY-MM-DD',semester.startDate),field('totalWeeks','总周数',semester.totalWeeks || 20)],save:async v=>{
+ return {title:'学期设置',fields:[field('name','学期名称',semester.name),field('startDate','起始日期 YYYY-MM-DD',semester.startDate),field('totalWeeks','总周数',semester.totalWeeks || 16)],save:async v=>{
  if(!/^\d{4}-\d{2}-\d{2}$/.test(v.startDate)||new Date(v.startDate).toISOString().slice(0,10)!==v.startDate)throw new Error('起始日期无效');
  const next=structuredClone(s.schedule.customizations);next.semester={name:v.name,startDate:v.startDate,totalWeeks:integer(v.totalWeeks,1,30)};
  s.result(await s.client.json('/app/schedule','PUT',next));await s.loadSchedule();
  }};
 }
 export function courseForm(s:Session,course?:any,single=false):Form {
- return {title:course?'编辑课程':'添加课程',fields:[field('courseName','课程名',course?.courseName),field('teacherName','教师',course?.teacherName),field('classroom','地点',course?.classroom),field('weekday','星期 1–7',course?.weekday || 1),field('startPeriod','开始节次',course?.startPeriod || 1),field('endPeriod','结束节次',course?.endPeriod || 2),field('weeks','周次（如 1-16 或 1,3,5）',course?.weeks?.join(',') || `1-${s.schedule.customizations?.semester?.totalWeeks || 20}`),field('date','单日日期（留空为周期课程）',course?.occurrenceDate || (single?new Date().toLocaleDateString('sv-SE'):''))],save:async v=>{
+ return {title:course?'编辑课程':'添加课程',fields:[field('courseName','课程名',course?.courseName),field('teacherName','教师',course?.teacherName),field('classroom','地点',course?.classroom),field('weekday','星期 1–7',course?.weekday || 1),field('startPeriod','开始节次',course?.startPeriod || 1),field('endPeriod','结束节次',course?.endPeriod || 2),field('weeks','周次（如 1-16 或 1,3,5）',course?.weeks?.join(',') || `1-${s.schedule.customizations?.semester?.totalWeeks || 16}`),field('date','单日日期（留空为周期课程）',course?.occurrenceDate || (single?new Date().toLocaleDateString('sv-SE'):''))],save:async v=>{
  if(!v.courseName.trim())throw new Error('请填写课程名');
  const start=integer(v.startPeriod,1,13),end=integer(v.endPeriod,start,13);
  const weeks=[...new Set(v.weeks.split(/[,，\s]+/).filter(Boolean).flatMap(item=>{const [a,b]=item.split('-');const from=integer(a,1,30),to=b?integer(b,from,30):from;return Array.from({length:to-from+1},(_,i)=>from+i);}))].sort((a,b)=>a-b);

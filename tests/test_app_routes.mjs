@@ -19,7 +19,10 @@ const declarations = ast.statements.filter((statement) =>
   ts.isFunctionDeclaration(statement) && functions.has(statement.name?.text) ||
   ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ['libraryRoots', 'envWriteQueue', 'appRoutes'].includes(declaration.name.getText(ast)))
 ).map((statement) => statement.getText(ast)).join('\n');
-const compiled = ts.transpileModule(declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const envSource = await fs.readFile(new URL('../src/runtime/environment-settings.ts', import.meta.url), 'utf8');
+const envAst = ts.createSourceFile('environment-settings.ts', envSource, ts.ScriptTarget.Latest, true);
+const envDeclarations = envAst.statements.filter(statement => !ts.isImportDeclaration(statement)).map(statement => statement.getText(envAst)).join('\n');
+const compiled = ts.transpileModule(envDeclarations + '\n' + declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 
 async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));

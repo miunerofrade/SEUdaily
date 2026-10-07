@@ -136,3 +136,15 @@ test('tool images survive approval and follow all tool replies as visual input',
   assert.equal(saved.pendingToolImages,undefined);
   assert.equal(saved.messages.some(item=>Array.isArray(item.content) && item.content.some(part=>part.type === 'image_url')),true);
 });
+
+test('refusing a pending tool does not validate or execute its expired capability',async t=>{
+  let expired=false,executed=0;
+  const f=setup(t,[call('call','invoke-capability','{"ticket":"expired"}'),{role:'assistant',content:'已取消'}],{
+    'invoke-capability':{id:'invoke-capability',description:'fixture',inputSchema:z.object({ticket:z.string()}),requireApproval:()=>{if(expired) throw new Error('ticket expired');return true;},execute:()=>{executed++;return result('unexpected');}},
+  });
+  const context=ctx('deny-expired');const first=await events(f.runtime.runTurn(user('修改'),context));
+  expired=true;
+  await events(f.runtime.resumeApproval({approvalId:first.find(item=>item.type==='tool-approval-request').payload.approvalId,approved:false},context));
+  const run=await f.store.getRun(context.runToken);
+  assert.equal(executed,0);assert.match(run.messages.find(item=>item.role==='tool').content,/用户拒绝/);
+});

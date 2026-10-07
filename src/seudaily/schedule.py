@@ -466,7 +466,7 @@ class ScheduleService:
     def _default_customizations() -> dict[str, Any]:
         return {
             "version": 1,
-            "semester": {"name": "", "startDate": "", "totalWeeks": 20},
+            "semester": {"name": "", "startDate": "", "totalWeeks": 16},
             "overrides": {},
             "customCourses": [],
             "dateOverrides": [],
@@ -538,7 +538,7 @@ class ScheduleService:
         semester_input = payload.get("semester", current["semester"])
         if not isinstance(semester_input, dict):
             raise ValueError("semester 必须是对象")
-        total_weeks = int(semester_input.get("totalWeeks", 20))
+        total_weeks = int(semester_input.get("totalWeeks", 16))
         if not 1 <= total_weeks <= 30:
             raise ValueError("totalWeeks 必须在 1 到 30 之间")
         semester = {

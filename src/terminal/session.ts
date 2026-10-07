@@ -52,6 +52,7 @@ export const commands: Record<string, string> = {
   login: "登录续接 [schedule/ID]",
   apply: "确认本地操作 [ID]",
   mode: "选择权限模式 [normal/full/extra]",
+  permission: "查看或切换权限模式 [normal/full/extra]",
   attach: '添加图片或文档 "路径"；也可粘贴文件路径',
   detach: "清空文档",
   thinking: "展开 / 折叠模型思考（Ctrl+T）",
@@ -1019,6 +1020,17 @@ export class Session extends EventEmitter {
       if (!id || !this.actions.has(id)) throw new Error("没有此操作请求");
       const request = this.actions.get(id);
       this.confirm("apply", id, request.text + (["create-focus", "create_focus"].includes(request.kind) ? "\n创建即授权此关注完全访问，不含 extra。" : ""));
+      return;
+    }
+    if (name === "permission") {
+      if (!args.length) {
+        const data = await this.client.json('/app/settings');
+        const enabled = (key: string) => data.fields.some((field: any) => field.name === key && field.value === 'true');
+        this.show(`当前权限：${enabled('SEUDAILY_FULL_ACCESS_EXTRA') ? 'extra' : enabled('SEUDAILY_FULL_ACCESS') ? 'full' : 'normal'}\nnormal：逐项审批\nfull：业务与浏览器免审批\nextra：另启用工作区文件和终端\n用法：/permission normal|full|extra`);
+      } else if (args.length === 1 && ['normal','full','extra'].includes(args[0])) {
+        await this.client.json('/app/settings','POST',{values:{SEUDAILY_FULL_ACCESS:String(args[0] !== 'normal'),SEUDAILY_FULL_ACCESS_EXTRA:String(args[0] === 'extra')}});
+        this.show(`权限已切换为 ${args[0]}，与 Web、微信共享。已有待审批任务仍需确认或取消。`);
+      } else throw new Error('/permission [normal|full|extra]');
       return;
     }
     if (name === "mode") {

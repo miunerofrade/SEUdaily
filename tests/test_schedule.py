@@ -780,3 +780,12 @@ def test_agent_cancelling_recurring_course_only_changes_requested_day(tmp_path):
     assert service.get_schedule(local_only=True, target_date='2026-10-07')['count'] == 0
     assert service.get_schedule(local_only=True, target_date='2026-10-14')['count'] == 1
     assert service.cache_file.read_bytes() == before
+
+
+def test_semester_default_is_sixteen_weeks_and_start_date_patch_does_not_invent_fields(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / 'schedule.json', customization_file=tmp_path / 'user.json')
+    assert service._load_customizations()['semester']['totalWeeks'] == 16
+    saved = service.apply_agent_change({'operation':'semester','semester':{'startDate':'2026-09-20'}})['customizations']['semester']
+    assert saved == {'name':'','startDate':'2026-09-20','totalWeeks':16}
+    service.apply_agent_change({'operation':'semester','semester':{'totalWeeks':18}})
+    assert service.apply_agent_change({'operation':'semester','semester':{'startDate':'2026-09-21'}})['customizations']['semester']['totalWeeks'] == 18

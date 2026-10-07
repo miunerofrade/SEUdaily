@@ -206,7 +206,7 @@ TUI 输入 `/mode` 打开权限选择，用左右方向键选择并保存，与 
 
 | 模式 | 工具访问 |
 | --- | --- |
-| 普通 | 需要写入、命令和浏览器交互时逐项审批 |
+| 普通 | 需要写入、命令和浏览器交互时逐项审批；微信支持文本确认／取消 |
 | 完全访问 | 业务工具和浏览器交互免审批 |
 | 完全访问-extra | 在完全访问基础上增加工作区文件与终端能力 |
 
@@ -308,3 +308,5 @@ SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/
 执行 `seudaily wechat`，在 TUI 扫码接入；或运行 `seudaily web`，点击“微信”在浮层扫码和输入手机验证码。命令自动复用或启动常驻后端，退出界面后继续收发。普通文字进入当前 Agent 会话；发送 `/help` 查看 `/new`、`/sessions`、`/use`、`/context`、`/history`。会话管理不需要模型配置，文字聊天使用已有模型设置；暂未接入媒体或 RAG。接入资格及真实账号测试需本人完成。操作、存储与恢复说明见 [docs/wechat.md](docs/wechat.md)。
 
 服务管理：`seudaily ps` 列出运行中的 SEUdaily 后端；`seudaily stop --port 4111` 或 `seudaily stop <PID>` 只停止选定的一个服务。旧版后端也可以查看和停止，不要求版本或数据目录与当前 CLI 一致。源码用户可用 `seudaily wechat --data-dir "$PWD"` 保留仓库中的原有数据。所有子命令均通过 npm 的 `seudaily` 入口运行。
+
+微信与终端均支持 `/permission` 查看模式，`/permission normal|full|extra` 切换并持久保存共享权限。微信待审批操作可回复“确认 编号”或“取消 编号”，也支持 `/approve 编号`、`/deny 编号`。学期默认总周数为 16，只设置起始日期时不修改其他字段。

@@ -167,6 +167,9 @@ export class AgentRuntime {
                             throw new Error('请求的工具不在当前工具目录中');
                         const parsed = await tool.inputSchema.parseAsync(JSON.parse(call.function.arguments));
                         payload.args = redactValue(parsed);
+                        if (decision?.callId === call.id && !decision.approved)
+                            throw new Error('用户拒绝了工具执行');
+                        requestContext.set('seudailyApprovedCapabilityTicket', decision?.approved && decision.callId === call.id && tool.id === 'invoke-capability' ? parsed.ticket : undefined);
                         const approvalRequired = typeof tool.requireApproval === 'function' ? await tool.requireApproval(parsed, options) : tool.requireApproval;
                         if (approvalRequired && decision?.callId !== call.id) {
                             run.status = 'waiting';
@@ -176,8 +179,6 @@ export class AgentRuntime {
                             yield event('tool-approval-request', { ...payload, approvalId: run.approval.id });
                             return;
                         }
-                        if (decision?.callId === call.id && !decision.approved)
-                            throw new Error('用户拒绝了工具执行');
                         run.executing = call.id;
                         await this.persist(run); // Durable execution boundary: a restart cannot replay it.
                         yield event('tool-call', payload);
@@ -204,6 +205,7 @@ export class AgentRuntime {
                         modelOutput = JSON.stringify(output);
                     }
                     decision = undefined;
+                    requestContext.delete('seudailyApprovedCapabilityTicket');
                     run.executing = undefined;
                     const existing = run.parts.find(part => part.type === 'tool-invocation' && part.toolInvocation?.toolCallId === call.id);
                     const invocation = { ...payload, state: 'result', result: output };

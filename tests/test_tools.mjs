@@ -183,6 +183,16 @@ export async function runPythonTool(action, payload) {
     await assert.rejects(invokeCapabilityTool.execute({ ticket: capability.ticket, arguments: {} }, {
       requestContext: { get: () => "another-run" },
     }), /票据/);
+    const savedTickets = [];
+    const durableOptions = {requestContext:{get:key=>key === "seudailyRunToken" ? "durable-run" : key === "seudailyCapabilityTickets" ? savedTickets : undefined}};
+    const durable = (await searchCapabilitiesTool.execute({query:"修改课表",namespace:"local-actions"},durableOptions)).results[0];
+    const actualNow = Date.now;
+    try {
+      Date.now = () => actualNow() + 11 * 60_000;
+      await assert.rejects(invokeCapabilityTool.execute({ticket:durable.ticket,arguments:apply},durableOptions), /票据/);
+      const approvedOptions = {requestContext:{get:key=>key === "seudailyApprovedCapabilityTicket" ? durable.ticket : durableOptions.requestContext.get(key)}};
+      assert.equal((await invokeCapabilityTool.execute({ticket:durable.ticket,arguments:apply},approvedOptions)).status,"completed");
+    } finally {Date.now = actualNow;}
   } finally {
     if (previousRoot === undefined) delete process.env.SEUDAILY_PROJECT_ROOT;
     else process.env.SEUDAILY_PROJECT_ROOT = previousRoot;

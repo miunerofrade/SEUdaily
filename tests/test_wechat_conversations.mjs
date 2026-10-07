@@ -26,14 +26,16 @@ async function fixture(t, options={}) {
     yield {type:'text',text};yield {type:'complete',message:{role:'assistant',content:text},finishReason:'stop'};
   },async summarize(){throw new Error('unexpected summary call');}};
   const agent=new AgentRuntime({store,provider,tools:async()=>options.tools??{},instructions:async()=>'fixture'});
-  const conversations=new WeChatConversations(store,agent);
+  let permission = 'normal';
+  const permissionChanges = [];
+  const conversations=new WeChatConversations(store,agent,{get:()=>permission,set:async mode=>{permission=mode;permissionChanges.push(mode);}});
   const protocol={updates:async(a,signal)=>{
     while(!batches.length) await delay(5,undefined,{signal});
     return {msgs:batches.shift(),get_updates_buf:String(counter)};
   },send:async(a,payload)=>{if(options.failSend?.()) throw new Error('offline');replies.push(structuredClone(payload));return {};}};
   let runtime=new WeChatRuntime(store.client,protocol,5,conversations);await runtime.start();
   t.after(async()=>{await runtime.close();await agent.shutdown();await store.close();});
-  return {store,agent,conversations,requests,replies,
+  return {store,agent,conversations,requests,replies,permissionChanges,
     status:()=>runtime.status(),
     async stop(){await runtime.close();},
     async restart(){await runtime.close();runtime=new WeChatRuntime(store.client,protocol,5,conversations);await runtime.start();},
@@ -152,9 +154,9 @@ test('session creation rolls back on a routing failure and cross-account session
 test('tool approval is not automatically granted through WeChat',async t=>{
   let executed=0;
   const f=await fixture(t,{tools:{probe:{id:'probe',description:'write',requireApproval:true,inputSchema:z.object({}),execute:async()=>{executed++;return {};}}},stream:async function*(){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'call',type:'function',function:{name:'probe',arguments:'{}'}}]},finishReason:'tool_calls'};}});
-  assert.match(await f.reply(f.send('试一下需要确认的操作')[0]),/微信不会自动批准/);
+  assert.match(await f.reply(f.send('试一下需要确认的操作')[0]),/确认 [A-F0-9]{8}/);
   assert.equal(executed,0);
-  assert.match(await f.reply(f.send('继续')[0]),/待确认的操作/);
+  assert.match(await f.reply(f.send('继续')[0]),/待确认：/);
   assert.equal(f.requests.length,1);
 });
 
@@ -235,4 +237,63 @@ test('delete rollback restores the thread, history, cursor and confirmation when
   assert.equal((await f.store.client.execute("SELECT state FROM wechat_messages WHERE id='delete-failure'")).rows[0].state,'received');
   await f.store.client.execute('DROP TRIGGER rollback_delete');await f.conversations.route(row,account);
   assert.equal(await f.store.getThreadById({threadId:first.threadId}),undefined);
+});
+
+test('permission lists and switches all modes without creating a conversation or calling the model',async t=>{
+  const f=await fixture(t);
+  assert.match(await f.reply(f.send('/permission')[0]),/当前权限：normal[\s\S]*normal[\s\S]*full[\s\S]*extra/);
+  for (const mode of ['full','extra','normal']) assert.match(await f.reply(f.send('/permission '+mode)[0]),new RegExp('已切换为 '+mode));
+  assert.deepEqual(f.permissionChanges,['full','extra','normal']);
+  assert.match(await f.reply(f.send('/permission invalid')[0]),/用法/);
+  assert.deepEqual(f.permissionChanges,['full','extra','normal']);
+  assert.equal((await f.status()).currentSession,undefined);
+  assert.equal(f.requests.length,0);
+});
+
+async function approvalFixture(t) {
+  let executed=0;
+  const f=await fixture(t,{tools:{probe:{id:'probe',description:'write',requireApproval:true,inputSchema:z.object({}),execute:async()=>{executed++;return {status:'completed'};}}},stream:async function*(messages){
+    if (messages.at(-1).role === 'tool') {
+      const result=JSON.parse(messages.at(-1).content),text=result.status === 'failed' ? '操作已拒绝' : '操作完成';
+      yield {type:'text',text};yield {type:'complete',message:{role:'assistant',content:text}};
+    } else yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'call',type:'function',function:{name:'probe',arguments:'{}'}}]}};
+  }});
+  return {...f,executed:()=>executed};
+}
+
+test('text approval survives reconnect, is bound to the current session and never executes twice',async t=>{
+  const f=await approvalFixture(t);
+  const prompt=await f.reply(f.send('做个操作')[0]);
+  const code=/确认 ([A-F0-9]{8})/.exec(prompt)[1];
+  assert.equal(f.executed(),0);
+  await f.restart();
+  assert.match(await f.reply(f.send('/approve')[0]),new RegExp(code));
+  assert.match(await f.reply(f.send('确认 00000000')[0]),/编号已失效/);
+  await f.reply(f.send('/new 其他会话')[0]);
+  assert.match(await f.reply(f.send('确认 '+code)[0]),/没有待审批/);
+  assert.equal(f.executed(),0);
+  await f.reply(f.send('/use 1')[0]);
+  const id=f.send('确认 '+code)[0];assert.equal(await f.reply(id),'操作完成');
+  assert.equal(f.executed(),1);
+  const row=(await f.store.client.execute({sql:'SELECT * FROM wechat_messages WHERE id=?',args:[id]})).rows[0];
+  await f.conversations.route(row,account);
+  assert.match(await f.reply(f.send('/approve '+code)[0]),/没有待审批/);
+  assert.equal(f.executed(),1);
+  // Recovery after answer persistence but before channel reply persistence never replays the write.
+  await f.store.client.execute({sql:"UPDATE wechat_messages SET state='queued' WHERE id=?",args:[id]});
+  assert.match(await f.conversations.answer(row,new AbortController().signal),/未重复执行/);
+  assert.equal(f.executed(),1);
+});
+
+test('text refusal resumes the conversation without performing the operation',async t=>{
+  const f=await approvalFixture(t);
+  const prompt=await f.reply(f.send('需要审批')[0]);const code=/确认 ([A-F0-9]{8})/.exec(prompt)[1];
+  assert.equal(await f.reply(f.send('/deny '+code)[0]),'操作已拒绝');
+  assert.equal(f.executed(),0);
+  assert.equal(await f.store.waitingRun((await f.status()).currentSession.threadId),undefined);
+  const again=await f.reply(f.send('再问一次')[0]);const another=/确认 ([A-F0-9]{8})/.exec(again)[1];
+  assert.notEqual(another,code);
+  assert.match(await f.reply(f.send('/approve '+code)[0]),/编号已失效/);
+  assert.equal(await f.reply(f.send('取消 '+another)[0]),'操作已拒绝');
+  assert.equal(f.executed(),0);
 });

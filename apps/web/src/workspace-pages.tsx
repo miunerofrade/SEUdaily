@@ -63,7 +63,7 @@ function academicWeek(startDate: string, totalWeeks: number, date = new Date()) 
 
 const emptyCustomizations: ScheduleCustomizations = {
   version: 1,
-  semester: { name: "", startDate: "", totalWeeks: 20 },
+  semester: { name: "", startDate: "", totalWeeks: 16 },
   overrides: {},
   customCourses: [],
   dateOverrides: [],
