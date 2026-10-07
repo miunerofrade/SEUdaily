@@ -814,7 +814,8 @@ export function FocusPage({
 
 export function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>([]);
-  const [category, setCategory] = useState("documents");
+  const [category, setCategory] = useState("");
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [source, setSource] = useState("");
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
@@ -861,8 +862,8 @@ export function LibraryPage() {
   }
 
   return <div className="workspace-page library-page">
-    <KnowledgePanel selectedPath={selectedFilePath || undefined} onFilesChanged={load} />
-    <PageHeader title="资料库" description="" action={<button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button>} />
+    <PageHeader title="资料库" description="" action={<div className="schedule-actions"><button className="page-action" aria-expanded={knowledgeOpen} onClick={() => setKnowledgeOpen(current => !current)}>{knowledgeOpen ? "收起知识库" : "知识库"}</button><button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button></div>} />
+    {knowledgeOpen && <KnowledgePanel selectedPath={selectedFilePath || undefined} onFilesChanged={load} />}
     <PageState loading={loading} error={error}>
       <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
         <div className="browser-column">
