@@ -13,7 +13,9 @@ type Source = {id:string; name:string};
 type Entry = {name:string; sources:string[]};
 function sourceIdentity(item: any): Source {
   if(item.source && typeof item.source.id==='string' && /^[a-z0-9][a-z0-9.-]*$/.test(item.source.id)
-      && typeof item.source.name==='string' && item.source.name.trim())return item.source;
+      && typeof item.source.name==='string' && item.source.name.trim())return {
+        id:item.source.id,name:Object.values(noticeSources).find(source=>source.host===item.source.id)?.name || item.source.name,
+      };
   for(const value of [item.sourceUrl,item.url]) {
     try {
       const url=new URL(value);
@@ -100,7 +102,7 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
           // Publish the new pointer before removing any original; retry is safe after interruption.
           await atomicMetadata(record,{...item,path,source});
         }
-      } else if(!item.source)await atomicMetadata(record,{...item,source});
+      } else if(item.source?.id!==source.id || item.source?.name!==source.name)await atomicMetadata(record,{...item,source});
       if(path===oldPath && dirname(path)===files)remaining.add(path);
       const previous=entries.get(path);
       entries.set(path,{name:previous?.name || item.name,sources:[...new Set([...(previous?.sources || []),source.name])].sort()});

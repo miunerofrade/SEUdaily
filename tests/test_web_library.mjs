@@ -66,3 +66,14 @@ test('orphan originals move to unclassified without requiring a database',async 
  assert.equal(await readFile(join(files,'unclassified/orphan.txt'),'utf8'),'原文件');
  await assert.rejects(readFile(join(files,'orphan.txt')),{code:'ENOENT'});
 });
+
+test('configured Chinese source name replaces a stored raw hostname without moving again',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'seudaily-source-name-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const directory=join(root,'.seudaily/web-files/files/news.seu.edu.cn'),metadata=join(root,'.seudaily/web-files/metadata');
+ await mkdir(directory,{recursive:true});await mkdir(metadata,{recursive:true});
+ const path=join(directory,'news.md'),record=join(metadata,'news.json');await writeFile(path,'新闻网正文');
+ await writeFile(record,JSON.stringify({path,name:'学校新闻.md',url:'https://news.seu.edu.cn/notice',source:{id:'news.seu.edu.cn',name:'news.seu.edu.cn'}}));
+ const entries=await webLibraryEntries(root);
+ assert.deepEqual(entries.get(path).sources,['东大新闻网']);
+ const saved=JSON.parse(await readFile(record,'utf8'));assert.equal(saved.path,path);assert.equal(saved.source.name,'东大新闻网');
+});

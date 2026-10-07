@@ -74,5 +74,9 @@
         "/xzzq_52683/list.htm"
       ]
     }
+  },
+  "news": {
+    "name": "东大新闻网",
+    "host": "news.seu.edu.cn"
   }
 }

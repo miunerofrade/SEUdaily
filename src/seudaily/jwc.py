@@ -106,13 +106,17 @@ _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link"
 def _load_notice_sources(path: Path) -> dict:
     """Only known sites and public WebPlus list paths; no extraction DSL."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or set(data) != {"jwc", "cse"}:
-        raise ValueError("通知栏目配置仅支持 jwc/cse")
+    if not isinstance(data, dict) or not {"jwc", "cse"}.issubset(data):
+        raise ValueError("通知栏目配置需要 jwc/cse")
     result = {}
     for site, source in data.items():
         if (not isinstance(source,dict) or not isinstance(source.get('name'),str) or not source['name'].strip()
                 or source.get('host') != site+'.seu.edu.cn'):
             raise ValueError(f"无效通知机构配置：{site}")
+        if site not in {'jwc','cse'}:
+            if 'categories' in source:
+                raise ValueError("额外来源仅支持机构名称，不支持抓取栏目")
+            continue
         categories=source.get('categories')
         if not isinstance(categories, dict) or not categories:
             raise ValueError("通知栏目配置不能为空")
