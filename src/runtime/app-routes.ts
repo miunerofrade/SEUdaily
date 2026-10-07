@@ -594,6 +594,9 @@ export const appRoutes = [
     requiresAuth: false,
     handler: async (c: any) => {
       const root = resolve(projectRoot, "exports");
+      const category=c.req.query('category') || '',query=(c.req.query('query') || '').trim().toLocaleLowerCase();
+      const labels=[['documents','上传文件'],['references','参考资料'],['web','网页与通知'],['knowledge','课程笔记'],['subtitle','课程字幕'],['media','课程媒体'],['images','临时图片']];
+      if(!category && !query && c.req.query('all')!=='1')return c.json({root,level:'categories',directories:labels.map(([id,label])=>({id,label})),files:[],count:0});
       const files = await walkFiles(root);
       const imageRoot = resolve(projectRoot, ".seudaily", "uploads", "images");
       const images = await walkFiles(imageRoot);
@@ -613,10 +616,35 @@ export const appRoutes = [
         return document ? [{...file,name:document.name,category:builtinIds.has(document.id)?'references':'documents',course:builtinIds.has(document.id)?'参考资料':'上传文件',teacher:'本地文件'}] : [];
       }));
       const webEntries=await webLibraryEntries(projectRoot);
+      await knowledge.relocateSources([...webEntries].flatMap(([path,item])=>item.legacyPaths.map(oldPath=>({oldPath,path}))));
       const webFiles=await walkFiles(resolve(projectRoot,'.seudaily','web-files','files'));
-      files.push(...webFiles.map(file=>({...file,name:webEntries.get(file.path)?.name || file.name,sources:webEntries.get(file.path)?.sources || ['未分类'],sections:webEntries.get(file.path)?.sections || [],category:'web',course:'网页与通知',teacher:'本地缓存'})));
+      files.push(...webFiles.map(file=>({...file,name:webEntries.get(file.path)?.name || file.name,sources:webEntries.get(file.path)?.sources || ['未分类'],sections:webEntries.get(file.path)?.sections || [],notice:webEntries.get(file.path)?.notice,category:'web',course:'网页与通知',teacher:'本地缓存'})));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      return c.json({ root, files, count: files.length });
+      if(c.req.query('all')==='1')return c.json({root,files,count:files.length});
+      const source=c.req.query('source') || '',section=c.req.query('section') || '',notice=c.req.query('notice') || '',course=c.req.query('course') || '',teacher=c.req.query('teacher') || '';
+      let chosen=query ? files.filter(file=>file.name.toLocaleLowerCase().includes(query)) : files.filter(file=>file.category===category);
+      let level='files';let directories:{id:string;label:string}[]=[];
+      const groups=(values:string[])=>[...new Set(values)].sort((a,b)=>a.localeCompare(b,'zh-CN')).map(value=>({id:value,label:value}));
+      if(!query && category==='web') {
+        if(!source){level='sources';directories=groups(chosen.flatMap((file:any)=>file.sources || ['未分类']));}
+        else {
+          chosen=chosen.filter((file:any)=>file.sources?.includes(source));
+          if(!section){level='sections';directories=groups(chosen.flatMap((file:any)=>file.sections?.filter((item:any)=>item.source===source).map((item:any)=>item.label) || ['其他资料']));}
+          else {
+            chosen=chosen.filter((file:any)=>file.sections?.some((item:any)=>item.source===source && item.label===section));
+            if(!notice){level='notices';directories=[...new Map(chosen.map((file:any)=>[file.notice?.id || file.path,{id:file.notice?.id || file.path,label:file.notice?.title || file.name}])).values()] as {id:string;label:string}[];}
+            else chosen=chosen.filter((file:any)=>(file.notice?.id || file.path)===notice);
+          }
+        }
+      } else if(!query && !['documents','references','images'].includes(category)) {
+        if(!course){level='courses';directories=groups(chosen.map(file=>file.course));}
+        else {chosen=chosen.filter(file=>file.course===course);if(!teacher){level='teachers';directories=groups(chosen.map(file=>file.teacher || '未分类'));}else chosen=chosen.filter(file=>(file.teacher || '未分类')===teacher);}
+      }
+      if(level!=='files')return c.json({root,level,directories,files:[],count:directories.length});
+      if(c.req.query('pdf')==='1')chosen=chosen.filter(file=>file.type==='PDF');
+      const limit=Math.max(1,Math.min(100,Number(c.req.query('limit')) || 50)),offset=Math.max(0,Number.parseInt(c.req.query('cursor') || '0',10) || 0);
+      const page=chosen.slice(offset,offset+limit),next=offset+page.length;
+      return c.json({root,level:query?'search':'files',directories:[],files:page,count:chosen.length,nextCursor:next<chosen.length?String(next):null});
     },
   }),
   registerApiRoute("/app/library/preview", {

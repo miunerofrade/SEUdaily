@@ -943,7 +943,7 @@ class JwcService:
         })
         from .saved_web_files import body
         links = '\n\n## 附件\n\n' + '\n'.join(f"- [{item['name']}]({item['url']})" for item in attachments if not item['url'].endswith('.gif')) if attachments else ''
-        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or '') + links,source_name=self.config.name)
+        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or '') + links,source_name=self.config.name,notice=article)
         article["lastCheckedAt"] = _iso_now()
         return changed
 

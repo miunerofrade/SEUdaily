@@ -130,3 +130,13 @@ test('indexing uses the full split result rather than the twelve-chunk tool prev
  assert.equal((await service.list())[0].chunkCount,25);assert.equal(f.rows.size,25);
  assert.equal(f.calls.flat().length,25);assert.equal([...f.rows.values()].at(-1).text,'参考资料第24段');
 });
+
+
+test('source relocation retains an indexed document and all destinations without re-embedding',async t=>{
+ const f=await fixture(t),oldPath=join(f.root,'old.pdf');
+ const document=await f.service.enqueue('通知.pdf',Buffer.from('%PDF-fixture'),undefined,oldPath);await f.service.tick();const calls=f.calls.length;
+ const paths=[join(f.root,'notice-a','file.pdf'),join(f.root,'notice-b','file.pdf')];
+ await f.service.relocateSources(paths.map(path=>({oldPath,path})));
+ assert.deepEqual((await f.service.sources(document.id)).sort(),paths.sort());
+ await f.service.relocateSources(paths.map(path=>({oldPath,path})));assert.equal(f.calls.length,calls);assert.equal((await f.service.list())[0].state,'indexed');
+});

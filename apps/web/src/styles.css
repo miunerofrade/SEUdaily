@@ -404,7 +404,7 @@ button { color: inherit; }
 .column-browser.columns-2 { --column-count:2; }
 .column-browser.columns-3 { --column-count:3; }
 .column-browser.columns-4 { --column-count:4; }
-.browser-column { min-width:240px; flex:1 0 max(240px, calc(100% / var(--column-count, 1))); overflow:hidden; border-right:1px solid #dedede; background:#fff; }
+.browser-column { position:relative; min-width:160px; flex:1 0 max(240px, calc(100% / var(--column-count, 1))); overflow:hidden; border-right:1px solid #dedede; background:#fff; }
 .browser-column-list { height:100%; overflow-y:auto; padding:5px; }
 .browser-column-list button { width:100%; min-height:44px; display:grid; grid-template-columns:24px minmax(0,1fr) 18px; align-items:center; gap:9px; padding:7px 10px; border:0; border-radius:8px; background:transparent; color:#555; text-align:left; cursor:pointer; }
 .browser-column-list button:hover { background:#f2f2f2; }
@@ -552,3 +552,9 @@ button { color: inherit; }
 
 .library-format-icon.format-pdf { color:#b65b52; }
 .library-format-icon.format-xlsx, .library-format-icon.format-xls { color:#528365; }
+
+.column-browser.columns-5 { --column-count:5; }
+.browser-column-resize { position:absolute; top:0; bottom:0; right:-3px; width:7px; z-index:2; cursor:col-resize; }
+.browser-column-resize:hover,.browser-column-resize:focus-visible { background:rgba(80,120,160,.2); outline:none; }
+
+.column-browser.columns-5 .browser-column { flex-basis:max(160px,calc(100% / 5)); }

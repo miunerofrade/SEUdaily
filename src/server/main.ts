@@ -1,3 +1,5 @@
+import {webLibraryEntries} from '../runtime/web-library.js';
+import {projectRoot} from '../runtime/runtime-paths.js';
 import { knowledge, loadBuiltinKnowledge } from '../runtime/knowledge/index.js';
 import { startWeChatRuntime, wechatRuntime } from './wechat.js';
 import { cancelComponentPreparation } from '../distribution/components.js';
@@ -27,6 +29,8 @@ const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: Number(pro
     console.log(`SEUdaily API ready at http://127.0.0.1:${process.env.SEUDAILY_PORT ?? 4111}`);
     void agentStore.ready.then(async () => {
       try {await loadBuiltinKnowledge();} catch(error) {console.error('内置参考资料登记失败，下次启动可重试',error);}
+      const webEntries=await webLibraryEntries(projectRoot);
+      await knowledge.relocateSources([...webEntries].flatMap(([path,item])=>item.legacyPaths.map(oldPath=>({oldPath,path}))));
       knowledge.start(); noticeAttachments.start(); await startWeChatRuntime(); if (process.env.SEUDAILY_PERSISTENT === '1' || !process.env.SEUDAILY_INSTALL_ROOT || hasEnabledFocus()) startFocusRuntime();
     }).catch(error => { console.error('后端初始化失败，数据库已保留', error); void shutdown(1); });
 });

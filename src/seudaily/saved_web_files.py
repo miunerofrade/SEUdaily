@@ -39,15 +39,28 @@ def source_identity(url: str, name: str='') -> dict:
     key=host if re.fullmatch(r'[a-z0-9][a-z0-9.-]*',host) else hashlib.sha256(host.encode()).hexdigest() if host else 'unclassified'
     return {'id':key,'name':name or source_names().get(host,host) or '未分类'}
 
-def save(url: str,name: str,content: bytes,extension: str,*,markdown: str | None=None,source_url: str='',source_name: str='') -> dict:
+def save(url: str,name: str,content: bytes,extension: str,*,markdown: str | None=None,source_url: str='',source_name: str='',notice: dict | None=None) -> dict:
     digest=hashlib.sha256(content).hexdigest()
     source=source_identity(source_url or url,source_name)
-    path=root()/'files'/source['id']/(digest+extension)
+    if notice is None:
+        site={'jwc.seu.edu.cn':'jwc','cse.seu.edu.cn':'cse'}.get(source['id'])
+        match=re.search(r'a(\d+)/page\.',source_url or url)
+        if site and match:
+            try: notice=json.loads((root().parent/site/'articles'/f"seu-{site}-{match.group(1)}.json").read_text(encoding='utf-8'))
+            except (OSError,ValueError): pass
+    notice=notice or {}
+    notice_url=source_url or url
+    notice_id=notice.get('id','')
+    if not re.fullmatch(r'[a-zA-Z0-9-]+',notice_id): notice_id=hashlib.sha256(notice_url.encode()).hexdigest()
+    section_id=notice.get('category','other')
+    if not re.fullmatch(r'[a-zA-Z0-9_-]+',section_id): section_id='other'
+    identity={'id':notice_id,'title':notice.get('title') or name.rsplit('.',1)[0],'url':notice_url}
+    path=root()/'files'/source['id']/section_id/notice_id/(digest+extension)
     if not path.exists():atomic(path,content)
-    data={'url':url,'name':name,'path':str(path),'sha256':digest,'sizeBytes':len(content),'sourceUrl':source_url or url,'source':source}
+    data={'url':url,'name':name,'path':str(path),'sha256':digest,'sizeBytes':len(content),'sourceUrl':source_url or url,'source':source,'notice':identity,'sectionId':section_id}
     if markdown is not None:data.update(markdown=markdown,charCount=len(markdown),parsed=True)
     atomic(root()/'metadata'/(hashlib.sha256(url.encode()).hexdigest()+'.json'),json.dumps(data,ensure_ascii=False).encode())
     return data
 
-def body(url: str,title: str,text: str,*,source_name: str='') -> None:
-    if text.strip():save(url,title+'.md',('# '+title+'\n\n来源：'+url+'\n\n'+text).encode(),'.md',source_name=source_name)
+def body(url: str,title: str,text: str,*,source_name: str='',notice: dict | None=None) -> None:
+    if text.strip():save(url,title+'.md',('# '+title+'\n\n来源：'+url+'\n\n'+text).encode(),'.md',source_name=source_name,notice=notice)

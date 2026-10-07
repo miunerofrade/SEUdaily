@@ -99,6 +99,14 @@ export class KnowledgeService {
     const result=await this.db.execute(id ? {sql:'SELECT path FROM knowledge_sources WHERE documentId=?',args:[id]} : 'SELECT path FROM knowledge_sources');
     return result.rows.map(row=>String(row.path));
   }
+  async relocateSources(moves:{oldPath:string;path:string}[]) {
+    await this.ready;
+    return this.serialize(async()=>{
+      for(const move of moves)await this.db.execute({sql:'INSERT OR IGNORE INTO knowledge_sources(path,documentId) SELECT ?,documentId FROM knowledge_sources WHERE path=?',args:[move.path,move.oldPath]});
+      const destinations=new Set(moves.map(move=>move.path));
+      for(const oldPath of new Set(moves.map(move=>move.oldPath)))if(!destinations.has(oldPath))await this.db.execute({sql:'DELETE FROM knowledge_sources WHERE path=?',args:[oldPath]});
+    });
+  }
   async enqueueBuiltin(id:string,name:string,bytes:Buffer) {
     await this.ready;
     const previous=(await this.db.execute({sql:'SELECT documentId FROM knowledge_builtin_sources WHERE id=?',args:[id]})).rows[0];

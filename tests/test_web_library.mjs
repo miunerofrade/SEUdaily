@@ -41,7 +41,8 @@ test('legacy shared originals migrate by source with intact metadata and repeat 
  const entries=await webLibraryEntries(root);assert.equal(entries.size,2);
  for(const [index,host,label] of [[0,'jwc.seu.edu.cn','教务处'],[1,'cse.seu.edu.cn','计软智学院']]) {
   const record=JSON.parse(await readFile(records[index],'utf8'));
-  assert.equal(record.path,join(root,'.seudaily/web-files/files',host,digest+'.md'));
+  const noticeUrl=index===0?'https://jwc.seu.edu.cn/notice':'https://cse.seu.edu.cn/b';
+  assert.equal(record.path,join(root,'.seudaily/web-files/files',host,'other',createHash('sha256').update(noticeUrl).digest('hex'),digest+'.md'));
   assert.deepEqual(record.source,{id:host,name:label});assert.equal(record.markdown,'已解析正文');
   assert.equal(await readFile(record.path,'utf8'),'原文件正文');assert.deepEqual(entries.get(record.path).sources,[label]);
  }
@@ -52,7 +53,7 @@ test('legacy shared originals migrate by source with intact metadata and repeat 
 test('migration preserves conflicting destination and original for recovery',async t=>{
  const root=await mkdtemp(join(tmpdir(),'seudaily-source-conflict-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const {path,records,digest}=await legacyFile(root,[['https://jwc.seu.edu.cn/notice']]);
- const directory=join(root,'.seudaily/web-files/files/jwc.seu.edu.cn');await mkdir(directory);
+ const directory=join(root,'.seudaily/web-files/files/jwc.seu.edu.cn/other',createHash('sha256').update('https://jwc.seu.edu.cn/notice').digest('hex'));await mkdir(directory,{recursive:true});
  const target=join(directory,digest+'.md');await writeFile(target,'不同内容');
  await webLibraryEntries(root);
  assert.equal(await readFile(path,'utf8'),'原文件正文');assert.equal(await readFile(target,'utf8'),'不同内容');
@@ -67,15 +68,16 @@ test('orphan originals move to unclassified without requiring a database',async 
  await assert.rejects(readFile(join(files,'orphan.txt')),{code:'ENOENT'});
 });
 
-test('configured Chinese source name replaces a stored raw hostname without moving again',async t=>{
+test('source name and notice directory migrate together and remain stable on repeat',async t=>{
  const root=await mkdtemp(join(tmpdir(),'seudaily-source-name-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const directory=join(root,'.seudaily/web-files/files/news.seu.edu.cn'),metadata=join(root,'.seudaily/web-files/metadata');
  await mkdir(directory,{recursive:true});await mkdir(metadata,{recursive:true});
  const path=join(directory,'news.md'),record=join(metadata,'news.json');await writeFile(path,'新闻网正文');
  await writeFile(record,JSON.stringify({path,name:'学校新闻.md',url:'https://news.seu.edu.cn/notice',source:{id:'news.seu.edu.cn',name:'news.seu.edu.cn'}}));
  const entries=await webLibraryEntries(root);
- assert.deepEqual(entries.get(path).sources,['东大新闻网']);
- const saved=JSON.parse(await readFile(record,'utf8'));assert.equal(saved.path,path);assert.equal(saved.source.name,'东大新闻网');
+ const saved=JSON.parse(await readFile(record,'utf8'));
+ assert.deepEqual(entries.get(saved.path).sources,['东大新闻网']);assert.notEqual(saved.path,path);assert.equal(saved.source.name,'东大新闻网');
+ assert.equal(await readFile(saved.path,'utf8'),'新闻网正文');assert.deepEqual(await webLibraryEntries(root),entries);
 });
 
 

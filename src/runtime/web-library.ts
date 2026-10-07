@@ -10,7 +10,8 @@ function within(root: string, path: string) {
 }
 
 type Source = {id:string; name:string};
-type Entry = {name:string; sources:string[]; sections:{source:string;label:string}[]};
+type Notice = {id:string;title:string;url:string};
+type Entry = {legacyPaths:string[];notice:Notice;name:string; sources:string[]; sections:{source:string;label:string}[]};
 function sourceIdentity(item: any): Source {
   if(item.source && typeof item.source.id==='string' && /^[a-z0-9][a-z0-9.-]*$/.test(item.source.id)
       && typeof item.source.name==='string' && item.source.name.trim())return {
@@ -45,13 +46,14 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
     await mkdir(directory,{recursive:true,mode:0o700});
     if(!within(canonical,await realpath(directory)))throw new Error('网页资料目录越界');
   }
-  async function sourceDirectory(source:Source) {
-    const directory=resolve(files,source.id);
+  async function sourceDirectory(source:Source,sectionId?:string,noticeId?:string) {
+    const directory=resolve(files,source.id,...(sectionId && noticeId ? [sectionId,noticeId] : []));
     await mkdir(directory,{recursive:true,mode:0o700});
     if(!within(await realpath(files),await realpath(directory)))throw new Error('网页来源目录越界');
     return directory;
   }
   const obsoleteBodies=new Map<string,string>();
+  const articleNotices=new Map<string,{notice:Notice;sectionId:string}>();
   const articleSections=new Map<string,{source:string;label:string}>();
   for(const site of ['jwc','cse']) {
     const directory=resolve(project,'.seudaily',site,'articles');
@@ -63,6 +65,10 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
         const article=JSON.parse(await readFile(resolve(directory,entry.name),'utf8'));
         if(typeof article.url!=='string')continue;
         const section={source:sourceIdentity({url:article.url}).name,label:String(article.categoryLabel || (noticeSources as any)[site]?.categories?.[article.category]?.[0] || '其他资料')};
+        const notice={id:/^[a-z0-9-]+$/i.test(article.id || '') ? article.id : createHash('sha256').update(article.url).digest('hex'),title:String(article.title || '网页资料'),url:article.url};
+        const sectionId=/^[a-z0-9_-]+$/i.test(article.category || '') ? article.category : 'other';
+        articleNotices.set(article.url,{notice,sectionId});
+        for(const attachment of article.attachments || [])if(typeof attachment.url==='string')articleNotices.set(attachment.url,{notice,sectionId});
         articleSections.set(article.url,section);
         for(const attachment of article.attachments || [])if(typeof attachment.url==='string')articleSections.set(attachment.url,section);
         if(!String(article.content || '').trim() && !article.attachments?.length)continue;
@@ -76,9 +82,9 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
         if(old && !(await lstat(old.path).catch(()=>null)))continue;
         if(old?.sha256===digest)continue;
         const source=sourceIdentity({url:article.url});
-        const path=resolve(await sourceDirectory(source),digest+'.md');
+        const path=resolve(await sourceDirectory(source,sectionId,notice.id),digest+'.md');
         try {await writeFile(path,bytes,{flag:'wx',mode:0o600});} catch(error:any){if(error.code!=='EEXIST')throw error;}
-        await atomicMetadata(record,{url:article.url,name:title+'.md',path,sha256:digest,sizeBytes:bytes.length,sourceUrl:article.url,source});
+        await atomicMetadata(record,{url:article.url,name:title+'.md',path,sha256:digest,sizeBytes:bytes.length,sourceUrl:article.url,source,notice,sectionId});
         if(old && old.path!==path && typeof old.path==='string' && within(files,resolve(old.path)))obsoleteBodies.set(old.path,old.sha256);
       } catch { /* A damaged older cache must not hide the other library files. */ }
     }
@@ -97,32 +103,36 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       }
       oldPath=resolve(item.path);
       const source=sourceIdentity(item);
-      let path=oldPath;
-      if(dirname(oldPath)===files) {
-        const details=await lstat(oldPath).catch(()=>null);
-        if(details?.isFile()) {
-          const bytes=await readFile(oldPath);
-          const digest=createHash('sha256').update(bytes).digest('hex');
-          originals.set(oldPath,digest);
-          if(typeof item.sha256==='string' && digest!==item.sha256)throw new Error('网页原文件校验失败');
-          path=resolve(await sourceDirectory(source),basename(oldPath));
-          try {await copyFile(oldPath,path,constants.COPYFILE_EXCL);} catch(error:any){if(error.code!=='EEXIST')throw error;}
-          if(!(await lstat(path)).isFile())throw new Error('网页迁移目标不是普通文件');
-          if(createHash('sha256').update(await readFile(path)).digest('hex')!==digest)throw new Error('网页迁移目标文件冲突');
-          // Publish the new pointer before removing any original; retry is safe after interruption.
-          await atomicMetadata(record,{...item,path,source});
-        }
-      } else if(item.source?.id!==source.id || item.source?.name!==source.name)await atomicMetadata(record,{...item,source});
-      if(path===oldPath && dirname(path)===files)remaining.add(path);
-      const previous=entries.get(path);
       const section=articleSections.get(item.url) || articleSections.get(item.sourceUrl) || item.noticeSection || {source:source.name,label:'其他资料'};
-      if(JSON.stringify(item.noticeSection)!==JSON.stringify(section))await atomicMetadata(record,{...item,path,source,noticeSection:section});
-      entries.set(path,{name:previous?.name || item.name,sources:[...new Set([...(previous?.sources || []),source.name])].sort(),sections:[...(previous?.sections || []).filter(value=>value.source!==section.source || value.label!==section.label),section]});
+      const context=articleNotices.get(item.url) || articleNotices.get(item.sourceUrl);
+      const notice=context?.notice || item.notice || {id:createHash('sha256').update(item.sourceUrl || item.url || oldPath).digest('hex'),title:item.name.replace(/\.[^.]+$/,''),url:item.sourceUrl || item.url || ''};
+      if(!/^[a-z0-9-]+$/i.test(notice.id))throw new Error('通知目录标识无效');
+      const sectionId=context?.sectionId || (/^[a-z0-9_-]+$/i.test(item.sectionId || '') ? item.sectionId : 'other');
+      let path=oldPath;
+      const details=await lstat(oldPath).catch(()=>null);
+      const destination=resolve(await sourceDirectory(source,sectionId,notice.id),basename(oldPath));
+      if(details?.isFile() && destination!==oldPath) {
+        const bytes=await readFile(oldPath),digest=createHash('sha256').update(bytes).digest('hex');
+        if(typeof item.sha256==='string' && digest!==item.sha256)throw new Error('网页原文件校验失败');
+        if(destination!==oldPath) {
+          originals.set(oldPath,digest);
+          try {await copyFile(oldPath,destination,constants.COPYFILE_EXCL);}catch(error:any){if(error.code!=='EEXIST')throw error;}
+          if(!(await lstat(destination)).isFile() || createHash('sha256').update(await readFile(destination)).digest('hex')!==digest)throw new Error('网页迁移目标文件冲突');
+          path=destination;
+        }
+      }
+      const legacyPaths=[...new Set([...(Array.isArray(item.legacyPaths)?item.legacyPaths:[]),...(path!==oldPath?[oldPath]:[])])].filter(value=>typeof value==='string' && within(files,resolve(value)));
+      const updated={...item,path,source,noticeSection:section,notice,sectionId,legacyPaths};
+      if(JSON.stringify(updated)!==JSON.stringify(item))await atomicMetadata(record,updated);
+      if(path===oldPath)remaining.add(path);
+      const previous=entries.get(path);
+      entries.set(path,{legacyPaths:[...new Set([...(previous?.legacyPaths || []),...legacyPaths])],notice,name:previous?.name || item.name,sources:[...new Set([...(previous?.sources || []),source.name])].sort(),sections:[...(previous?.sections || []).filter(value=>value.source!==section.source || value.label!==section.label),section]});
     } catch {
       if(oldPath)remaining.add(oldPath);
       brokenMetadata=true;
     }
   }
+  if(!brokenMetadata)for(const [path,digest] of originals)if(!entries.has(path) && !remaining.has(path) && createHash('sha256').update(await readFile(path)).digest('hex')===digest)await unlink(path);
   // Keep flat originals if damaged records prevent us from proving all references moved.
   if(!brokenMetadata)for(const entry of await readdir(files,{withFileTypes:true})) {
     if(!entry.isFile() || remaining.has(resolve(files,entry.name)))continue;

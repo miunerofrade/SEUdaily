@@ -508,7 +508,7 @@ export type ScheduleResponse = {
   warnings?: string[];
 };
 
-export type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string; sources?: string[]; sections?: {source:string;label:string}[] };
+export type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string; sources?: string[]; sections?: {source:string;label:string}[]; notice?: {id:string;title:string;url:string} };
 export type NoticeItem = { id: string; title: string; url: string; publishedAt?: string; category?: string; detailStatus?: string };
 export type TrainingPlanSource = {
   title: string;
@@ -748,8 +748,9 @@ export function authorizeSchedule() {
   return completeCampusLogin<ScheduleResponse>("/app/schedule/authorize");
 }
 
-export function fetchLibrary() {
-  return jsonRequest<{ root: string; files: LibraryFile[]; count: number }>("/app/library");
+export type LibraryBrowse = {root:string;level:string;directories:{id:string;label:string}[];files:LibraryFile[];count:number;nextCursor?:string|null};
+export function fetchLibrary(options:Record<string,string>={}) {
+  return jsonRequest<LibraryBrowse>("/app/library?"+new URLSearchParams(options));
 }
 
 export function deleteLibraryFile(path: string) {

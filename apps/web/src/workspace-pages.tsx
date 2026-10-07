@@ -820,7 +820,18 @@ export function LibraryPage() {
   const [section, setSection] = useState("");
   const [pdfOnly,setPdfOnly]=useState(false);
   const [fileSearch,setFileSearch]=useState("");
-  const fileMatches=files.filter(file=>file.name.toLocaleLowerCase().includes(fileSearch.trim().toLocaleLowerCase()));
+  const [notice,setNotice]=useState("");
+  const [sources,setSources]=useState<{id:string;label:string}[]>([]);
+  const [sections,setSections]=useState<{id:string;label:string}[]>([]);
+  const [notices,setNotices]=useState<{id:string;label:string}[]>([]);
+  const [courses,setCourses]=useState<{id:string;label:string}[]>([]);
+  const [teachers,setTeachers]=useState<{id:string;label:string}[]>([]);
+  const [count,setCount]=useState(0),[cursor,setCursor]=useState<string|null>(null);
+  const requestVersion=useRef(0),loadedExtra=useRef(false);
+  const [widths,setWidths]=useState<Record<number,number>>(()=>{try{return JSON.parse(localStorage.getItem('seudaily-library-widths') || '{}');}catch{return {};}});
+  const dragCleanup=useRef<(()=>void)|null>(null);
+  useEffect(()=>()=>dragCleanup.current?.(),[]);
+  useEffect(()=>{localStorage.setItem('seudaily-library-widths',JSON.stringify(widths));},[widths]);
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LibraryFile | null>(null);
@@ -832,33 +843,34 @@ export function LibraryPage() {
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const load = useCallback(async () => { setLoading(true); setError(""); try { setFiles((await fetchLibrary()).files); } catch (reason) { setError(reason instanceof Error ? reason.message : "资料读取失败"); } finally { setLoading(false); } }, []);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    let disposed=false,pending=false;
-    const timer=setInterval(()=>{
-      if(document.hidden || pending)return;
-      pending=true;
-      void fetchLibrary().then(response=>{if(!disposed)setFiles(response.files);}).catch(()=>undefined).finally(()=>{pending=false;});
-    },10_000);
-    return ()=>{disposed=true;clearInterval(timer);};
-  },[]);
   const categories = [{id:"documents",label:"上传文件"}, {id:"references",label:"参考资料"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
-  const visible = files.filter((file) => file.category === category);
-  const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
-  const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
-  const flatCategory = ["documents","references","web"].includes(category);
-  const sources = [...new Set(visible.flatMap(file => file.sources?.length ? file.sources : ["未分类"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
-  const sourceFiles=visible.filter(file=>(file.sources?.length ? file.sources : ["未分类"]).includes(source));
-  const sections=[...new Set(sourceFiles.flatMap(file=>file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
-  const selectedFiles = category === "web" ? sourceFiles.filter(file=>(file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]).includes(section)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
-  const displayFiles=pdfOnly ? selectedFiles.filter(file=>file.type === "PDF") : selectedFiles;
-  const pdfCount=selectedFiles.filter(file=>file.type === "PDF").length;
-  const columnCount = category === "web" ? (section ? 4 : source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
+  const options=useMemo(()=>({category,source,section,notice,course,teacher,query:fileSearch.trim(),pdf:pdfOnly?'1':'0'}),[category,source,section,notice,course,teacher,fileSearch,pdfOnly]);
+  const load = useCallback(async (quiet=false,append=false) => {
+    const version=++requestVersion.current;loadedExtra.current=append;if(!quiet)setLoading(true);setError("");
+    try {
+      const response=await fetchLibrary({...options,...(append && cursor?{cursor}:{})});
+      if(version!==requestVersion.current)return;
+      if(response.level==='sources')setSources(response.directories);
+      if(response.level==='sections')setSections(response.directories);
+      if(response.level==='notices')setNotices(response.directories);
+      if(response.level==='courses')setCourses(response.directories);
+      if(response.level==='teachers')setTeachers(response.directories);
+      setFiles(previous=>append?[...new Map([...previous,...response.files].map(file=>[file.path,file])).values()]:response.files);
+      setCount(response.count);setCursor(response.nextCursor || null);
+    }catch(reason){if(version===requestVersion.current && !quiet)setError(reason instanceof Error?reason.message:'资料读取失败');}
+    finally{if(version===requestVersion.current)setLoading(false);}
+  },[options,cursor]);
+  const loadRef=useRef(load);loadRef.current=load;
+  useEffect(()=>{void loadRef.current();return ()=>{requestVersion.current++;};},[options]);
+  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden && !loadedExtra.current)void loadRef.current(true);},10_000);return ()=>clearInterval(timer);},[]);
+  const flatCategory=["documents","references","images"].includes(category);
+  const displayFiles=files;
+  const columnCount=category==='web'?(notice?5:section?4:source?3:2):flatCategory?2:1+(category?1:0)+(course?1:0)+(teacher?1:0);
+  function chooseCategory(next:string){setCategory(next);setSource("");setSection("");setNotice("");setCourse("");setTeacher("");setPdfOnly(false);setSelectedFilePath("");}
+  function chooseCourse(next:string){setCourse(next);setTeacher("");setSelectedFilePath("");}
+  function resizeHandle(index:number){return <div className="browser-column-resize" role="separator" aria-orientation="vertical" aria-label={`调整第${index+1}栏宽度`} tabIndex={0} onKeyDown={event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const width=event.currentTarget.parentElement!.getBoundingClientRect().width;setWidths(current=>({...current,[index]:Math.max(160,Math.min(800,width+(event.key==='ArrowRight'?16:-16)))}));}} onMouseDown={event=>{event.preventDefault();dragCleanup.current?.();const x=event.clientX,width=event.currentTarget.parentElement!.getBoundingClientRect().width;const move=(next:MouseEvent)=>setWidths(current=>({...current,[index]:Math.max(160,Math.min(800,width+next.clientX-x))}));const end=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',end);dragCleanup.current=null;};dragCleanup.current=end;document.addEventListener('mousemove',move);document.addEventListener('mouseup',end);}}/>;}
+  function columnStyle(index:number){return widths[index]?{flex:`0 0 ${Math.max(160,Math.min(800,widths[index]))}px`}:undefined;}
 
-  function chooseCategory(next: string) { setCategory(next); setPdfOnly(false); setSource(""); setSection(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
-  function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
-  function chooseTeacher(next: string) { setTeacher(next); setSelectedFilePath(""); }
   async function openPreview(file: LibraryFile) {
     setPreviewTarget(file); setPreviewText(""); setPreviewError("");
     if (!["TXT", "MD"].includes(file.type)) return;
@@ -883,25 +895,19 @@ export function LibraryPage() {
     {knowledgeOpen && <KnowledgePanel />}
     <div className="library-file-search"><input type="search" aria-label="搜索文件名" placeholder="搜索文件名" value={fileSearch} onChange={event=>setFileSearch(event.target.value)}/>{fileSearch && <button type="button" onClick={()=>setFileSearch("")}>清空</button>}</div>
     <PageState loading={loading} error={error}>
-      {fileSearch.trim() ? <div className="library-file-search-results"><p>找到 {fileMatches.length} 个文件</p>{fileMatches.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} onClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span><strong>{friendlyFileName(file)}</strong><small>{file.sections?.map(item=>`${item.source} / ${item.label}`).join('、') || file.course}</small></span></button>)}{!fileMatches.length && <div className="browser-column-empty">没有匹配的文件</div>}</div> : <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = displayFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
-        <div className="browser-column">
-          <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
-        </div>
-        {category === "web" && <div className="browser-column">
-          <div className="browser-column-list">{sources.length ? sources.map(item => <button key={item} className={source === item ? "selected" : ""} onClick={() => { setSource(item); setSection(""); setSelectedFilePath(""); }}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无网页资料</div>}</div>
-        </div>}
-        {category === "web" && source && <div className="browser-column"><div className="browser-column-list">{sections.map(item=><button key={item} className={section===item?"selected":""} onClick={()=>{setSection(item);setSelectedFilePath("");}}><Folder size={17}/><span>{item}</span><ChevronRight size={15}/></button>)}</div></div>}
-        {category && !flatCategory && <div className="browser-column">
-          <div className="browser-column-list">{courses.length ? courses.map((item) => <button key={item} className={course === item ? "selected" : ""} onClick={() => chooseCourse(item)}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无课程资料</div>}</div>
-        </div>}
-        {course && category !== "web" && <div className="browser-column">
-          <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
-        </div>}
-        {((course && teacher) || (flatCategory && (category !== "web" || (source && section)))) && <div className="browser-column browser-file-column">
-          {category === "web" && <div className="browser-file-filter"><button type="button" aria-pressed={!pdfOnly} onClick={()=>setPdfOnly(false)}>全部 {selectedFiles.length}</button><button type="button" aria-pressed={pdfOnly} onClick={()=>setPdfOnly(true)}>只看 PDF {pdfCount}</button></div>}
-          <div className="browser-column-list">{displayFiles.length ? displayFiles.map((file) => <button key={file.path} title={`${file.name} · ${file.type}`} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}><LibraryFileIcon file={file}/><span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
+      {fileSearch.trim() ? <div className="library-file-search-results"><p>找到 {count} 个文件</p>{files.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} onClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span><strong>{friendlyFileName(file)}</strong><small>{file.sections?.map(item=>`${item.source} / ${item.label}`).join('、') || file.course}</small></span></button>)}{!files.length && <div className="browser-column-empty">没有匹配的文件</div>}</div> : <div className={`column-browser columns-${columnCount}`} onKeyDown={event=>{const file=files.find(item=>item.path===selectedFilePath);if(file && event.key===' '){event.preventDefault();void openPreview(file);}}}>
+        <div className="browser-column" style={columnStyle(0)}><div className="browser-column-list">{categories.map(item=><button key={item.id} className={category===item.id?'selected':''} onClick={()=>chooseCategory(item.id)}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(0)}</div>
+        {category==='web' && <div className="browser-column" style={columnStyle(1)}><div className="browser-column-list">{sources.map(item=><button key={item.id} className={source===item.id?'selected':''} onClick={()=>{setSource(item.id);setSection('');setNotice('');setPdfOnly(false);}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(1)}</div>}
+        {category==='web' && source && <div className="browser-column" style={columnStyle(2)}><div className="browser-column-list">{sections.map(item=><button key={item.id} className={section===item.id?'selected':''} onClick={()=>{setSection(item.id);setNotice('');setPdfOnly(false);}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(2)}</div>}
+        {category==='web' && section && <div className="browser-column" style={columnStyle(3)}><div className="browser-column-list">{notices.map(item=><button key={item.id} title={item.label} className={notice===item.id?'selected':''} onClick={()=>{setNotice(item.id);setPdfOnly(false);setSelectedFilePath('');}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(3)}</div>}
+        {category && !flatCategory && category!=='web' && <div className="browser-column" style={columnStyle(1)}><div className="browser-column-list">{courses.map(item=><button key={item.id} className={course===item.id?'selected':''} onClick={()=>chooseCourse(item.id)}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(1)}</div>}
+        {course && category!=='web' && <div className="browser-column" style={columnStyle(2)}><div className="browser-column-list">{teachers.map(item=><button key={item.id} className={teacher===item.id?'selected':''} onClick={()=>{setTeacher(item.id);setSelectedFilePath('');}}><UserRound size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(2)}</div>}
+        {((course && teacher) || flatCategory || (category==='web' && notice)) && <div className="browser-column browser-file-column" style={columnStyle(columnCount-1)}>
+          {category==='web' && <div className="browser-file-filter"><button type="button" aria-pressed={!pdfOnly} onClick={()=>setPdfOnly(false)}>全部</button><button type="button" aria-pressed={pdfOnly} onClick={()=>setPdfOnly(true)}>只看 PDF</button></div>}
+          <div className="browser-column-list">{displayFiles.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} className={selectedFilePath===file.path?'selected':''} aria-selected={selectedFilePath===file.path} onClick={()=>setSelectedFilePath(file.path)} onDoubleClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span>{friendlyFileName(file)}</span></button>)}{!files.length && <div className="browser-column-empty">暂无文件</div>}</div>{resizeHandle(columnCount-1)}
         </div>}
       </div>}
+      {cursor && <button className="page-action" disabled={loading} onClick={()=>void load(false,true)}>加载更多</button>}
     </PageState>
     {previewTarget && <FilePreview file={previewTarget} text={previewText} loading={previewLoading} error={previewError} onClose={() => setPreviewTarget(null)} />}
     {deleteTarget && <div className="confirm-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) setDeleteTarget(null); }}><div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-file-title"><button className="confirm-close" onClick={() => setDeleteTarget(null)} aria-label="关闭"><X size={17} /></button><div className="confirm-icon"><Trash2 size={18} /></div><h2 id="delete-file-title">删除这个文件？</h2><p>“{friendlyFileName(deleteTarget)}”将从本机永久删除，无法恢复。</p><div className="confirm-actions"><button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button className="danger" disabled={deleting} onClick={() => void removeFile()}>{deleting ? "正在删除…" : "删除"}</button></div></div></div>}

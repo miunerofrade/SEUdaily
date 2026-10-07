@@ -38,10 +38,21 @@ test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async
  assert.equal(resolveDocumentContexts(refs)[0].markdown,document.markdown);
  assert.equal((await receiveWeChatFile('课程说明.txt',Buffer.from(document.markdown),'fixture-file-source')).path,received.path);
  const library=await (await request('/app/knowledge')).json();assert.equal(library.documents.length,1);
- const fileList=await (await request('/app/library')).json();
+ const fileList=await (await request('/app/library?category=documents')).json();
  const storedFiles=fileList.files.filter(item=>item.category==='documents');
  assert.equal(storedFiles.length,1,'original and knowledge copies appear once');
  assert.equal(storedFiles[0].name,'课程说明.txt');
+ const initial=await (await request('/app/library')).json();assert.equal(initial.level,'categories');assert.equal(initial.files.length,0);assert.equal(initial.directories.length,7);
+ const articleDirectory=join(root,'.seudaily/jwc/articles'),metadataDirectory=join(root,'.seudaily/web-files/metadata'),originalDirectory=join(root,'.seudaily/web-files/files/jwc.seu.edu.cn');
+ await Promise.all([articleDirectory,metadataDirectory,originalDirectory].map(path=>mkdir(path,{recursive:true})));
+ const {createHash}=await import('node:crypto');const articleUrl='https://jwc.seu.edu.cn/2026/1007/c21681a1/page.htm';
+ const attachments=[{name:'讲座预告.pdf',url:'https://jwc.seu.edu.cn/notice.pdf'},{name:'活动指南.pdf',url:'https://jwc.seu.edu.cn/guide.pdf'}];
+ await writeFile(join(articleDirectory,'1.json'),JSON.stringify({id:'seu-jwc-1',title:'讲座预告',url:articleUrl,category:'practice',content:'通知正文',attachments}));
+ for(const [index,item] of attachments.entries()){const bytes=Buffer.from('%PDF-fixture'+index),digest=createHash('sha256').update(bytes).digest('hex'),path=join(originalDirectory,digest+'.pdf');await writeFile(path,bytes);await writeFile(join(metadataDirectory,index+'.json'),JSON.stringify({...item,path,sourceUrl:articleUrl,sha256:digest}));}
+ for(const [query,level] of [['category=web','sources'],['category=web&source=教务处','sections'],['category=web&source=教务处&section=实践教学','notices']]){const result=await (await request('/app/library?'+query)).json();assert.equal(result.level,level);assert.equal(result.files.length,0);assert.equal(result.directories.length,1);}
+ const noticeFiles=await (await request('/app/library?category=web&source=教务处&section=实践教学&notice=seu-jwc-1')).json();assert.equal(noticeFiles.files.length,3);assert.equal(noticeFiles.files.filter(file=>file.type==='PDF').length,2);assert.ok(noticeFiles.files.every(file=>file.path.includes('/practice/seu-jwc-1/')));
+ const firstPage=await (await request('/app/library?query=讲座预告&limit=1')).json();assert.equal(firstPage.count,2);assert.equal(firstPage.files.length,1);assert.equal(firstPage.nextCursor,'1');
+ const nextPage=await (await request('/app/library?query=讲座预告&limit=1&cursor=1')).json();assert.equal(nextPage.files.length,1);assert.equal(nextPage.nextCursor,null);assert.notEqual(nextPage.files[0].path,firstPage.files[0].path);
  const download=await app.request('http://127.0.0.1:4111/app/library/preview?path='+encodeURIComponent(storedFiles[0].path)+'&download=1&name='+encodeURIComponent(storedFiles[0].name),{headers:{host:'127.0.0.1:4111'}});
  assert.equal(download.status,200);assert.match(download.headers.get('Content-Disposition'),/^attachment;/);
  assert.equal(await download.text(),document.markdown);
