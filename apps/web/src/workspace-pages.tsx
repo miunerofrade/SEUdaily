@@ -4,7 +4,7 @@ import { useImeComposition } from "./ime";
 import { conversationPath, withParents, latestDescendant } from "../../../src/shared/conversation-tree";
 import { PromptVersions } from "./prompt-versions";
 import { editedDocumentContent, messageContent } from "./conversation-cache";
-import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, FileImage, FileText, Folder, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowUp, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, CircleStop, ExternalLink, File, FileAudio, FileImage, Presentation, FileSpreadsheet, FileText, FileType, FileVideo, Folder, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Save, Settings2, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import ReactMarkdown from "react-markdown";
@@ -818,6 +818,9 @@ export function LibraryPage() {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [source, setSource] = useState("");
   const [section, setSection] = useState("");
+  const [pdfOnly,setPdfOnly]=useState(false);
+  const [fileSearch,setFileSearch]=useState("");
+  const fileMatches=files.filter(file=>file.name.toLocaleLowerCase().includes(fileSearch.trim().toLocaleLowerCase()));
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LibraryFile | null>(null);
@@ -849,9 +852,11 @@ export function LibraryPage() {
   const sourceFiles=visible.filter(file=>(file.sources?.length ? file.sources : ["未分类"]).includes(source));
   const sections=[...new Set(sourceFiles.flatMap(file=>file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
   const selectedFiles = category === "web" ? sourceFiles.filter(file=>(file.sections?.filter(item=>item.source===source).map(item=>item.label) || ["其他资料"]).includes(section)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
+  const displayFiles=pdfOnly ? selectedFiles.filter(file=>file.type === "PDF") : selectedFiles;
+  const pdfCount=selectedFiles.filter(file=>file.type === "PDF").length;
   const columnCount = category === "web" ? (section ? 4 : source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
 
-  function chooseCategory(next: string) { setCategory(next); setSource(""); setSection(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
+  function chooseCategory(next: string) { setCategory(next); setPdfOnly(false); setSource(""); setSection(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
   function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
   function chooseTeacher(next: string) { setTeacher(next); setSelectedFilePath(""); }
   async function openPreview(file: LibraryFile) {
@@ -876,8 +881,9 @@ export function LibraryPage() {
   return <div className="workspace-page library-page">
     <PageHeader title="资料库" description="" action={<div className="schedule-actions"><button className="page-action" aria-expanded={knowledgeOpen} onClick={() => setKnowledgeOpen(current => !current)}>{knowledgeOpen ? "收起搜索" : "搜索资料"}</button><button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button></div>} />
     {knowledgeOpen && <KnowledgePanel />}
+    <div className="library-file-search"><input type="search" aria-label="搜索文件名" placeholder="搜索文件名" value={fileSearch} onChange={event=>setFileSearch(event.target.value)}/>{fileSearch && <button type="button" onClick={()=>setFileSearch("")}>清空</button>}</div>
     <PageState loading={loading} error={error}>
-      <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
+      {fileSearch.trim() ? <div className="library-file-search-results"><p>找到 {fileMatches.length} 个文件</p>{fileMatches.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} onClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span><strong>{friendlyFileName(file)}</strong><small>{file.sections?.map(item=>`${item.source} / ${item.label}`).join('、') || file.course}</small></span></button>)}{!fileMatches.length && <div className="browser-column-empty">没有匹配的文件</div>}</div> : <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = displayFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
         <div className="browser-column">
           <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
         </div>
@@ -892,9 +898,10 @@ export function LibraryPage() {
           <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
         </div>}
         {((course && teacher) || (flatCategory && (category !== "web" || (source && section)))) && <div className="browser-column browser-file-column">
-          <div className="browser-column-list">{selectedFiles.length ? selectedFiles.map((file) => <button key={file.path} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}>{file.category === "images" ? <FileImage size={17} /> : <FileText size={17} />}<span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
+          {category === "web" && <div className="browser-file-filter"><button type="button" aria-pressed={!pdfOnly} onClick={()=>setPdfOnly(false)}>全部 {selectedFiles.length}</button><button type="button" aria-pressed={pdfOnly} onClick={()=>setPdfOnly(true)}>只看 PDF {pdfCount}</button></div>}
+          <div className="browser-column-list">{displayFiles.length ? displayFiles.map((file) => <button key={file.path} title={`${file.name} · ${file.type}`} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}><LibraryFileIcon file={file}/><span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
         </div>}
-      </div>
+      </div>}
     </PageState>
     {previewTarget && <FilePreview file={previewTarget} text={previewText} loading={previewLoading} error={previewError} onClose={() => setPreviewTarget(null)} />}
     {deleteTarget && <div className="confirm-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) setDeleteTarget(null); }}><div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-file-title"><button className="confirm-close" onClick={() => setDeleteTarget(null)} aria-label="关闭"><X size={17} /></button><div className="confirm-icon"><Trash2 size={18} /></div><h2 id="delete-file-title">删除这个文件？</h2><p>“{friendlyFileName(deleteTarget)}”将从本机永久删除，无法恢复。</p><div className="confirm-actions"><button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button className="danger" disabled={deleting} onClick={() => void removeFile()}>{deleting ? "正在删除…" : "删除"}</button></div></div></div>}
@@ -908,15 +915,20 @@ function FilePreview({ file, text, loading, error, onClose }: { file: LibraryFil
   const audio = ["MP3", "M4A", "WAV"].includes(file.type);
   const textFile = ["TXT", "MD"].includes(file.type);
   return <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="file-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="file-preview-title"><header><h2 id="file-preview-title">{friendlyFileName(file)}</h2><a className="preview-download" href={url + "&download=1&name=" + encodeURIComponent(file.name)} download={file.name}>下载原文件</a><a href={url} target="_blank" rel="noreferrer" title="在新窗口打开"><ExternalLink size={16} /></a><button type="button" className="preview-close" aria-label="关闭预览" onClick={onClose}><X size={18} /></button></header><div className="file-preview-content">
-    {loading ? <div className="preview-state"><LoaderCircle className="spin" size={22} />正在读取文件…</div> : error ? <div className="preview-state error">{error}</div> : image ? <img src={url} alt={file.name} /> : video ? <video src={url} controls /> : audio ? <audio src={url} controls /> : file.type === "PDF" ? <iframe src={url} title={file.name} /> : textFile ? (file.type === "MD" ? <div className="preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(text)}</ReactMarkdown></div> : <pre>{text}</pre>) : <div className="preview-state">该格式暂不支持内嵌预览，可点击右上角在新窗口打开。</div>}
+    {loading ? <div className="preview-state"><LoaderCircle className="spin" size={22} />正在读取文件…</div> : error ? <div className="preview-state error">{error}</div> : image ? <img src={url} alt={file.name} /> : video ? <video src={url} controls /> : audio ? <audio src={url} controls /> : file.type === "PDF" ? <iframe src={url} title={`${file.name} · ${file.type}`} /> : textFile ? (file.type === "MD" ? <div className="preview-markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(text)}</ReactMarkdown></div> : <pre>{text}</pre>) : <div className="preview-state">该格式暂不支持内嵌预览，可点击右上角在新窗口打开。</div>}
   </div></div></div>;
+}
+
+function LibraryFileIcon({file}:{file:LibraryFile}) {
+  const Icon=file.type === "PDF" ? FileType : ["MD","TXT","DOC","DOCX"].includes(file.type) ? FileText : ["XLS","XLSX","CSV"].includes(file.type) ? FileSpreadsheet : ["PPT","PPTX"].includes(file.type) ? Presentation : ["PNG","JPG","JPEG","WEBP","GIF"].includes(file.type) ? FileImage : ["MP4","WEBM"].includes(file.type) ? FileVideo : ["MP3","M4A","WAV"].includes(file.type) ? FileAudio : File;
+  return <Icon size={17} role="img" aria-label={file.type} className={`library-format-icon format-${file.type.toLowerCase()}`}/>;
 }
 
 function friendlyFileName(file: LibraryFile) {
   const match = file.name.match(/^(\d{4})(\d{2})(\d{2})(?:-(\d+))?/);
   if (/_Summary\.md$/i.test(file.name)) return match ? `${match[1]}-${match[2]}-${match[3]} · 课程笔记` : "课程笔记";
   if (/_transcript\.txt$/i.test(file.name)) return match ? `${match[1]}-${match[2]}-${match[3]} · 第 ${match[4] ?? "?"} 段字幕` : "课堂字幕";
-  return file.name;
+  return file.name.replace(/\.[^.]+$/, "");
 }
 
 const noticeLabels:Record<string,string>={news:"最新动态",academic:"教务信息",student_status:"学籍管理",practice:"实践教学",lectures:"文化素质教育"};
