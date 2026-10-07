@@ -1,0 +1,70 @@
+{
+  "jwc": {
+    "news": [
+      "最新动态",
+      "/zxdt/list.htm"
+    ],
+    "academic": [
+      "教务信息",
+      "/jwxx/list.htm"
+    ],
+    "lectures": [
+      "文化素质教育（讲座预告）",
+      "/cbxx/list.htm"
+    ],
+    "student_status": [
+      "学籍管理",
+      "/xjgl/list.htm"
+    ],
+    "practice": [
+      "实践教学",
+      "/sjjx/list.htm"
+    ],
+    "teaching_research": [
+      "教学研究",
+      "/jxyj/list.htm"
+    ],
+    "downloads": [
+      "下载专区",
+      "/xzzq/list.htm"
+    ]
+  },
+  "cse": {
+    "undergraduate_notices": [
+      "本科生通知公告",
+      "/49469/list.htm"
+    ],
+    "teaching": [
+      "教学动态",
+      "/49470/list.htm"
+    ],
+    "student_affairs": [
+      "学生工作通知公告",
+      "/49447/list.htm"
+    ],
+    "employment": [
+      "就业信息",
+      "/jyxx/list.htm"
+    ],
+    "research": [
+      "科研动态",
+      "/49441/list.htm"
+    ],
+    "academic_events": [
+      "学术活动",
+      "/xshd_53564/list.htm"
+    ],
+    "recruitment": [
+      "人才招聘",
+      "/rczp/list.htm"
+    ],
+    "undergraduate_downloads": [
+      "本科生下载专区",
+      "/xzzq_53939/list.htm"
+    ],
+    "graduate_downloads": [
+      "研究生下载专区",
+      "/xzzq_52683/list.htm"
+    ]
+  }
+}

@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 from .cancellation import raise_if_cancelled
+from .campus_device import device_fingerprint
 from .runtime_paths import env_value
 from .vpn import campus_proxy
 
@@ -272,11 +273,15 @@ class CampusSession:
                 key = self._auth_post("getChiperKey", {})
                 public = load_der_public_key(base64.urlsafe_b64decode(key["publicKey"]))
                 encrypted = base64.b64encode(public.encrypt(self.password.encode(), PKCS1v15())).decode()
+                try:
+                    fingerprint = device_fingerprint()
+                except (OSError, ValueError) as error:
+                    raise CampusAuthError("auth_required", "无法读取或保存校园设备标识，请检查数据目录中的 .seudaily/campus-device.json。") from error
                 login_payload = {
                     "service": service, "username": self.username, "password": encrypted,
                     "captcha": "", "rememberMe": False, "loginType": "account",
                     "wxBinded": False, "mobilePhoneNum": "", "mobileVerifyCode": "",
-                    "fingerPrint": None}
+                    "fingerPrint": fingerprint}
                 result = self._auth_post("casLogin", login_payload)
                 if result.get("code") == 502:
                     self.pending_sms = SMSChallenge(self, login_payload, stop_before)

@@ -1,4 +1,5 @@
 import base64
+import json
 from urllib.parse import quote
 
 import httpx
@@ -21,6 +22,7 @@ class FakeCampus:
         self.sso_logins = 0
         self.app_valid = False
         self.captcha = captcha
+        self.fingerprints = []
 
     def __call__(self, request):
         path = request.url.path
@@ -46,6 +48,8 @@ class FakeCampus:
             import json
             payload = json.loads(request.content)
             assert payload["username"] == "test-user"
+            self.fingerprints.append(payload["fingerPrint"])
+            assert len(payload["fingerPrint"]) == 32
             assert self.key.decrypt(base64.b64decode(payload["password"]), PKCS1v15()) == b"test-password"
             self.password_logins += 1
             return httpx.Response(200, headers={"set-cookie": "SSO=valid; Path=/; Secure"},
@@ -66,6 +70,7 @@ class FakeCampus:
 
 def session_for(tmp_path, provider, monkeypatch):
     monkeypatch.setattr("seudaily.campus_auth.campus_proxy", lambda: None)
+    monkeypatch.setenv("SEUDAILY_PROJECT_ROOT", str(tmp_path))
     session = CampusSession(tmp_path / "cookies.json", username="test-user", password="test-password")
     session.client.close()
     session.client = httpx.Client(transport=httpx.MockTransport(provider))
@@ -81,6 +86,7 @@ def test_fresh_login_and_app_sso_use_one_encrypted_password_submission(tmp_path,
         assert provider.password_logins == 1
         assert provider.sso_logins == 1
         assert session.cookie_file.exists()
+        assert provider.fingerprints == [json.loads((tmp_path / ".seudaily/campus-device.json").read_text())["fingerprint"]]
 
 
 def test_expired_business_session_is_renewed_and_query_retried(tmp_path, monkeypatch):
@@ -91,6 +97,31 @@ def test_expired_business_session_is_renewed_and_query_retried(tmp_path, monkeyp
         assert session.post(API, form={}).ok
         assert provider.password_logins == 1
         assert provider.sso_logins == 2
+
+
+def test_legacy_cookie_recovery_does_not_create_device_identity(tmp_path, monkeypatch):
+    (tmp_path / "cookies.json").write_text(json.dumps([
+        {"name": "SSO", "value": "valid", "domain": "auth.seu.edu.cn", "path": "/", "secure": True}
+    ]))
+    provider = FakeCampus()
+    with session_for(tmp_path, provider, monkeypatch) as session:
+        session.ensure_authenticated(ENTRY)
+    assert provider.password_logins == 0
+    assert not (tmp_path / ".seudaily/campus-device.json").exists()
+
+
+def test_distinct_cookie_clients_reuse_device_identity(tmp_path, monkeypatch):
+    provider = FakeCampus()
+    with session_for(tmp_path, provider, monkeypatch) as session:
+        session.ensure_authenticated(ENTRY)
+    other_provider = FakeCampus()
+    # VPN uses temporary cookies while business clients retain their own jars.
+    with CampusSession(tmp_path / "temporary-vpn" / "cookies.json", username="test-user",
+                       password="test-password", load_saved_cookies=False, use_vpn=False) as other:
+        other.client.close()
+        other.client = httpx.Client(transport=httpx.MockTransport(other_provider))
+        other.ensure_authenticated(ENTRY)
+    assert provider.fingerprints == other_provider.fingerprints
 
 
 def test_captcha_stops_before_submitting_password(tmp_path, monkeypatch):
@@ -134,6 +165,7 @@ class SMSCampus(FakeCampus):
         super().__init__()
         self.sends = 0
         self.codes = []
+        self.sms_fingerprints = []
 
     def __call__(self, request):
         import json
@@ -143,6 +175,7 @@ class SMSCampus(FakeCampus):
             return httpx.Response(200, json={'code': 200})
         if request.url.path.endswith('/casLogin'):
             payload = json.loads(request.content)
+            self.sms_fingerprints.append(payload['fingerPrint'])
             encrypted = payload['mobileVerifyCode']
             code = self.key.decrypt(base64.b64decode(encrypted), PKCS1v15()).decode() if encrypted else ''
             self.codes.append(code)
@@ -171,6 +204,8 @@ def test_sms_keeps_cas_session_and_retries_without_browser(tmp_path, monkeypatch
         assert sms_challenge_action(challenge.id, 'verify', '123456')['status'] == 'completed'
         assert session.client.is_closed
         assert provider.codes == ['', '999999', '123456']
+        assert len(set(provider.sms_fingerprints)) == 1
+        assert provider.sms_fingerprints[0] == json.loads((tmp_path / '.seudaily/campus-device.json').read_text())['fingerprint']
         with session_for(tmp_path, provider, monkeypatch) as resumed:
             resumed.ensure_authenticated(ENTRY)
         assert provider.password_logins == 1

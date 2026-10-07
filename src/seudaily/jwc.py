@@ -103,27 +103,33 @@ _ARTICLE_PATH = re.compile(
 _SPACE = re.compile(r"\s+")
 _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
-JWC_CATEGORIES = {
-    "news": ("最新动态", "/zxdt/list.htm"),
-    "academic": ("教务信息", "/jwxx/list.htm"),
-    "lectures": ("文化素质教育（讲座预告）", "/cbxx/list.htm"),
-    "student_status": ("学籍管理", "/xjgl/list.htm"),
-    "practice": ("实践教学", "/sjjx/list.htm"),
-    "teaching_research": ("教学研究", "/jxyj/list.htm"),
-    "downloads": ("下载专区", "/xzzq/list.htm"),
-}
+def _load_notice_categories(path: Path) -> dict[str, dict[str, tuple[str, str]]]:
+    """Only known sites and public WebPlus list paths; no extraction DSL."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {"jwc", "cse"}:
+        raise ValueError("通知栏目配置仅支持 jwc/cse")
+    result = {}
+    for site, categories in data.items():
+        if not isinstance(categories, dict) or not categories:
+            raise ValueError("通知栏目配置不能为空")
+        result[site] = {}
+        for key, entry in categories.items():
+            if (not re.fullmatch(r"[a-z][a-z0-9_]*", key)
+                    or not isinstance(entry, list) or len(entry) != 2
+                    or not all(isinstance(value, str) for value in entry)
+                    or not entry[0].strip()
+                    or not re.fullmatch(r"/[A-Za-z0-9_]+/list\.htm", entry[1])):
+                raise ValueError(f"无效通知栏目配置：{site}/{key}")
+            result[site][key] = (entry[0], entry[1])
+        paths = [entry[1] for entry in result[site].values()]
+        if len(paths) != len(set(paths)):
+            raise ValueError(f"通知栏目路径重复：{site}")
+    return result
 
-CSE_CATEGORIES = {
-    "undergraduate_notices": ("本科生通知公告", "/49469/list.htm"),
-    "teaching": ("教学动态", "/49470/list.htm"),
-    "student_affairs": ("学生工作通知公告", "/49447/list.htm"),
-    "employment": ("就业信息", "/jyxx/list.htm"),
-    "research": ("科研动态", "/49441/list.htm"),
-    "academic_events": ("学术活动", "/xshd_53564/list.htm"),
-    "recruitment": ("人才招聘", "/rczp/list.htm"),
-    "undergraduate_downloads": ("本科生下载专区", "/xzzq_53939/list.htm"),
-    "graduate_downloads": ("研究生下载专区", "/xzzq_52683/list.htm"),
-}
+
+_NOTICE_CATEGORIES = _load_notice_categories(Path(__file__).with_name("notice_categories.json"))
+JWC_CATEGORIES = _NOTICE_CATEGORIES["jwc"]
+CSE_CATEGORIES = _NOTICE_CATEGORIES["cse"]
 
 
 @dataclass(frozen=True)
