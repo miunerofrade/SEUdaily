@@ -818,7 +818,6 @@ export function LibraryPage() {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [source, setSource] = useState("");
   const [section, setSection] = useState("");
-  const [pdfOnly,setPdfOnly]=useState(false);
   const [fileSearch,setFileSearch]=useState("");
   const [notice,setNotice]=useState("");
   const [sources,setSources]=useState<{id:string;label:string}[]>([]);
@@ -844,7 +843,7 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const categories = [{id:"documents",label:"上传文件"}, {id:"references",label:"参考资料"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
-  const options=useMemo(()=>({category,source,section,notice,course,teacher,query:fileSearch.trim(),pdf:pdfOnly?'1':'0'}),[category,source,section,notice,course,teacher,fileSearch,pdfOnly]);
+  const options=useMemo(()=>({category,source,section,notice,course,teacher,query:fileSearch.trim()}),[category,source,section,notice,course,teacher,fileSearch]);
   const load = useCallback(async (quiet=false,append=false) => {
     const version=++requestVersion.current;loadedExtra.current=append;if(!quiet)setLoading(true);setError("");
     try {
@@ -866,7 +865,7 @@ export function LibraryPage() {
   const flatCategory=["documents","references","images"].includes(category);
   const displayFiles=files;
   const columnCount=category==='web'?(notice?5:section?4:source?3:2):flatCategory?2:1+(category?1:0)+(course?1:0)+(teacher?1:0);
-  function chooseCategory(next:string){setCategory(next);setSource("");setSection("");setNotice("");setCourse("");setTeacher("");setPdfOnly(false);setSelectedFilePath("");}
+  function chooseCategory(next:string){setCategory(next);setSource("");setSection("");setNotice("");setCourse("");setTeacher("");setSelectedFilePath("");}
   function chooseCourse(next:string){setCourse(next);setTeacher("");setSelectedFilePath("");}
   function resizeHandle(index:number){return <div className="browser-column-resize" role="separator" aria-orientation="vertical" aria-label={`调整第${index+1}栏宽度`} tabIndex={0} onKeyDown={event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const width=event.currentTarget.parentElement!.getBoundingClientRect().width;setWidths(current=>({...current,[index]:Math.max(160,Math.min(800,width+(event.key==='ArrowRight'?16:-16)))}));}} onMouseDown={event=>{event.preventDefault();dragCleanup.current?.();const x=event.clientX,width=event.currentTarget.parentElement!.getBoundingClientRect().width;const move=(next:MouseEvent)=>setWidths(current=>({...current,[index]:Math.max(160,Math.min(800,width+next.clientX-x))}));const end=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',end);dragCleanup.current=null;};dragCleanup.current=end;document.addEventListener('mousemove',move);document.addEventListener('mouseup',end);}}/>;}
   function columnStyle(index:number){return widths[index]?{flex:`0 0 ${Math.max(160,Math.min(800,widths[index]))}px`}:undefined;}
@@ -897,13 +896,12 @@ export function LibraryPage() {
     <PageState loading={loading} error={error}>
       {fileSearch.trim() ? <div className="library-file-search-results"><p>找到 {count} 个文件</p>{files.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} onClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span><strong>{friendlyFileName(file)}</strong><small>{file.sections?.map(item=>`${item.source} / ${item.label}`).join('、') || file.course}</small></span></button>)}{!files.length && <div className="browser-column-empty">没有匹配的文件</div>}</div> : <div className={`column-browser columns-${columnCount}`} onKeyDown={event=>{const file=files.find(item=>item.path===selectedFilePath);if(file && event.key===' '){event.preventDefault();void openPreview(file);}}}>
         <div className="browser-column" style={columnStyle(0)}><div className="browser-column-list">{categories.map(item=><button key={item.id} className={category===item.id?'selected':''} onClick={()=>chooseCategory(item.id)}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(0)}</div>
-        {category==='web' && <div className="browser-column" style={columnStyle(1)}><div className="browser-column-list">{sources.map(item=><button key={item.id} className={source===item.id?'selected':''} onClick={()=>{setSource(item.id);setSection('');setNotice('');setPdfOnly(false);}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(1)}</div>}
-        {category==='web' && source && <div className="browser-column" style={columnStyle(2)}><div className="browser-column-list">{sections.map(item=><button key={item.id} className={section===item.id?'selected':''} onClick={()=>{setSection(item.id);setNotice('');setPdfOnly(false);}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(2)}</div>}
-        {category==='web' && section && <div className="browser-column" style={columnStyle(3)}><div className="browser-column-list">{notices.map(item=><button key={item.id} title={item.label} className={notice===item.id?'selected':''} onClick={()=>{setNotice(item.id);setPdfOnly(false);setSelectedFilePath('');}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(3)}</div>}
+        {category==='web' && <div className="browser-column" style={columnStyle(1)}><div className="browser-column-list">{sources.map(item=><button key={item.id} className={source===item.id?'selected':''} onClick={()=>{setSource(item.id);setSection('');setNotice('');}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(1)}</div>}
+        {category==='web' && source && <div className="browser-column" style={columnStyle(2)}><div className="browser-column-list">{sections.map(item=><button key={item.id} className={section===item.id?'selected':''} onClick={()=>{setSection(item.id);setNotice('');}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(2)}</div>}
+        {category==='web' && section && <div className="browser-column" style={columnStyle(3)}><div className="browser-column-list">{notices.map(item=><button key={item.id} title={item.label} className={notice===item.id?'selected':''} onClick={()=>{setNotice(item.id);setSelectedFilePath('');}}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(3)}</div>}
         {category && !flatCategory && category!=='web' && <div className="browser-column" style={columnStyle(1)}><div className="browser-column-list">{courses.map(item=><button key={item.id} className={course===item.id?'selected':''} onClick={()=>chooseCourse(item.id)}><Folder size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(1)}</div>}
         {course && category!=='web' && <div className="browser-column" style={columnStyle(2)}><div className="browser-column-list">{teachers.map(item=><button key={item.id} className={teacher===item.id?'selected':''} onClick={()=>{setTeacher(item.id);setSelectedFilePath('');}}><UserRound size={17}/><span>{item.label}</span><ChevronRight size={15}/></button>)}</div>{resizeHandle(2)}</div>}
         {((course && teacher) || flatCategory || (category==='web' && notice)) && <div className="browser-column browser-file-column" style={columnStyle(columnCount-1)}>
-          {category==='web' && <div className="browser-file-filter"><button type="button" aria-pressed={!pdfOnly} onClick={()=>setPdfOnly(false)}>全部</button><button type="button" aria-pressed={pdfOnly} onClick={()=>setPdfOnly(true)}>只看 PDF</button></div>}
           <div className="browser-column-list">{displayFiles.map(file=><button key={file.path} title={`${file.name} · ${file.type}`} className={selectedFilePath===file.path?'selected':''} aria-selected={selectedFilePath===file.path} onClick={()=>setSelectedFilePath(file.path)} onDoubleClick={()=>void openPreview(file)}><LibraryFileIcon file={file}/><span>{friendlyFileName(file)}</span></button>)}{!files.length && <div className="browser-column-empty">暂无文件</div>}</div>{resizeHandle(columnCount-1)}
         </div>}
       </div>}
