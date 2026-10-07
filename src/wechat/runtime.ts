@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import QRCode from 'qrcode';
+import type {WeChatFile} from './media.js';
+export type ReceivedWeChatFile = {name:string;path:string;state:string};
+export type WeChatFileReceiver = (name:string,bytes:Buffer,source:string)=>Promise<ReceivedWeChatFile>;
 import type { LocalClient } from '../agent/sqlite.js';
 import type { WeChatConversations } from './conversations.js';
 import { redactText } from '../agent/redaction.js';
@@ -23,7 +26,7 @@ export class WeChatRuntime {
   private nextFlushAt = 0;
   private flushFailures = 0;
   private workers = new Map<string, Promise<void>>();
-  constructor(private db: LocalClient, private protocol = new WeChatProtocol(), private pollDelay = 1000, private conversations?: WeChatConversations) {}
+  constructor(private db: LocalClient, private protocol = new WeChatProtocol(), private pollDelay = 1000, private conversations?: WeChatConversations,private receiveFile?:WeChatFileReceiver,private prepareFiles?:(files:ReceivedWeChatFile[],signal:AbortSignal)=>Promise<string[]>) {}
   initialize() {
     return this.ready ??= (async () => {
       await this.db.batch([
@@ -32,6 +35,10 @@ export class WeChatRuntime {
         'CREATE INDEX IF NOT EXISTS wechat_pending ON wechat_messages(account,peer,state,createdAt)',
         'CREATE INDEX IF NOT EXISTS wechat_recent ON wechat_messages(account,peer,createdAt DESC)',
       ]);
+      const columns=new Set((await this.db.execute('PRAGMA table_info(wechat_messages)')).rows.map(row=>String(row.name)));
+      for (const [name,type] of [['files',"TEXT NOT NULL DEFAULT '[]'"],['documents',"TEXT NOT NULL DEFAULT '[]'"],['sourceCreatedAt','INTEGER'],['preparedAt','INTEGER'],['sentAt','INTEGER']] as const) {
+        if (!columns.has(name)) await this.db.execute(`ALTER TABLE wechat_messages ADD COLUMN ${name} ${type}`);
+      }
       await this.conversations?.initialize();
       const data = (await this.db.execute('SELECT data FROM wechat_account WHERE id=1')).rows[0]?.data;
       if (data) {
@@ -64,7 +71,7 @@ export class WeChatRuntime {
     await this.initialize();
     const account = this.account;
     const currentSession = account ? await this.conversations?.current(account) : undefined;
-    const rows = account ? (await this.db.execute({sql:'SELECT id,peer,session,text,reply,threadId,resourceId,state,createdAt FROM wechat_messages WHERE account=? AND peer=? ORDER BY createdAt DESC LIMIT 6',args:[account.botId,account.userId]})).rows : [];
+    const rows = account ? (await this.db.execute({sql:'SELECT id,peer,session,text,reply,threadId,resourceId,state,createdAt,sourceCreatedAt,preparedAt,sentAt FROM wechat_messages WHERE account=? AND peer=? ORDER BY createdAt DESC LIMIT 6',args:[account.botId,account.userId]})).rows : [];
     return { state: this.login?.state ?? (account ? account.needsLogin ? 'needs_login' : 'connected' : 'disconnected'),
       loginId: this.login?.id, qr: this.login ? { size: this.login.size, modules: this.login.modules } : undefined,
       botId: account?.botId, userId: account?.userId, threadId: currentSession?.threadId ?? (this.conversations ? '' : DEMO_THREAD), resourceId: this.conversations ? 'seudaily-wechat-local' : DEMO_RESOURCE,
@@ -132,21 +139,22 @@ export class WeChatRuntime {
     const sourceId = msg.message_id ?? msg.client_id;
     if (typeof sourceId !== 'string' || typeof msg.context_token !== 'string' || msg.session_id !== undefined && typeof msg.session_id !== 'string') return undefined;
     if (!sourceId || !Array.isArray(msg.item_list)) return undefined;
+    const files = msg.item_list.filter(item=>item.type===4 && item.file_item).map(item=>{const file=item.file_item!;return {file_name:typeof file.file_name==='string' ? file.file_name : undefined,len:typeof file.len==='string' ? file.len : undefined,media:file.media ? {full_url:file.media.full_url,encrypt_query_param:file.media.encrypt_query_param,aes_key:file.media.aes_key,encrypt_type:file.media.encrypt_type} : undefined};});
     const text = msg.item_list.filter(item => item.type === 1 && typeof item.text_item?.text === 'string').map(item => item.text_item!.text).join('\n');
-    const unsupported = msg.item_list.some(item => item.type !== 1);
-    if (!text && !unsupported) return undefined;
+    const unsupported = msg.item_list.some(item => item.type !== 1 && !(item.type===4 && item.file_item && this.receiveFile));
+    if (!text && !unsupported && !files.length) return undefined;
     const id = String(sourceId), peer = msg.from_user_id, session = msg.session_id ?? '';
-    const reply = unsupported ? '目前支持文字聊天。图片、语音及文件暂未接入，请发送文字。' : this.conversations ? '' : `SEUdaily 微信 demo\n会话：${DEMO_THREAD}\n消息：${id}\n${text.slice(0,1200)}`;
+    const reply = unsupported ? '目前支持文字和文件上传；图片、语音及视频暂未接入。文件请作为原文件发送。' : this.conversations ? '' : `SEUdaily 微信 demo\n会话：${DEMO_THREAD}\n消息：${id}\n${text.slice(0,1200)}`;
     const clientId = 'seudaily-' + createHash('sha256').update(`${account.botId}\0${peer}\0${id}`).digest('hex').slice(0,40);
     const payload = {from_user_id:'',to_user_id:peer,client_id:clientId,message_type:2,message_state:2,context_token:msg.context_token,item_list:[{type:1,text_item:{text:reply}}]};
-    return {sql:`INSERT OR IGNORE INTO wechat_messages(account,id,peer,session,text,reply,threadId,resourceId,payload,state,createdAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,args:[account.botId,id,peer,session,text,reply,this.conversations ? '' : DEMO_THREAD,this.conversations ? '' : DEMO_RESOURCE,JSON.stringify(payload),this.conversations && !unsupported ? 'received' : 'pending',Date.now()]};
+    return {sql:`INSERT OR IGNORE INTO wechat_messages(account,id,peer,session,text,reply,threadId,resourceId,payload,state,createdAt,files,sourceCreatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,args:[account.botId,id,peer,session,text,reply,this.conversations ? '' : DEMO_THREAD,this.conversations ? '' : DEMO_RESOURCE,JSON.stringify(payload),this.conversations && !unsupported ? 'received' : 'pending',Date.now(),JSON.stringify(files),Number.isFinite(msg.create_time_ms) ? msg.create_time_ms! : null]};
   }
   private async prepareReply(row: any, text: string) {
     // Keep one reply/client_id per inbound message; complete long answers remain in Agent history.
     const characters = Array.from(redactText(text));
     const reply = characters.length > 1800 ? characters.slice(0,1800).join('') + '\n\n（回复较长，完整内容请在网页或终端查看。）' : characters.join('');
     const payload = JSON.parse(String(row.payload)); payload.item_list = [{type:1,text_item:{text:reply}}];
-    await this.db.execute({sql:"UPDATE wechat_messages SET reply=?,payload=?,state='pending' WHERE account=? AND id=?",args:[reply,JSON.stringify(payload),row.account,row.id]});
+    await this.db.execute({sql:"UPDATE wechat_messages SET reply=?,payload=?,preparedAt=?,state='pending' WHERE account=? AND id=?",args:[reply,JSON.stringify(payload),Date.now(),row.account,row.id]});
   }
   private async flush(account: BotAccount, signal: AbortSignal) {
     if (this.flushing || signal.aborted || Date.now() < this.nextFlushAt || this.account?.needsLogin) return;
@@ -157,7 +165,7 @@ export class WeChatRuntime {
       for (const row of received) { if (signal.aborted) return; await this.conversations.route(row as any,account); }
       const commands = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state='command' ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
       for (const row of commands) await this.prepareReply(row,await this.conversations.commandReply(row as any));
-      const queued = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state='queued' ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
+      const queued = (await this.db.execute({sql:"SELECT * FROM wechat_messages WHERE account=? AND peer=? AND state IN ('queued','file') ORDER BY rowid LIMIT 100",args:[account.botId,account.userId]})).rows;
       const seen = new Set<string>();
       for (const row of queued) {
         const thread = String(row.threadId);
@@ -165,24 +173,44 @@ export class WeChatRuntime {
         seen.add(thread);
         const worker = (async () => {
           try {
-            let text = await this.conversations!.answer(row as any,signal);
+            let text:string|undefined;
+            if (row.state==='file') {
+              const files=JSON.parse(String(row.files)) as (WeChatFile & {saved?:ReceivedWeChatFile})[];
+              const saved:ReceivedWeChatFile[]=[];
+              if(files.length>10) throw new Error('每条微信消息最多接收 10 个附件');
+              for(const [index,file] of files.entries()) {
+                if(!file.saved) {
+                  const downloaded=await this.protocol.downloadFile(file,AbortSignal.any([signal,AbortSignal.timeout(60000)]));
+                  file.saved=await this.receiveFile!(downloaded.name,downloaded.bytes,`${row.account}:${row.id}:${index}`);
+                  await this.db.execute({sql:'UPDATE wechat_messages SET files=? WHERE account=? AND id=?',args:[JSON.stringify(files),row.account,row.id]});
+                }
+                saved.push(file.saved);
+              }
+              text=await this.conversations!.fileReceipt(row as any,saved);
+            } else {
+              const documents=JSON.parse(String(row.documents || '[]')) as ReceivedWeChatFile[];
+              const refs=documents.length ? await this.prepareFiles!(documents,signal) : undefined;
+              text = await this.conversations!.answer(row as any,signal,refs);
+            }
             if (!signal.aborted && text !== undefined) {
               const current = await this.conversations!.current(account);
               if (current?.threadId !== thread) text = `来自「${await this.conversations!.label(thread)}」\n\n` + text;
               await this.prepareReply(row,text);
             }
           } catch (error) {
-            if (!signal.aborted && (error as any).status !== 409) await this.prepareReply(row,'这次回答未完成，请在网页或终端检查模型配置和会话状态，再重新发送。');
+            if (!signal.aborted && (error as any).status !== 409) await this.prepareReply(row,row.state==='file' ? '文件接收未完成：'+redactText((error as Error).message)+'。请重新发送；已保存的文件仍在资料库。' : JSON.parse(String(row.documents || '[]')).length ? '附件解析或聊天未完成：'+redactText((error as Error).message)+'。原文件仍保存在资料库。' : '这次回答未完成，请在网页或终端检查模型配置和会话状态，再重新发送。');
           }
         })().catch(() => {this.error = '微信回复保存失败，正在重试';}).finally(() => {this.workers.delete(thread);});
         this.workers.set(thread,worker);
       }
     }
-    const rows = (await this.db.execute({sql:"SELECT id,payload FROM wechat_messages WHERE account=? AND peer=? AND state='pending' ORDER BY rowid LIMIT 20",args:[account.botId,account.userId]})).rows;
+    const rows = (await this.db.execute({sql:"SELECT id,payload,text,createdAt,sourceCreatedAt,preparedAt FROM wechat_messages WHERE account=? AND peer=? AND state='pending' ORDER BY rowid LIMIT 20",args:[account.botId,account.userId]})).rows;
     for (const row of rows) {
       if (signal.aborted) return;
       await this.protocol.send(account, JSON.parse(String(row.payload)), AbortSignal.any([signal, AbortSignal.timeout(15000)]));
-      await this.db.execute({sql:"UPDATE wechat_messages SET state='sent' WHERE account=? AND id=?",args:[account.botId,row.id]});
+      const sentAt=Date.now();
+      await this.db.execute({sql:"UPDATE wechat_messages SET state='sent',sentAt=? WHERE account=? AND id=?",args:[sentAt,account.botId,row.id]});
+      if (/^\/new(?:\s|$)/.test(String(row.text))) console.info('微信新建会话耗时：'+JSON.stringify({deliveryMs:row.sourceCreatedAt ? Number(row.createdAt)-Number(row.sourceCreatedAt) : null,localMs:row.preparedAt ? Number(row.preparedAt)-Number(row.createdAt) : null,sendMs:row.preparedAt ? sentAt-Number(row.preparedAt) : null}));
     }
     this.flushFailures = 0; this.nextFlushAt = 0;
     } catch (error) {

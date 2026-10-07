@@ -296,7 +296,7 @@ async function resolveStoredImage(part: Record<string, unknown>) {
 async function storedAttachments(messageId: string, parts: Array<Record<string, unknown>> = []): Promise<ImageAttachment[]> {
   let imageIndex = 0;
   const attachments = await Promise.all(parts.map(async (part, index) => {
-    if (part.type !== "file" && part.type !== "image") return [];
+    if (part.type !== "file" && part.type !== "image" || typeof part.path === "string" && typeof part.data !== "string") return [];
     const path = await resolveStoredImage(part);
     const raw = typeof part.data === "string" ? part.data : typeof part.image === "string" ? part.image : "";
     const ref = /^(?:seudaily|cvstream)-image-ref:/.test(raw) ? raw : undefined;
@@ -359,7 +359,10 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
     const parts = item.content?.parts ?? [];
     const content = item.role === "user" ? visibleStoredContent(storedContent) : storedAssistantContent(parts, storedContent);
     const attachments = item.role === "user" ? await storedAttachments(item.id, item.content?.parts) : undefined;
-    const documents = item.role === "user" ? legacyStoredDocuments(item.id, storedContent) : undefined;
+    const documents = item.role === "user" ? [
+      ...legacyStoredDocuments(item.id, storedContent),
+      ...parts.filter(part=>part.type==='file' && typeof part.filename==='string' && typeof part.path==='string').map((part,index)=>({id:`${item.id}-file-${index}`,name:String(part.filename),mediaType:'application/octet-stream',charCount:0})),
+    ] : undefined;
 
     return {
       id: item.id,

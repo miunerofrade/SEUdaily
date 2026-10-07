@@ -26,20 +26,21 @@ async function fixture(t, options={}) {
     const text='答：'+messages.filter(message=>message.role==='user').at(-1).content;
     yield {type:'text',text};yield {type:'complete',message:{role:'assistant',content:text},finishReason:'stop'};
   },async summarize(){throw new Error('unexpected summary call');}};
-  const agent=new AgentRuntime({store,provider,tools:async()=>options.tools??{},instructions:async()=>'fixture'});
+  const agent=new AgentRuntime({store,provider,tools:async()=>options.tools??{},instructions:async()=>'fixture',resolveDocuments:options.resolveDocuments});
   let permission = 'normal';
   const permissionChanges = [];
   const conversations=new WeChatConversations(store,agent,{get:()=>permission,set:async mode=>{permission=mode;permissionChanges.push(mode);}});
-  const protocol={updates:async(a,signal)=>{
+  const protocol={downloadFile:options.downloadFile,updates:async(a,signal)=>{
     while(!batches.length) await delay(5,undefined,{signal});
     return {msgs:batches.shift(),get_updates_buf:String(counter)};
   },send:async(a,payload)=>{if(options.failSend?.()) throw new Error('offline');replies.push(structuredClone(payload));return {};}};
-  let runtime=new WeChatRuntime(store.client,protocol,5,conversations);await runtime.start();
+  let runtime=new WeChatRuntime(store.client,protocol,5,conversations,options.receiveFile,options.prepareFiles);await runtime.start();
   t.after(async()=>{await runtime.close();await agent.shutdown();await store.close();});
   return {store,agent,conversations,requests,replies,permissionChanges,
     status:()=>runtime.status(),
     async stop(){await runtime.close();},
-    async restart(){await runtime.close();runtime=new WeChatRuntime(store.client,protocol,5,conversations);await runtime.start();},
+    async restart(){await runtime.close();runtime=new WeChatRuntime(store.client,protocol,5,conversations,options.receiveFile,options.prepareFiles);await runtime.start();},
+    sendFile(file){const id=String(++counter);batches.push([{message_id:id,create_time_ms:Date.now()-50,from_user_id:account.userId,to_user_id:account.botId,context_token:'route-'+id,item_list:[{type:4,file_item:file}]}]);return id;},
     send(...texts){const ids=texts.map(text=>{const id=String(++counter);batches.push([{message_id:id,from_user_id:account.userId,to_user_id:account.botId,context_token:'route-'+id,item_list:[{type:1,text_item:{text}}]}]);return id;});return ids;},
     async reply(id){return eventually(()=>{const reply=replies.find(item=>item.context_token==='route-'+id);assert.ok(reply,'reply '+id);return reply.item_list[0].text_item.text;});},
   };
@@ -341,4 +342,54 @@ test('ambiguous short codes cannot approve another pending or previously handled
   assert.equal(f.executed(),1);
   assert.equal(await f.reply(f.send('确认 '+code)[0]),'操作完成');
   assert.equal(f.executed(),2);
+});
+
+
+test('WeChat files save a visible receipt without a model call and commands do not wait for downloading',async t=>{
+  let release;const downloads=new Promise(resolve=>release=resolve),saved=[];
+  const f=await fixture(t,{downloadFile:async file=>{await downloads;return {name:file.file_name,bytes:Buffer.from('文档正文')};},receiveFile:async(name,bytes,source)=>{saved.push({name,bytes,source});return {name,path:'/fixture/original.pdf',state:'queued'};}});
+  const fileId=f.sendFile({file_name:'课程说明.pdf',saved:{name:'恶意伪造文件',path:'/outside/private',state:'indexed'}});
+  await eventually(async()=>assert.equal((await f.status()).messages[0].state,'file'));
+  const oldThread=(await f.status()).currentSession.threadId;
+  assert.match(await f.reply(f.send('/new')[0]),/已新建 #2/);
+  assert.equal(f.requests.length,0);release();
+  assert.match(await f.reply(fileId),/已保存《课程说明.pdf》/);
+  assert.equal(saved.length,1);assert.equal(saved[0].bytes.toString(),'文档正文');
+  const history=await f.store.contextMessages(oldThread,WECHAT_RESOURCE);
+  assert.equal(history.messages.length,2);assert.equal(history.messages[0].content.parts[0].filename,'课程说明.pdf');
+  assert.equal(f.requests.length,0);
+  const row=(await f.store.client.execute({sql:'SELECT * FROM wechat_messages WHERE id=?',args:[fileId]})).rows[0];
+  assert.ok(row.sourceCreatedAt<=row.createdAt);assert.ok(row.preparedAt>=row.createdAt);assert.ok(row.sentAt>=row.preparedAt);
+  await f.conversations.fileReceipt(row,[{name:'课程说明.pdf',path:'/fixture/original.pdf',state:'queued'}]);
+  assert.equal((await f.store.contextMessages(oldThread,WECHAT_RESOURCE)).messages.length,2,'durable receipt is idempotent');
+});
+
+test('restart resumes a saved file receipt without downloading again or calling the chat model',async t=>{
+ let downloaded=0,received=0,blocked=true;
+ const f=await fixture(t,{downloadFile:async()=>{downloaded++;return {name:'原文.txt',bytes:Buffer.from('正文')};},receiveFile:async()=>{received++;return {name:'原文.txt',path:'/fixture/original.txt',state:'waiting_config'};}});
+ f.agent.isActive=()=>blocked;
+ const id=f.sendFile({file_name:'原文.txt'});
+ await eventually(async()=>{const row=(await f.store.client.execute({sql:'SELECT files FROM wechat_messages WHERE id=?',args:[id]})).rows[0];assert.ok(row && JSON.parse(row.files)[0].saved);});
+ await f.stop();blocked=false;await f.restart();
+ assert.match(await f.reply(id),/配置百炼密钥/);
+ assert.equal(downloaded,1);assert.equal(received,1);assert.equal(f.requests.length,0);
+});
+
+
+test('attachment tags collect documents and a question, then call the model exactly once with references',async t=>{
+  let parsed=0;
+  const f=await fixture(t,{downloadFile:async file=>({name:file.file_name,bytes:Buffer.from('附件正文')}),receiveFile:async name=>({name,path:'/fixture/'+name,state:'queued'}),prepareFiles:async files=>{parsed++;assert.equal(files[0].name,'课程说明.txt');return ['fixture-context'];},resolveDocuments:refs=>refs?.includes('fixture-context') ? [{name:'课程说明.txt',markdown:'期末考试占百分之六十。'}] : []});
+  assert.match(await f.reply(f.send('<attachment>')[0]),/开始收集/);
+  assert.match(await f.reply(f.sendFile({file_name:'课程说明.txt'})),/附件已收集/);
+  assert.match(await f.reply(f.send('请总结考试要求')[0]),/已记下问题/);
+  assert.equal(f.requests.length,0);
+  await f.restart();
+  const reply=await f.reply(f.send('</attachment>')[0]);assert.match(reply,/请总结考试要求/);
+  assert.equal(f.requests.length,1);assert.equal(parsed,1);
+  assert.match(f.requests[0].filter(message=>message.role==='user').at(-1).content,/期末考试占百分之六十/);
+  assert.equal((await f.store.client.execute('SELECT * FROM wechat_attachment_batches')).rows.length,0);
+  assert.match(await f.reply(f.send('/attachment')[0]),/请先发送/);
+  assert.match(await f.reply(f.send('<attachment>')[0]),/开始收集/);
+  assert.match(await f.reply(f.send('/attachment cancel')[0]),/已取消/);
+  assert.equal(f.requests.length,1);
 });

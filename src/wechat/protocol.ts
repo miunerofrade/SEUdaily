@@ -1,3 +1,4 @@
+import {downloadWeChatFile,type WeChatFile} from './media.js';
 import { randomBytes } from 'node:crypto';
 import { VERSION } from '../distribution/config.js';
 export const WECHAT_API = 'https://ilinkai.weixin.qq.com';
@@ -14,7 +15,7 @@ export function trustedWeChatBase(value: string): string {
   return url.origin;
 }
 export type BotAccount = { token: string; botId: string; userId: string; base: string; cursor: string; needsLogin: boolean };
-export type WeChatMessage = { message_id?: string; client_id?: string; from_user_id?: string; to_user_id?: string; session_id?: string; group_id?: string; message_type?: number; message_state?: number; context_token?: string; item_list?: { type: number; text_item?: { text?: string } }[] };
+export type WeChatMessage = { message_id?: string; client_id?: string; from_user_id?: string; to_user_id?: string; session_id?: string; create_time_ms?: number; group_id?: string; message_type?: number; message_state?: number; context_token?: string; item_list?: { type: number; text_item?: { text?: string }; file_item?: WeChatFile }[] };
 export class WeChatProtocol {
   constructor(private transport: typeof fetch = fetch) {}
   async request(base: string, path: string, body: unknown | undefined, signal: AbortSignal, token?: string): Promise<any> {
@@ -41,6 +42,7 @@ export class WeChatProtocol {
     if (code !== undefined) throw new WeChatError(code === -14 ? '微信凭证失效，请重新扫码' : `微信接口返回错误码 ${code}`, code);
     return data;
   }
+  downloadFile(file:WeChatFile,signal:AbortSignal) {return downloadWeChatFile(file,signal,this.transport);}
   qr(signal: AbortSignal, tokens: string[]) { return this.request(WECHAT_API, '/ilink/bot/get_bot_qrcode?bot_type=3', { local_token_list: tokens }, signal); }
   qrStatus(base: string, qr: string, signal: AbortSignal, code?: string) {
     return this.request(base, `/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qr)}${code ? `&verify_code=${encodeURIComponent(code)}` : ''}`, undefined, signal);

@@ -1,6 +1,6 @@
 # 微信接入与会话管理
 
-SEUdaily 直接实现[腾讯官方 openclaw-weixin iLink HTTP 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)，无需安装 OpenClaw，也无需申请企业微信 webhook。账号是否具备接入资格、手机上的确认和验证码，以微信实际提示为准。当前支持个人账号的文字聊天和会话管理，文字消息接入现有 Agent；模型配置与 Web/TUI 共用。真实微信账号接入需要本人实测。
+SEUdaily 直接实现[腾讯官方 openclaw-weixin iLink HTTP 协议](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)，无需安装 OpenClaw，也无需申请企业微信 webhook。账号是否具备接入资格、手机上的确认和验证码，以微信实际提示为准。当前支持个人账号的文字聊天、文件上传和会话管理，文字消息接入现有 Agent；模型配置与 Web/TUI 共用。真实微信账号接入需要本人实测。
 
 ## 首次接入
 
@@ -36,7 +36,7 @@ seudaily wechat --data-dir /path/to/data --port 4111
 
 同一会话的消息按接收顺序交给 Agent。回答生成期间仍可使用 `/help`、新建或切换会话；每条消息在入站路由时固定内部会话，切换不会把旧任务的回答放进新会话。旧任务完成时，若当前会话已经变化，微信回复会标明它来自哪个会话。普通权限下，工具审批会直接在微信显示变更内容和编号，回复“确认 编号”或“取消 编号”即可处理，也可使用 `/approve 编号` 或 `/deny 编号`。微信不会自动批准；校园登录和验证码仍需网页/终端处理。已启用完全访问模式时，用户明确要求的本地课表变更可按现有权限执行。
 
-接收兼容可选 type/state 字段缺省及 NEW/FINISH 用户消息，过滤生成中消息和 Bot 消息。只接受绑定时扫码者的个人消息，不接受群消息或其他人的消息。图片、语音和文件暂不下载、不解密、不进入 RAG；收到这些内容时提示改发文字。
+接收兼容可选 type/state 字段缺省及 NEW/FINISH 用户消息，过滤生成中消息和 Bot 消息。只接受绑定时扫码者的个人消息，不接受群消息或其他人的消息。文件消息通过腾讯 CDN 下载并按协议解密，单文件最多 50 MB、每条消息最多 10 个文件；下载在后台运行，新建、切换会话不等待下载。原文件统一出现在“资料库 → 上传文件”，支持的 PDF、DOCX、XLSX、PPTX、TXT、MD 自动进入后台索引，其他格式只保存。文件上传只发送收件确认，不调用聊天模型；本地会话历史也记录文件名和确认。随后直接发文字提问即可使用已有资料。需要把文件正文直接交给本次聊天时，先发 `<attachment>`，再发文件与问题，最后发 `</attachment>`（也可 `/attachment [问题]`）。结束前只收集附件和问题，不调用聊天模型；结束时解析正文并发起一轮聊天。附件仍自动入库，原文件仍在资料库。本轮最多 10 个文件，收集状态按会话保存，重启后保留；`/attachment cancel` 取消本轮提交，不删除已入库文件。微信图片、语音和视频尚未接入，图片若以文件发送会保存原文件，但不做 OCR。
 
 原始微信 `session_id` 和 `context_token` 用于渠道记录/回复路由，与内部 Agent 会话 ID 分开。回复回传对应入站消息的 context_token；稳定 client_id 由 Bot、用户和原消息 ID 生成。
 
@@ -59,7 +59,7 @@ seudaily stop --data-dir /path/to/data --port 4111
 数据位于 `--data-dir` 指定目录的 `.seudaily/agent.db`，使用现有 SQLite WAL、FULL 同步和串行事务机制：
 
 - `wechat_account`：单个 Bot 的 token、Bot ID、扫码用户 ID、经过 HTTPS 官方域名验证的 API 地址、接收游标、是否需要重新登录。二维码和手机验证码只在内存中存在，不落盘。
-- `wechat_messages`：原始微信 ID、peer、外部 session、内部 threadId/resourceId、文本、回复、带 context_token 的待发送 payload、接收时间和 received/command/queued/pending/sent 状态。入站先持久保存，再执行会话命令或交给 Agent；旧 demo 记录保留。
+- `wechat_messages`：原始微信 ID、peer、外部 session、内部 threadId/resourceId、文本、回复、带 context_token 的待发送 payload、微信源时间（接口提供时）、本机接收/准备回复/发送完成时间、附件下载引用及 received/command/queued/file/pending/sent 状态。入站先持久保存，再执行会话命令或交给 Agent；旧 demo 记录保留。
 - `wechat_sessions`：按 Bot 和扫码用户隔离的固定会话编号及内部 threadId；`wechat_current`：该用户在微信当前选中的 threadId；`wechat_delete_confirmations`：待删除会话及 5 分钟确认有效期（重启保留）。
 - Agent 的 `threads/messages/runs/summaries`：正式会话历史、执行状态和上下文摘要。微信资源为 `seudaily-wechat-local`，共享现有 Web/TUI 历史展示；会话命令不会混入模型聊天上下文。
 - 入站消息去重插入与游标提交处于同一事务；游标只有成功响应中的非空新值才会更新。重启继续处理已入站消息和待发送回复，再继续长轮询。会话新建/选择与消息路由在同一事务中提交；重复入站不会重复执行 `/new`。模型轮次使用稳定运行 ID；已完成回答可恢复发送，服务中断的工具执行不会自动重放。
@@ -81,3 +81,7 @@ seudaily stop --data-dir /path/to/data --port 4111
 待审批消息会显示真实操作内容及四位短码，例如“确认 A31D”或“取消 A31D”。兼容原八位编号，输入开头或末尾至少四位即可，字母不区分大小写；若短码对应多个操作，会提示使用完整八位编号。`/approve` 或 `/deny` 不带编号时展示当前待审批操作；确认或取消必须携带编号。编号绑定当前会话和待审批调用，切换会话、重复确认或使用过期编号均不会执行其他任务。控制命令不调用模型；审批恢复原来的模型任务，不新建会话。断线后可继续处理待审批任务，已明确批准的调用不受发现票据十分钟有效期限制，也不会重放已执行的写操作。
 
 学期总周数默认 16，已有明确保存的自定义周数继续保留。只设置起始日期时不改学期名称或总周数；模型不得自行填充这些字段。升级前已经提出的审批保留原参数，需取消不正确的旧请求后重新发起。
+
+## 延迟排查
+
+`/new` 只操作本地数据库，不调用聊天模型。后端日志记录该命令的 deliveryMs（微信消息创建到本机收到）、localMs（收到到回复准备完）、sendMs（回复准备完到发送接口确认）三个阶段。接口缺少源时间时 deliveryMs 为 null，不能据此判断收件耗时。发送接口确认不代表手机已经展示消息。历史消息没有新增时间记录，不倒填推测值。

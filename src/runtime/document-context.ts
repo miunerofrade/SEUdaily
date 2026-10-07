@@ -1,5 +1,5 @@
 import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
-import { mkdirSync, lstatSync, realpathSync, openSync, closeSync, fstatSync, readFileSync, writeFileSync, fsyncSync, constants } from 'node:fs';
+import { mkdirSync, lstatSync, realpathSync, openSync, closeSync, fstatSync, readFileSync, writeFileSync, fsyncSync, ftruncateSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { runtimeRoot } from './runtime-paths.js';
 import { tmpdir } from 'node:os';
@@ -34,6 +34,12 @@ export function storeDocumentContext(ref: string, name: string, markdown: string
   const fd = openContext(ref, true);
   try { writeFileSync(fd, JSON.stringify({ name, markdown, expiresAt: Number.MAX_SAFE_INTEGER }), 'utf8'); fsyncSync(fd); }
   finally { closeSync(fd); }
+}
+
+export function updateDocumentContext(ref:string,name:string,markdown:string) {
+  const fd=openContext(ref);
+  try {ftruncateSync(fd,0);writeFileSync(fd,JSON.stringify({name,markdown,expiresAt:Number.MAX_SAFE_INTEGER}),'utf8');fsyncSync(fd);}
+  finally {closeSync(fd);}
 }
 
 export function resolveDocumentContexts(refs: unknown) {

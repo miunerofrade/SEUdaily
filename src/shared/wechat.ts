@@ -2,7 +2,7 @@ export type WeChatStatus = {
   state: string; loginId?: string; qr?: {size:number;modules:string}; botId?: string; userId?: string;
   threadId: string; resourceId: string; error: string;
   currentSession?: {number:number;threadId:string;title:string};
-  messages: {id:string;peer:string;session:string;text:string;reply:string;state:string;createdAt:number}[];
+  messages: {id:string;peer:string;session:string;text:string;reply:string;state:string;createdAt:number;sourceCreatedAt?:number;preparedAt?:number;sentAt?:number}[];
 };
 export const wechatStateLabel: Record<string,string> = {
   disconnected:'尚未连接微信', wait:'请用微信扫描二维码', scaned:'已扫码，请在手机上确认',

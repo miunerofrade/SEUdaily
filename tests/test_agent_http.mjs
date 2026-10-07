@@ -30,6 +30,13 @@ test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async
  assert.equal(document.knowledge.duplicate,false);
  const again=await (await upload()).json();assert.equal(again.knowledge.duplicate,true);
  assert.equal(again.knowledge.id,document.knowledge.id);
+ const {receiveWeChatFile,prepareWeChatFiles}=await import('../src/wechat/file-receiver.ts');
+ const received=await receiveWeChatFile('课程说明.txt',Buffer.from(document.markdown),'fixture-file-source');
+ assert.equal(await readFile(received.path,'utf8'),document.markdown);
+ const refs=await prepareWeChatFiles([received],new AbortController().signal);
+ const {resolveDocumentContexts}=await import('../src/runtime/document-context.ts');
+ assert.equal(resolveDocumentContexts(refs)[0].markdown,document.markdown);
+ assert.equal((await receiveWeChatFile('课程说明.txt',Buffer.from(document.markdown),'fixture-file-source')).path,received.path);
  const library=await (await request('/app/knowledge')).json();assert.equal(library.documents.length,1);
  const fileList=await (await request('/app/library')).json();
  const storedFiles=fileList.files.filter(item=>item.category==='documents');

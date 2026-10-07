@@ -1,3 +1,4 @@
+import type {ReceivedWeChatFile} from './runtime.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentStore, threadDeletionStatements } from '../agent/storage.js';
 import type { AgentRuntime } from '../agent/runtime.js';
@@ -9,6 +10,7 @@ import type { BotAccount } from './protocol.js';
 export const WECHAT_RESOURCE = 'seudaily-wechat-local';
 export const WECHAT_HELP = `微信聊天
 直接发文字，继续当前会话。
+直接发文件，保存到资料库并自动索引，不调用聊天模型。
 
 /new [名称] — 开始新会话
 /sessions [页码] — 查看会话，★ 表示当前
@@ -21,8 +23,11 @@ export const WECHAT_HELP = `微信聊天
 /deny 编号 — 拒绝操作（也可回复“取消 编号”）
 /help — 查看这些命令
 
+<attachment> — 开始收集本次聊天附件
+</attachment> 或 /attachment [问题] — 结束并提交给模型
+
 完整记录也可在 SEUdaily 网页或终端查看。`;
-type Inbox = { account: string; id: string; peer: string; text: string; threadId: string; resourceId: string; payload: string };
+type Inbox = { account: string; id: string; peer: string; text: string; threadId: string; resourceId: string; payload: string; files?:string; documents?:string };
 const clip = (value: string, limit = 200) => value.length > limit ? value.slice(0, limit) + '…' : value;
 const visible = (message: any) => String(message.content?.content || message.content?.parts?.filter((part: any) => part.type === 'text').map((part: any) => part.text ?? '').join('') || '');
 
@@ -64,6 +69,7 @@ export class WeChatConversations {
   async initialize() {
     await this.store.ready;
     await this.store.client.batch([
+      "CREATE TABLE IF NOT EXISTS wechat_attachment_batches (threadId TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,account TEXT NOT NULL,peer TEXT NOT NULL,files TEXT NOT NULL,text TEXT NOT NULL)",
       'CREATE TABLE IF NOT EXISTS wechat_sessions (account TEXT NOT NULL, peer TEXT NOT NULL, number INTEGER NOT NULL, threadId TEXT UNIQUE NOT NULL, PRIMARY KEY(account,peer,number))',
       'CREATE TABLE IF NOT EXISTS wechat_approval_decisions (account TEXT NOT NULL, id TEXT NOT NULL, threadId TEXT NOT NULL, runToken TEXT NOT NULL, approvalId TEXT NOT NULL, approved INTEGER NOT NULL, PRIMARY KEY(account,id))',
       'CREATE TABLE IF NOT EXISTS wechat_current (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(account,peer))',
@@ -101,24 +107,51 @@ export class WeChatConversations {
     let threadId = '', reply = '', state = 'command';
     const text = row.text.trim();
     const approvalReply = /^(确认|同意|取消|拒绝)\s+([a-f0-9]{1,8})$/i.exec(text);
-    const command = approvalReply ? [text, ['确认','同意'].includes(approvalReply[1]) ? 'approve' : 'deny', approvalReply[2]] : /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+    const hasFiles=JSON.parse(row.files || '[]').length>0;
+    const begin=/^<attachment>(?:\s*([\s\S]*))?$/.exec(text),end=/^<\/attachment>(?:\s*([\s\S]*))?$/.exec(text);
+    const command = hasFiles ? null : begin ? [text,'attachment_begin',begin[1] || ''] : end ? [text,'attachment',end[1] || ''] : approvalReply ? [text, ['确认','同意'].includes(approvalReply[1]) ? 'approve' : 'deny', approvalReply[2]] : /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
     const name = command?.[1]?.toLowerCase(), argument = command?.[2]?.trim() ?? '';
     try {
       const existing = (await tx.execute({sql:"SELECT state FROM wechat_messages WHERE account=? AND id=?",args:[row.account,row.id]})).rows[0];
       if (existing?.state !== 'received') { await tx.rollback(); return; }
       const current = (await tx.execute({sql:`SELECT c.threadId FROM wechat_current c JOIN threads t ON t.id=c.threadId WHERE c.account=? AND c.peer=?`,args:[account.botId,account.userId]})).rows[0];
       threadId = String(current?.threadId ?? '');
-      if ((!threadId && (!command || ['new','context','history'].includes(name!))) || name === 'new') {
+      if ((!threadId && (!command || ['new','context','history','attachment_begin'].includes(name!))) || name === 'new') {
         const number = Number((await tx.execute({sql:'SELECT COALESCE(MAX(number),0)+1 AS n FROM wechat_sessions WHERE account=? AND peer=?',args:[account.botId,account.userId]})).rows[0].n);
         threadId = 'wechat-' + randomUUID();
-        const title = '微信 · ' + (name === 'new' && argument ? clip(argument.replace(/\s+/g,' '), 40) : !command ? clip(text.replace(/\s+/g,' '), 24) : '新对话');
+        const title = '微信 · ' + (name === 'new' && argument ? clip(argument.replace(/\s+/g,' '), 40) : !command ? clip((text || (JSON.parse(row.files || '[]')[0]?.file_name ?? '上传文件')).replace(/\s+/g,' '), 24) : '新对话');
         const now = new Date().toISOString();
         await tx.execute({sql:'INSERT INTO threads VALUES(?,?,?,?,?,?)',args:[threadId,WECHAT_RESOURCE,title,JSON.stringify({channel:'wechat'}),now,now]});
         await tx.execute({sql:'INSERT INTO wechat_sessions VALUES(?,?,?,?)',args:[account.botId,account.userId,number,threadId]});
         await tx.execute({sql:'INSERT INTO wechat_current VALUES(?,?,?) ON CONFLICT(account,peer) DO UPDATE SET threadId=excluded.threadId',args:[account.botId,account.userId,threadId]});
         if (name === 'new') reply = `已新建 #${number}「${title.replace(/^微信 · /,'')}」\n直接发消息开始聊天。旧会话已保留，/sessions 可查看。`;
       }
-      if (!command) state = 'queued';
+      const batch=(await tx.execute({sql:'SELECT files,text FROM wechat_attachment_batches WHERE threadId=? AND account=? AND peer=?',args:[threadId,account.botId,account.userId]})).rows[0];
+      if (!command) {
+        state = hasFiles ? 'file' : 'queued';
+        if(batch && !hasFiles){
+          await tx.execute({sql:"UPDATE wechat_attachment_batches SET text=text || ? WHERE threadId=?",args:['\n'+text,threadId]});
+          state='command';reply='已记下问题。继续发送附件，最后发送 </attachment> 提交。';
+        }
+      }
+      else if(name==='attachment_begin') {
+        if(!batch) await tx.execute({sql:'INSERT INTO wechat_attachment_batches VALUES(?,?,?,?,?)',args:[threadId,account.botId,account.userId,'[]',argument]});
+        reply='开始收集聊天附件。发送文件和问题，最后发送 </attachment> 或 /attachment 提交给模型。';
+      }
+      else if(name==='attachment') {
+        const pending=(await tx.execute({sql:"SELECT 1 FROM wechat_messages WHERE threadId=? AND state='file' LIMIT 1",args:[threadId]})).rows.length;
+        const files=JSON.parse(String(batch?.files || '[]'));
+        if(argument==='cancel' && batch){await tx.execute({sql:'DELETE FROM wechat_attachment_batches WHERE threadId=?',args:[threadId]});reply='已取消本轮附件聊天，已上传的文件仍保存在资料库。';}
+        else if(!batch)reply='请先发送 <attachment>，再发送文件和问题。';
+        else if(pending)reply='附件还在接收，请稍后再次发送 </attachment>。';
+        else if(!files.length)reply='还没有收到附件，请先发送文件，再发送 </attachment>。';
+        else {
+          const prompt=[String(batch.text),argument].filter(value=>value.trim()).join('\n') || '请阅读本次上传的附件，概括内容并说明可以帮助我分析哪些问题。';
+          await tx.execute({sql:'UPDATE wechat_messages SET text=?,documents=? WHERE account=? AND id=?',args:[prompt,JSON.stringify(files),row.account,row.id]});
+          await tx.execute({sql:'DELETE FROM wechat_attachment_batches WHERE threadId=?',args:[threadId]});
+          state='queued';
+        }
+      }
       else if (name === 'help') reply = WECHAT_HELP;
       else if (name === 'permission') reply = '@permission:' + argument;
       else if (name === 'approve' || name === 'deny') {
@@ -164,7 +197,7 @@ export class WeChatConversations {
         } else {
           const id = String(target.threadId), label = `#${target.number}「${clip(String(target.title || '新对话').replace(/^微信 · /,''),40)}」`;
           const running = this.agent.isActive(id) || (await tx.execute({sql:"SELECT 1 FROM runs WHERE threadId=? AND status IN ('running','waiting') LIMIT 1",args:[id]})).rows.length > 0;
-          const unsent = (await tx.execute({sql:"SELECT 1 FROM wechat_messages WHERE account=? AND peer=? AND threadId=? AND state IN ('queued','pending') LIMIT 1",args:[account.botId,account.userId,id]})).rows.length > 0;
+          const unsent = (await tx.execute({sql:"SELECT 1 FROM wechat_messages WHERE account=? AND peer=? AND threadId=? AND state IN ('queued','pending','file') LIMIT 1",args:[account.botId,account.userId,id]})).rows.length > 0;
           if (running || unsent) reply = `暂时不能删除 ${label}：还有任务、待审批操作或未发送的回复。请等待完成，或在网页／终端处理后再试。`;
           else if (parsed?.[2] !== '确认') {
             await tx.execute({sql:'INSERT INTO wechat_delete_confirmations VALUES(?,?,?,?,?) ON CONFLICT(account,peer) DO UPDATE SET threadId=excluded.threadId,number=excluded.number,expiresAt=excluded.expiresAt',args:[account.botId,account.userId,id,Number(target.number),Date.now()+5*60_000]});
@@ -218,7 +251,7 @@ export class WeChatConversations {
     const rows = history.slice(start,end);
     return rows.length ? `最近对话 ${heading} · 第 ${page} 页\n\n${rows.map(message => `${message.role === 'user' ? '你' : '助手'}：${clip(visible(message),250)}`).join('\n\n')}\n\n${start > 0 ? `/history ${page+1} 查看更早记录；` : ''}完整原文在网页或终端。` : '这一页没有对话记录。';
   }
-  async answer(row: Inbox, signal: AbortSignal) {
+  async answer(row: Inbox, signal: AbortSignal,documentRefs?:string[]) {
     const runToken = 'wechat-' + createHash('sha256').update(row.account + '\0' + row.peer + '\0' + row.id).digest('hex');
     const decision = (await this.store.client.execute({sql:'SELECT * FROM wechat_approval_decisions WHERE account=? AND id=? AND threadId=?',args:[row.account,row.id,row.threadId]})).rows[0];
     let run = await this.store.getRun(decision ? String(decision.runToken) : runToken);
@@ -234,7 +267,7 @@ export class WeChatConversations {
       const waiting = await this.store.waitingRun(row.threadId);
       if (waiting) return approvalText(waiting);
       if (!await this.store.getThreadById({threadId:row.threadId,resourceId:WECHAT_RESOURCE})) return '这个会话已被删除。发送 /new 开始新会话。';
-      const events = await this.agent.runTurn([{role:'user',content:row.text}],{threadId:row.threadId,resourceId:WECHAT_RESOURCE,runToken,userMessageId:runToken+'-user',assistantMessageId:runToken+'-assistant',interface:'wechat',namespaces:inferToolNamespaces(row.text)},signal);
+      const events = await this.agent.runTurn([{role:'user',content:row.text}],{threadId:row.threadId,resourceId:WECHAT_RESOURCE,runToken,userMessageId:runToken+'-user',assistantMessageId:runToken+'-assistant',interface:'wechat',documentRefs,namespaces:inferToolNamespaces(row.text)},signal);
       for await (const event of events) { if (signal.aborted) return undefined; }
       run = await this.store.getRun(runToken);
     }
@@ -248,6 +281,35 @@ export class WeChatConversations {
       return `${text ? clip(text,1300)+'\n\n' : ''}这次回答未完成，请在网页或终端查看详情和模型配置，再重新发送。`;
     }
     return redactText(text || '回答已完成，详细结果请在网页或终端查看。');
+  }
+  async fileReceipt(row:Inbox,files:ReceivedWeChatFile[]) {
+    if(this.agent.isActive(row.threadId)) return undefined;
+    const collecting=(await this.store.client.execute({sql:'SELECT threadId FROM wechat_attachment_batches WHERE threadId=?',args:[row.threadId]})).rows.length>0;
+    const reply=files.map(file=>`已保存《${file.name}》${['queued','indexed','processing'].includes(file.state) ? '，已加入后台索引' : file.state==='waiting_config' ? '，配置百炼密钥后自动索引' : file.state==='unsupported' ? '，该格式暂不索引' : '，暂未索引，请在资料库检查'}`).join('\n')+(collecting ? '\n附件已收集；继续发送文件或问题，最后发送 </attachment> 提交。' : '\n原文件在资料库 → 上传文件；可以继续发文件或提问。');
+    const id='wechat-file-'+createHash('sha256').update(row.account+'\0'+row.id).digest('hex');
+    const tx=await this.store.client.transaction('write');
+    try {
+      const thread=(await tx.execute({sql:'SELECT metadata FROM threads WHERE id=? AND resourceId=?',args:[row.threadId,WECHAT_RESOURCE]})).rows[0];
+      if(!thread)throw new Error('会话已删除');
+      const existing=(await tx.execute({sql:'SELECT id FROM messages WHERE id=?',args:[id+'-user']})).rows.length;
+      if(!existing){
+        const batch=(await tx.execute({sql:'SELECT files FROM wechat_attachment_batches WHERE threadId=? AND account=? AND peer=?',args:[row.threadId,row.account,row.peer]})).rows[0];
+        if(batch){
+          const collected=JSON.parse(String(batch.files)) as ReceivedWeChatFile[];
+          const unique=new Map([...collected,...files].map(file=>[file.path,file]));
+          if(unique.size>10)throw new Error('本轮聊天附件最多 10 个，新文件已保存到资料库；先结束本轮再开始下一轮');
+          await tx.execute({sql:'UPDATE wechat_attachment_batches SET files=? WHERE threadId=?',args:[JSON.stringify([...unique.values()]),row.threadId]});
+        }
+        const metadata=JSON.parse(String(thread.metadata)),now=new Date().toISOString();
+        const parts=files.map(file=>({type:'file',filename:file.name,path:file.path}));
+        const content=row.text || '上传文件：'+files.map(file=>file.name).join('、');
+        const user={content,parts,parentId:metadata.activeLeaf ?? null,modelMessages:[{role:'user',content}]};
+        const assistant={content:reply,parts:[{type:'text',text:reply}],parentId:id+'-user'};
+        for(const [messageId,role,content] of [[id+'-user','user',user],[id+'-assistant','assistant',assistant]] as const) await tx.execute({sql:'INSERT INTO messages(id,threadId,resourceId,role,content,createdAt) VALUES(?,?,?,?,?,?)',args:[messageId,row.threadId,WECHAT_RESOURCE,role,JSON.stringify(content),now]});
+        await tx.execute({sql:'UPDATE threads SET metadata=?,updatedAt=? WHERE id=?',args:[JSON.stringify({...metadata,activeLeaf:id+'-assistant'}),now,row.threadId]});
+      }
+      await tx.commit();return reply;
+    }catch(error){await tx.rollback();throw error;}finally{tx.close();}
   }
   async label(threadId: string) {
     const thread = await this.store.getThreadById({threadId,resourceId:WECHAT_RESOURCE});

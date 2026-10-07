@@ -1,3 +1,4 @@
+import {receiveWeChatFile,prepareWeChatFiles} from '../wechat/file-receiver.js';
 import type { Hono } from 'hono';
 import { chmod } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -8,7 +9,7 @@ import { WeChatRuntime } from '../wechat/runtime.js';
 import { WeChatConversations } from '../wechat/conversations.js';
 import { agentRuntime } from '../runtime/application.js';
 import { ensurePersistentRuntime } from './lifecycle.js';
-export const wechatRuntime = new WeChatRuntime(agentStore.client,undefined,1000,new WeChatConversations(agentStore,agentRuntime));
+export const wechatRuntime = new WeChatRuntime(agentStore.client,undefined,1000,new WeChatConversations(agentStore,agentRuntime),receiveWeChatFile,prepareWeChatFiles);
 let prepared: Promise<void> | undefined;
 function prepare() { return prepared ??= prepareOnce(); }
 async function prepareOnce() {
