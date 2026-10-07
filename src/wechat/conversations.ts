@@ -27,7 +27,8 @@ const clip = (value: string, limit = 200) => value.length > limit ? value.slice(
 const visible = (message: any) => String(message.content?.content || message.content?.parts?.filter((part: any) => part.type === 'text').map((part: any) => part.text ?? '').join('') || '');
 
 const approvalCode = (id: string) => createHash('sha256').update(id).digest('hex').slice(0, 8).toUpperCase();
-function approvalText(run: any) {
+const matchesApprovalCode = (id: string, input: string) => /^[A-F0-9]{4,8}$/.test(input) && (approvalCode(id).startsWith(input) || approvalCode(id).endsWith(input));
+function approvalText(run: any, fullCode = false) {
   const call = run.pendingCalls?.find((call: any) => call.id === run.approval?.callId);
   if (!run.approval || !call) return '当前没有待审批操作。';
   let args: any;
@@ -52,7 +53,7 @@ function approvalText(run: any) {
     const fields: Record<string,string> = {courseName:'课程名',teacherName:'教师',classroom:'教室',weekday:'星期',startPeriod:'开始节次',endPeriod:'结束节次',weeks:'周次'};
     for (const [key,value] of Object.entries(schedule.changes ?? course ?? {})) if (fields[key]) lines.push(`${fields[key]}：${Array.isArray(value) ? value.join(',') : value}`);
   } else lines.push(clip(JSON.stringify(redactValue(args)),700));
-  const code = approvalCode(run.approval.id);
+  const code = approvalCode(run.approval.id).slice(0, fullCode ? 8 : 4);
   return redactText(lines.join('\n')) + `\n\n确认请回复：确认 ${code}\n拒绝请回复：取消 ${code}\n也可用 /approve ${code} 或 /deny ${code}。`;
 }
 type PermissionControls = {get: () => PermissionMode; set: (mode: PermissionMode) => Promise<void>};
@@ -99,7 +100,7 @@ export class WeChatConversations {
     const tx = await this.store.client.transaction();
     let threadId = '', reply = '', state = 'command';
     const text = row.text.trim();
-    const approvalReply = /^(确认|同意|取消|拒绝)\s+([a-f0-9]{8})$/i.exec(text);
+    const approvalReply = /^(确认|同意|取消|拒绝)\s+([a-f0-9]{1,8})$/i.exec(text);
     const command = approvalReply ? [text, ['确认','同意'].includes(approvalReply[1]) ? 'approve' : 'deny', approvalReply[2]] : /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
     const name = command?.[1]?.toLowerCase(), argument = command?.[2]?.trim() ?? '';
     try {
@@ -125,10 +126,17 @@ export class WeChatConversations {
         const run = saved ? JSON.parse(String(saved.state)) : undefined;
         if (!run?.approval) reply = '当前会话没有待审批操作。/sessions 和 /use 可切换会话。';
         else if (!argument) reply = approvalText(run);
-        else if (argument.toUpperCase() !== approvalCode(run.approval.id)) reply = '审批编号已失效或不属于当前会话，未执行操作。\n\n' + approvalText(run);
+        else if (!matchesApprovalCode(run.approval.id, argument.toUpperCase())) reply = '审批编号已失效、少于四位或不属于当前会话，未执行操作。\n\n' + approvalText(run);
         else {
-          await tx.execute({sql:'INSERT INTO wechat_approval_decisions VALUES(?,?,?,?,?,?)',args:[row.account,row.id,threadId,run.id,run.approval.id,name === 'approve' ? 1 : 0]});
-          state = 'queued';
+          // Reject ambiguous abbreviations, including ones already consumed in this binding.
+          const pending = (await tx.execute({sql:"SELECT r.state FROM runs r JOIN wechat_sessions s ON s.threadId=r.threadId WHERE s.account=? AND s.peer=? AND r.status='waiting'",args:[account.botId,account.userId]})).rows;
+          const consumed = (await tx.execute({sql:'SELECT d.approvalId FROM wechat_approval_decisions d JOIN wechat_messages m ON m.account=d.account AND m.id=d.id WHERE d.account=? AND m.peer=?',args:[account.botId,account.userId]})).rows;
+          const ids = new Set<string>([...pending.map(row=>JSON.parse(String(row.state)).approval?.id),...consumed.map(row=>String(row.approvalId))].filter(Boolean));
+          if ([...ids].filter(id=>matchesApprovalCode(id,argument.toUpperCase())).length !== 1) reply = '这个短编号对应多个操作，请使用下面的完整编号。\n\n' + approvalText(run,true);
+          else {
+            await tx.execute({sql:'INSERT INTO wechat_approval_decisions VALUES(?,?,?,?,?,?)',args:[row.account,row.id,threadId,run.id,run.approval.id,name === 'approve' ? 1 : 0]});
+            state = 'queued';
+          }
         }
       }
       else if (name === 'sessions') {

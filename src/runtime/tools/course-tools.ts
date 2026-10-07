@@ -389,7 +389,7 @@ export const proposeLocalActionTool = createTool({
     return {type: "text" as const, value: JSON.stringify({status: output.status, summary: output.summary, change: data.change, warnings: output.warnings})};
   },
   id: "propose-local-action",
-  description: "管理本地课表或创建关注。preview 只提出方案；apply 按现有权限执行，普通模式需审批，完全访问模式可直接执行。支持学期设置、周期/单日增课、改单日课程、停课与移动单次课，不能修改学校远端课表。",
+  description: "管理本地课表或创建关注。preview 只提出方案；apply 按现有权限执行，普通模式需审批，完全访问模式可直接执行。支持学期设置、周期/单日增课、改单日课程、停课与移动单次课，不能修改学校远端课表。学期起止日期可先用 read-web-page 读取学校校历确认；semester 仅支持 name/startDate/totalWeeks，未指定总周数保留已有值，缺省为 16 周。",
   requireApproval: (input, options) => input.mode === "apply" && !isUnapprovedAccessEnabled(options),
   inputSchema: localActionProposalSchema,
   execute: async (input, options) => {

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AgentStore } from '../src/agent/storage.ts';
@@ -154,7 +155,7 @@ test('session creation rolls back on a routing failure and cross-account session
 test('tool approval is not automatically granted through WeChat',async t=>{
   let executed=0;
   const f=await fixture(t,{tools:{probe:{id:'probe',description:'write',requireApproval:true,inputSchema:z.object({}),execute:async()=>{executed++;return {};}}},stream:async function*(){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'call',type:'function',function:{name:'probe',arguments:'{}'}}]},finishReason:'tool_calls'};}});
-  assert.match(await f.reply(f.send('试一下需要确认的操作')[0]),/确认 [A-F0-9]{8}/);
+  assert.match(await f.reply(f.send('试一下需要确认的操作')[0]),/确认 [A-F0-9]{4}/);
   assert.equal(executed,0);
   assert.match(await f.reply(f.send('继续')[0]),/待确认：/);
   assert.equal(f.requests.length,1);
@@ -264,7 +265,7 @@ async function approvalFixture(t) {
 test('text approval survives reconnect, is bound to the current session and never executes twice',async t=>{
   const f=await approvalFixture(t);
   const prompt=await f.reply(f.send('做个操作')[0]);
-  const code=/确认 ([A-F0-9]{8})/.exec(prompt)[1];
+  const code=/确认 ([A-F0-9]{4})/.exec(prompt)[1];
   assert.equal(f.executed(),0);
   await f.restart();
   assert.match(await f.reply(f.send('/approve')[0]),new RegExp(code));
@@ -287,13 +288,57 @@ test('text approval survives reconnect, is bound to the current session and neve
 
 test('text refusal resumes the conversation without performing the operation',async t=>{
   const f=await approvalFixture(t);
-  const prompt=await f.reply(f.send('需要审批')[0]);const code=/确认 ([A-F0-9]{8})/.exec(prompt)[1];
+  const prompt=await f.reply(f.send('需要审批')[0]);const code=/确认 ([A-F0-9]{4})/.exec(prompt)[1];
   assert.equal(await f.reply(f.send('/deny '+code)[0]),'操作已拒绝');
   assert.equal(f.executed(),0);
   assert.equal(await f.store.waitingRun((await f.status()).currentSession.threadId),undefined);
-  const again=await f.reply(f.send('再问一次')[0]);const another=/确认 ([A-F0-9]{8})/.exec(again)[1];
+  const again=await f.reply(f.send('再问一次')[0]);const another=/确认 ([A-F0-9]{4})/.exec(again)[1];
   assert.notEqual(another,code);
   assert.match(await f.reply(f.send('/approve '+code)[0]),/编号已失效/);
   assert.equal(await f.reply(f.send('取消 '+another)[0]),'操作已拒绝');
   assert.equal(f.executed(),0);
+});
+
+
+const fullApprovalCode = id => createHash('sha256').update(id).digest('hex').slice(0,8).toUpperCase();
+test('approval accepts a lowercase suffix and legacy full code but rejects fewer than four digits',async t=>{
+  const f=await approvalFixture(t);
+  await f.reply(f.send('需要批准')[0]);
+  const run=await f.store.waitingRun((await f.status()).currentSession.threadId);
+  const code=fullApprovalCode(run.approval.id);
+  assert.match(await f.reply(f.send('确认 '+code.slice(0,3))[0]),/少于四位/);
+  assert.equal(f.executed(),0);
+  assert.equal(await f.reply(f.send('确认 '+code.slice(-4).toLowerCase())[0]),'操作完成');
+  assert.equal(f.executed(),1);
+  await f.reply(f.send('需要拒绝')[0]);
+  const next=await f.store.waitingRun((await f.status()).currentSession.threadId);
+  assert.equal(await f.reply(f.send('/deny '+fullApprovalCode(next.approval.id))[0]),'操作已拒绝');
+  assert.equal(f.executed(),1);
+});
+
+test('ambiguous short codes cannot approve another pending or previously handled operation',async t=>{
+  const f=await approvalFixture(t);
+  await f.reply(f.send('第一个操作')[0]);
+  const first=await f.store.waitingRun((await f.status()).currentSession.threadId);
+  const code=fullApprovalCode(first.approval.id);
+  await f.reply(f.send('/new 第二个会话')[0]);
+  await f.reply(f.send('第二个操作')[0]);
+  const second=await f.store.waitingRun((await f.status()).currentSession.threadId);
+  let colliding;
+  for(let i=0;i<2000000;i++) {
+    const id='fixture-collision-'+i, candidate=fullApprovalCode(id);
+    if(candidate.startsWith(code.slice(0,4)) && candidate!==code) {colliding=id;break;}
+  }
+  assert.ok(colliding,'fixture must find a four-digit collision');
+  second.approval.id=colliding;await f.store.saveRun(second);
+  assert.match(await f.reply(f.send('/approve '+code.slice(0,4))[0]),/对应多个操作/);
+  assert.equal(f.executed(),0);
+  assert.equal(await f.reply(f.send('/approve '+fullApprovalCode(colliding))[0]),'操作完成');
+  assert.equal(f.executed(),1);
+  await f.reply(f.send('/use 1')[0]);
+  // A stale short code remains ambiguous even after its original operation completed.
+  assert.match(await f.reply(f.send('确认 '+code.slice(0,4))[0]),/对应多个操作/);
+  assert.equal(f.executed(),1);
+  assert.equal(await f.reply(f.send('确认 '+code)[0]),'操作完成');
+  assert.equal(f.executed(),2);
 });

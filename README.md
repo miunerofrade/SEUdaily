@@ -309,4 +309,4 @@ SEUdaily 自有代码采用 [MIT](https://github.com/miunerofrade/SEUdaily/blob/
 
 服务管理：`seudaily ps` 列出运行中的 SEUdaily 后端；`seudaily stop --port 4111` 或 `seudaily stop <PID>` 只停止选定的一个服务。旧版后端也可以查看和停止，不要求版本或数据目录与当前 CLI 一致。源码用户可用 `seudaily wechat --data-dir "$PWD"` 保留仓库中的原有数据。所有子命令均通过 npm 的 `seudaily` 入口运行。
 
-微信与终端均支持 `/permission` 查看模式，`/permission normal|full|extra` 切换并持久保存共享权限。微信待审批操作可回复“确认 编号”或“取消 编号”，也支持 `/approve 编号`、`/deny 编号`。学期默认总周数为 16，只设置起始日期时不修改其他字段。
+微信与终端均支持 `/permission` 查看模式，`/permission normal|full|extra` 切换并持久保存共享权限。微信待审批操作会显示四位短码，可回复“确认 短码”或“取消 短码”（兼容旧编号的开头或末尾至少四位），也支持 `/approve 编号`、`/deny 编号`。学期默认总周数为 16，只设置起始日期时不修改其他字段。
