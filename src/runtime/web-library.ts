@@ -61,10 +61,11 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       if(!entry.isFile() || !entry.name.endsWith('.json'))continue;
       try {
         const article=JSON.parse(await readFile(resolve(directory,entry.name),'utf8'));
-        if(typeof article.url!=='string' || (!String(article.content || '').trim() && !article.attachments?.length))continue;
+        if(typeof article.url!=='string')continue;
         const section={source:sourceIdentity({url:article.url}).name,label:String(article.categoryLabel || (noticeSources as any)[site]?.categories?.[article.category]?.[0] || '其他资料')};
         articleSections.set(article.url,section);
         for(const attachment of article.attachments || [])if(typeof attachment.url==='string')articleSections.set(attachment.url,section);
+        if(!String(article.content || '').trim() && !article.attachments?.length)continue;
         const title=String(article.title || '通知正文');
         const links=(article.attachments || []).filter((item:any)=>/\.pdf(?:$|[?#])/i.test(item.url || '')).map((item:any)=>`- [${item.name}](${item.url})`).join('\n');
         const bytes=Buffer.from('# '+title+'\n\n来源：'+article.url+'\n\n'+String(article.content || '')+(links?'\n\n## 附件\n\n'+links:''));

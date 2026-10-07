@@ -77,3 +77,15 @@ test('configured Chinese source name replaces a stored raw hostname without movi
  assert.deepEqual(entries.get(path).sources,['东大新闻网']);
  const saved=JSON.parse(await readFile(record,'utf8'));assert.equal(saved.path,path);assert.equal(saved.source.name,'东大新闻网');
 });
+
+
+test('PDF-only cached notices keep their known column even when the text body is empty',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'seudaily-pdf-column-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const articles=join(root,'.seudaily/jwc/articles');await mkdir(articles,{recursive:true});
+ const url='https://jwc.seu.edu.cn/2026/0928/c21681a584569/page.htm';
+ await writeFile(join(articles,'notice.json'),JSON.stringify({title:'竞赛通知',url,content:'',category:'practice'}));
+ const {records}=await legacyFile(root,[['https://jwc.seu.edu.cn/attachment.pdf',url]],'%PDF-fixture');
+ const entries=await webLibraryEntries(root);assert.equal(entries.size,1);
+ assert.deepEqual([...entries.values()][0].sections,[{source:'教务处',label:'实践教学'}]);
+ assert.deepEqual(JSON.parse(await readFile(records[0],'utf8')).noticeSection,{source:'教务处',label:'实践教学'});
+});

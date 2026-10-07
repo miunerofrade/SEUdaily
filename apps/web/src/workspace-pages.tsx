@@ -831,6 +831,15 @@ export function LibraryPage() {
   const [error, setError] = useState("");
   const load = useCallback(async () => { setLoading(true); setError(""); try { setFiles((await fetchLibrary()).files); } catch (reason) { setError(reason instanceof Error ? reason.message : "资料读取失败"); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let disposed=false,pending=false;
+    const timer=setInterval(()=>{
+      if(document.hidden || pending)return;
+      pending=true;
+      void fetchLibrary().then(response=>{if(!disposed)setFiles(response.files);}).catch(()=>undefined).finally(()=>{pending=false;});
+    },10_000);
+    return ()=>{disposed=true;clearInterval(timer);};
+  },[]);
   const categories = [{id:"documents",label:"上传文件"}, {id:"references",label:"参考资料"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
   const visible = files.filter((file) => file.category === category);
   const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
