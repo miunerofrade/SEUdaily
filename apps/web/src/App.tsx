@@ -727,7 +727,8 @@ export default function App() {
   useLayoutEffect(() => {
     resetComposerAttachments();
   }, [activeRaw.id]);
-  const active = { ...activeRaw, messages: activeRaw.messagesLoaded === false ? [] : conversationPath(activeRaw.messages, activeRaw.activeLeaf).filter(message => !message.hidden) };
+  const activeMessages=useMemo(()=>activeRaw.messagesLoaded === false ? [] : conversationPath(activeRaw.messages,activeRaw.activeLeaf).filter(message=>!message.hidden),[activeRaw.messages,activeRaw.activeLeaf,activeRaw.messagesLoaded]);
+  const active = { ...activeRaw, messages:activeMessages };
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
   const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
   const recentConversations = useMemo(() => [
@@ -862,9 +863,13 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deleteTarget, deleting]);
 
-  useEffect(() => {
-    messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [active.messages]);
+  const chatScrollRef=useRef<HTMLElement>(null);
+  const followBottomRef=useRef(true);
+  useLayoutEffect(()=>{followBottomRef.current=true;},[active.id,view]);
+  useLayoutEffect(()=>{
+    const container=chatScrollRef.current;
+    if(container && followBottomRef.current)container.scrollTop=container.scrollHeight;
+  },[active.messages,active.id,view]);
 
   function mutateMessage(conversationId: string, messageId: string, updater: (message: ChatMessage) => ChatMessage) {
     setConversations((current) => current.map((conversation) => conversation.id === conversationId
@@ -1501,7 +1506,7 @@ export default function App() {
           {recentConversations.map(({ kind, conversation }) => (
             <div key={`${kind}-${conversation.id}`} className={`conversation-row ${kind === "focus" ? "focus-conversation" : ""} ${(kind === "chat" && view === "chat" && conversation.id === active.id) || (kind === "focus" && view === "focus" && conversation.focusId === selectedFocusId) ? "active" : ""}`}>
               <button className="conversation-item" onClick={() => kind === "focus" ? openFocusConversation(conversation.focusId || conversation.id) : (() => { setActiveId(conversation.id); setView("chat"); setNavOpen(false); })()}>
-                <span><strong>{conversation.title}</strong><small>{conversation.resourceId === 'seudaily-wechat-local' ? '微信 · ' : ''}{humanTime(conversation.updatedAt)}</small></span>
+                <span><strong>{conversation.title.replace(/^微信 · /,'')}</strong><small>创建于{conversation.source || (conversation.resourceId==='seudaily-wechat-local' ? '微信' : '网页')} · {humanTime(conversation.updatedAt)}</small></span>
               </button>
               {kind === "chat" && <button
                 type="button"
@@ -1532,7 +1537,10 @@ export default function App() {
           </div>
         </header>
 
-        <section className="chat-scroll">
+        <section className="chat-scroll" ref={chatScrollRef} onScroll={event=>{
+          const container=event.currentTarget;
+          followBottomRef.current=container.scrollHeight-container.scrollTop-container.clientHeight<24;
+        }}>
           {conversationError && !active.messages.length && activeRaw.messagesLoaded !== false && <div className="page-state error">{conversationError}</div>}
           {activeRaw.messagesLoaded === false && <div className="page-state">{conversationError || "正在加载会话历史…"}{conversationError && <button type="button" onClick={() => setHistoryReload(current => current + 1)}>重试</button>}</div>}
           {!active.messages.length ? (

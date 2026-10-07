@@ -1,3 +1,4 @@
+import {webLibraryNames} from './web-library.js';
 import { redactText } from '../agent/redaction.js';
 import { parseEnv, readEnvFile, updateEnvFile } from "./environment-settings.js";
 import { existsSync } from 'node:fs';
@@ -206,7 +207,7 @@ async function fullResultData(result: ToolResult): Promise<unknown> {
 
 type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
 
-const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents'), resolve(projectRoot, '.seudaily', 'knowledge', 'files')];
+const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents'), resolve(projectRoot, '.seudaily', 'knowledge', 'files'), resolve(projectRoot,'.seudaily','web-files','files')];
 
 function isWithinDirectory(root: string, target: string, allowRoot = false) {
   const child = relative(root, target);
@@ -276,7 +277,7 @@ async function walkFiles(root: string, directory = root, output: LibraryFile[] =
       continue;
     }
     const extension = extname(entry.name).toLowerCase();
-    if (![".md", ".txt", ".pdf", ".ppt", ".pptx", ".mp3", ".m4a", ".wav", ".mp4", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(extension)) continue;
+    if (![".md", ".txt", ".pdf", ".docx", ".xlsx", ".ppt", ".pptx", ".mp3", ".m4a", ".wav", ".mp4", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(extension)) continue;
     output.push({
       path: fullPath,
       ...libraryIdentity(root, fullPath),
@@ -607,6 +608,9 @@ export const appRoutes = [
         const document=indexed.get(file.path);
         return document ? [{...file,name:document.name,category:'documents',course:'上传文件',teacher:'本地文件'}] : [];
       }));
+      const webNames=await webLibraryNames(projectRoot);
+      const webFiles=await walkFiles(resolve(projectRoot,'.seudaily','web-files','files'));
+      files.push(...webFiles.map(file=>({...file,name:webNames.get(file.path) || file.name,category:'web',course:'网页与通知',teacher:'本地缓存'})));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return c.json({ root, files, count: files.length });
     },
@@ -771,10 +775,10 @@ export const appRoutes = [
     handler: async (c: any) => {
       const refresh = c.req.query("refresh") !== "false";
       const result = await runPythonTool<ToolResult>("list-jwc", {
-        categories: ["news", "academic", "lectures"],
+        categories: c.req.query("category") ? z.array(z.enum(["news","academic","lectures","student_status","practice"])).parse([c.req.query("category")]) : ["news", "academic", "lectures", "student_status", "practice"],
         freshness: refresh ? "latest" : "cache_only",
         timeScope: "any",
-        limit: 20,
+        limit: 60,
       });
       return c.json(resultResponse(result));
     },

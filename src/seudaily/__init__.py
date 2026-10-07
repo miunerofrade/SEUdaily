@@ -1,3 +1,3 @@
 """SEUdaily automation services exposed to the Mastra agent layer."""
 
-__version__ = "1.1.16"
+__version__ = "1.1.17"

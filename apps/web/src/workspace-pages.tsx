@@ -828,12 +828,13 @@ export function LibraryPage() {
   const [error, setError] = useState("");
   const load = useCallback(async () => { setLoading(true); setError(""); try { setFiles((await fetchLibrary()).files); } catch (reason) { setError(reason instanceof Error ? reason.message : "资料读取失败"); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
-  const categories = [{id:"documents",label:"上传文件"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
+  const categories = [{id:"documents",label:"上传文件"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
   const visible = files.filter((file) => file.category === category);
   const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
   const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
-  const selectedFiles = category === "documents" ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
-  const columnCount = category === "documents" ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
+  const flatCategory = ["documents","web"].includes(category);
+  const selectedFiles = flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
+  const columnCount = flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
 
   function chooseCategory(next: string) { setCategory(next); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
   function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
@@ -865,13 +866,13 @@ export function LibraryPage() {
         <div className="browser-column">
           <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
         </div>
-        {category && category !== "documents" && <div className="browser-column">
+        {category && !flatCategory && <div className="browser-column">
           <div className="browser-column-list">{courses.length ? courses.map((item) => <button key={item} className={course === item ? "selected" : ""} onClick={() => chooseCourse(item)}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无课程资料</div>}</div>
         </div>}
         {course && <div className="browser-column">
           <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
         </div>}
-        {((course && teacher) || category === "documents") && <div className="browser-column browser-file-column">
+        {((course && teacher) || flatCategory) && <div className="browser-column browser-file-column">
           <div className="browser-column-list">{selectedFiles.length ? selectedFiles.map((file) => <button key={file.path} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}>{file.category === "images" ? <FileImage size={17} /> : <FileText size={17} />}<span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
         </div>}
       </div>
@@ -899,11 +900,13 @@ function friendlyFileName(file: LibraryFile) {
   return file.name;
 }
 
+const noticeLabels:Record<string,string>={news:"最新动态",academic:"教务信息",student_status:"学籍管理",practice:"实践教学",lectures:"文化素质教育"};
 export function NoticesPage() {
+  const [category,setCategory]=useState('');
   const [items, setItems] = useState<NoticeItem[]>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
-  const load = useCallback(async (refresh = true) => { setLoading(true); setError(""); try { const response = await fetchNotices(refresh); setItems(response.data?.results ?? []); if (response.status === "failed") setError(response.summary); } catch (reason) { setError(reason instanceof Error ? reason.message : "通知读取失败"); } finally { setLoading(false); } }, []);
+  const load = useCallback(async (refresh = true) => { setLoading(true); setError(""); try { const response = await fetchNotices(refresh,category); setItems(response.data?.results ?? []); if (response.status === "failed") setError(response.summary); } catch (reason) { setError(reason instanceof Error ? reason.message : "通知读取失败"); } finally { setLoading(false); } }, [category]);
   useEffect(() => { void load(true); }, [load]);
-  return <div className="workspace-page"><PageHeader title="教务通知" description="东南大学教务处的最新动态、教务信息与讲座预告。" action={<button className="page-action" disabled={loading} onClick={() => void load(true)}><RefreshCw size={15} />刷新</button>} /><PageState loading={loading} error={error}>{items.length ? <div className="notice-list">{items.map((item) => <a href={item.url} target="_blank" rel="noreferrer" className="notice-row" key={item.id}><div><strong>{item.title}</strong><span>{item.category ?? "教务处"}</span></div><time>{item.publishedAt ?? ""}</time><ExternalLink size={15} /></a>)}</div> : <div className="page-empty"><FileText size={28} /><h2>暂时没有通知</h2><p>可以稍后刷新，或检查网络连接。</p></div>}</PageState></div>;
+  return <div className="workspace-page"><PageHeader title="教务通知" description="最新动态、教务信息、学籍管理、实践教学与文化素质教育。" action={<div className="schedule-actions"><select aria-label="教务栏目" value={category} onChange={event=>setCategory(event.target.value)}><option value="">全部栏目</option>{Object.entries(noticeLabels).map(([id,label])=><option value={id} key={id}>{label}</option>)}</select><button className="page-action" disabled={loading} onClick={() => void load(true)}><RefreshCw size={15} />刷新</button></div>} /><PageState loading={loading} error={error}>{items.length ? <div className="notice-list">{items.map((item) => <a href={item.url} target="_blank" rel="noreferrer" className="notice-row" key={item.id}><div><strong>{item.title}</strong><span>{noticeLabels[item.category ?? ""] ?? "教务处"}</span></div><time>{item.publishedAt ?? ""}</time><ExternalLink size={15} /></a>)}</div> : <div className="page-empty"><FileText size={28} /><h2>暂时没有通知</h2><p>可以稍后刷新，或检查网络连接。</p></div>}</PageState></div>;
 }
 
 const fieldLabels: Record<string, string> = { DASHSCOPE_API_KEY: "阿里云百炼 API Key", SEUDAILY_EMBEDDING_MODEL: "知识库向量模型（默认 qwen3.7-text-embedding）", SEUDAILY_EMBEDDING_BASE_URL: "向量服务地址（默认阿里云百炼）",  DEEPSEEK_API_KEY: "DeepSeek API Key", DEEPSEEK_MODEL: "模型", TAVILY_API_KEY: "Tavily API Key", SEUDAILY_USERNAME: "统一身份认证账号", SEUDAILY_PASSWORD: "统一身份认证密码", SEUDAILY_ASR_API_KEY: "语音转写 API Key", SEUDAILY_WHISPER_MODEL: "本地 Whisper 模型" };

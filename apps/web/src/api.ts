@@ -187,8 +187,10 @@ type StoredThread = {
   resourceId: string;
   createdAt: string;
   updatedAt: string;
-  metadata?: { activeLeaf?: string };
+  metadata?: { activeLeaf?: string; channel?:string };
 };
+
+function threadSource(thread: StoredThread) {return thread.resourceId==='seudaily-wechat-local' ? '微信' : thread.metadata?.channel==='cli' ? '终端' : thread.metadata?.channel==='program' || thread.resourceId==='seudaily-focus-local' || thread.resourceId.startsWith('focus') ? '程序' : thread.metadata?.channel==='web' ? '网页' : '本地';}
 
 type StoredMessage = {
   id: string;
@@ -387,6 +389,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
   const firstPrompt = messages.find((message) => message.role === "user")?.content ?? "新对话";
   return {
     id: thread.id,
+    source:threadSource(thread),
     activeLeaf: thread.metadata?.activeLeaf,
     resourceId: thread.resourceId,
     title: thread.title?.trim() || (firstPrompt.length > 18 ? `${firstPrompt.slice(0, 18)}…` : firstPrompt),
@@ -412,7 +415,7 @@ export async function loadServerConversations(): Promise<Conversation[]> {
     return threads;
   }));
   return threadGroups.flat().map(thread => ({
-    id: thread.id, resourceId: thread.resourceId, title: thread.title?.trim() || "新对话",
+    id: thread.id, source:threadSource(thread), resourceId: thread.resourceId, title: thread.title?.trim() || "新对话",
     createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt),
     activeLeaf: thread.metadata?.activeLeaf, messages: [], messagesLoaded: false,
   })).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -421,7 +424,7 @@ export async function loadServerConversations(): Promise<Conversation[]> {
 export function loadConversationMessages(conversation: Conversation) {
   return fetchThreadMessages({ ...conversation, resourceId: conversation.resourceId ?? RESOURCE_ID,
     createdAt: new Date(conversation.createdAt).toISOString(), updatedAt: new Date(conversation.updatedAt).toISOString(),
-    metadata: { activeLeaf: conversation.activeLeaf } });
+    metadata: { activeLeaf: conversation.activeLeaf, channel:conversation.source==='终端' ? 'cli' : conversation.source==='程序' ? 'program' : conversation.source==='网页' ? 'web' : undefined } });
 }
 
 export async function deleteServerConversation(threadId: string, resourceId?: string) {
@@ -730,6 +733,7 @@ export async function loadFocusConversations(): Promise<Conversation[]> {
       id: item.threadId || item.id,
       resourceId: item.resourceId,
       focusId: item.id,
+      source: '程序',
       title: item.title,
       createdAt: Date.parse(item.createdAt),
       updatedAt: messages.at(-1)?.createdAt ?? Date.parse(item.updatedAt),
@@ -779,8 +783,8 @@ export async function uploadDocument(file: File) {
   return await response.json() as { filename: string; extension: string; mediaType: string; contextRef: string; markdown: string; charCount: number; knowledge?: {state:string;error?:string} };
 }
 
-export function fetchNotices(refresh = true) {
-  return jsonRequest<{ status: string; summary: string; data?: { results?: NoticeItem[]; source?: string }; warnings?: string[] }>(`/app/notices?refresh=${refresh}`);
+export function fetchNotices(refresh = true,category = "") {
+  return jsonRequest<{ status: string; summary: string; data?: { results?: NoticeItem[]; source?: string }; warnings?: string[] }>(`/app/notices?refresh=${refresh}&category=${encodeURIComponent(category)}`);
 }
 
 export type SettingsPayload = {

@@ -388,8 +388,35 @@ test('attachment tags collect documents and a question, then call the model exac
   assert.equal(f.requests.length,1);assert.equal(parsed,1);
   assert.match(f.requests[0].filter(message=>message.role==='user').at(-1).content,/期末考试占百分之六十/);
   assert.equal((await f.store.client.execute('SELECT * FROM wechat_attachment_batches')).rows.length,0);
-  assert.match(await f.reply(f.send('/attachment')[0]),/请先发送/);
+  assert.match(await f.reply(f.send('/attachment')[0]),/没有找到/);
   assert.match(await f.reply(f.send('<attachment>')[0]),/开始收集/);
   assert.match(await f.reply(f.send('/attachment cancel')[0]),/已取消/);
   assert.equal(f.requests.length,1);
+});
+
+for(const order of ['text-first','files-first'])test('retroactive attachment '+order+' selects recent files once, excluding earlier batches',async t=>{
+  const f=await fixture(t,{downloadFile:async file=>({name:file.file_name,bytes:Buffer.from('附件正文')}),receiveFile:async name=>({name,path:'/fixture/'+name,state:'queued'}),prepareFiles:async files=>{assert.deepEqual(files.map(file=>file.name),['课件.txt','作业.txt']);return ['retro-context'];},resolveDocuments:refs=>refs?.includes('retro-context') ? [{name:'课件.txt',markdown:'作业截止周五。'}] : []});
+  await f.reply(f.send('/new')[0]);
+  if(order==='text-first')await f.reply(f.send('请总结这些材料')[0]);
+  await f.reply(f.sendFile({file_name:'课件.txt'}));
+  await f.reply(f.sendFile({file_name:'作业.txt'}));
+  if(order==='files-first')await f.reply(f.send('请总结这些材料')[0]);
+  const initial=f.requests.length;
+  assert.match(await f.reply(f.send('/attachment')[0]),/作业截止周五/);
+  assert.equal(f.requests.length,initial+1);
+  assert.match(await f.reply(f.send('/attachment')[0]),/没有找到/);
+  assert.equal(f.requests.length,initial+1);
+  const thread=(await f.status()).currentSession;
+  assert.match(thread.title,/请总结这些材料|课件/);
+});
+
+test('new WeChat sessions rename on the first message and explicit names survive restart',async t=>{
+  const f=await fixture(t);
+  await f.reply(f.send('/new')[0]);await f.reply(f.send('整理我的复习安排')[0]);
+  assert.equal((await f.status()).currentSession.title,'微信 · 整理我的复习安排');
+  const thread=(await f.status()).currentSession.threadId;
+  await f.store.client.execute({sql:"UPDATE threads SET title='微信 · 新对话' WHERE id=?",args:[thread]});
+  await f.restart();assert.equal((await f.status()).currentSession.title,'微信 · 整理我的复习安排');
+  await f.reply(f.send('/new 新对话')[0]);await f.reply(f.send('不要覆盖我的名字')[0]);await f.restart();
+  assert.equal((await f.status()).currentSession.title,'微信 · 新对话');
 });

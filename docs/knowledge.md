@@ -51,3 +51,9 @@ SEUDAILY_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 NPM 安装首次处理知识库时自动准备可选 Python 组件；源码开发环境可先执行 `uv sync --extra documents --extra knowledge --group test`。本阶段不包含定时备份或 OCR。
 
 源码开发的 Web 默认运行在 4173，通过 Vite 代理连接 4111 的后端，也可复用 NPM 启动的常驻后端。开发代理仅转换本地开发界面的 Origin；外部站点请求仍由后端拒绝。
+
+### 网页与通知原文
+
+资料库的“网页与通知”展示已读取的网页正文以及已下载的原始附件，可预览、下载。通知列表覆盖最新动态、教务信息、学籍管理、实践教学、文化素质教育；列表同步将正文放入后台抓取队列，正文缓存位于 `.seudaily/jwc/articles/`（计软智为 `.seudaily/cse/articles/`）。旧的正文缓存也可直接展示，无须重新抓网页。
+
+附件在模型明确读取，或通用网页阅读器根据问题/正文不足选中附件时才下载；列出通知不批量下载附件。下载过的附件及解析结果按 URL 复用，显式 refresh 才重新获取（教务附件读取）。原文件按内容 SHA-256 保存在 `.seudaily/web-files/files/`，友好文件名、来源链接、解析文本等位于 `.seudaily/web-files/metadata/`。解析的临时文件会清理，原文件保留。网页通知不自动进入聊天上传的向量索引，避免不必要的云端调用。所有这些路径都相对于服务的数据目录。

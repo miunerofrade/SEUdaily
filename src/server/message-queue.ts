@@ -113,7 +113,7 @@ export function installMessageQueue(app: Hono, normalize: (input: unknown) => Pr
             return c.json({ error: '消息不能为空' }, 400);
         if (draft.images.length + draft.documents.length > 10)
             return c.json({ error: '每轮最多 10 个附件' }, 400);
-        await agentStore.ensureThread({ threadId, resourceId });
+        await agentStore.ensureThread({ threadId, resourceId, interface:draft.interface });
         const queueId = randomUUID();
         await agentStore.client.execute({ sql: "INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES(?,?,?,'pending',?,'')", args: [queueId, threadId, resourceId, JSON.stringify(draft)] });
         return c.json({ id: queueId });

@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def isolated_web_originals(monkeypatch, tmp_path):
+    import seudaily.saved_web_files as saved
+    monkeypatch.setattr(saved, 'root', lambda: tmp_path / 'web-files')
+
 import seudaily.web_reader as web_reader
 
 
@@ -141,6 +146,10 @@ def test_empty_webplus_page_automatically_parses_pdf_and_cleans_temp_file(
     assert "Attachment parser works" in result["attachments"][0]["markdown"]
     assert opener.opened == [url, attachment_url]
     assert parsed_paths and all(not path.exists() for path in parsed_paths)
+    assert Path(result['attachments'][0]['path']).is_file()
+    again=web_reader.read_web_page(url, query="这个链接的附件说了什么？")
+    assert again['attachments'][0]['path']==result['attachments'][0]['path']
+    assert opener.opened==[url,attachment_url,url]
 
 
 def test_attachment_mode_none_never_downloads(

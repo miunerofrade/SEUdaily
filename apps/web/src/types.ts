@@ -97,6 +97,7 @@ export type Conversation = {
   updatedAt: number;
   messages: ChatMessage[];
   messagesLoaded?: boolean;
+  source?: string;
 };
 
 export type StreamEvent = {

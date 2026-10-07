@@ -99,13 +99,14 @@ export class AgentStore {
     async ensureThread(context: {
         threadId: string;
         resourceId: string;
+        interface?: string;
     }) {
         await this.ready;
         const existing = await this.getThreadById({ threadId: context.threadId });
         if (existing && existing.resourceId !== context.resourceId)
             throw new Error('会话不属于当前资源');
         const now = new Date().toISOString();
-        await this.client.execute({ sql: 'INSERT OR IGNORE INTO threads VALUES (?,?,?,?,?,?)', args: [context.threadId, context.resourceId, '', '{}', now, now] });
+        await this.client.execute({ sql: 'INSERT OR IGNORE INTO threads VALUES (?,?,?,?,?,?)', args: [context.threadId, context.resourceId, '', JSON.stringify({channel:context.resourceId === 'seudaily-focus-local' || context.resourceId.startsWith('focus-') ? 'program' : context.interface ?? 'web'}), now, now] });
     }
     async patchThread({ id, title, metadata, preserveUpdatedAt = false }: {
         id: string;

@@ -515,6 +515,10 @@ class JwcService:
             supported = "、".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
             raise ValueError(f"暂不支持解析该附件格式；支持：{supported}")
 
+        from .saved_web_files import cached, save
+        existing=cached(url)
+        if existing and existing.get('parsed') and not refresh:
+            return {'status':'completed','message':f'已读取{site_label}附件：{name}','article':article,'attachment':{**existing,'number':attachment_number,'extension':extension,'extractionMode':'text_layer' if extension=='.pdf' else 'document_structure'},'warnings':[]}
         sha256 = hashlib.sha256()
         size_bytes = 0
         with tempfile.TemporaryDirectory(
@@ -556,7 +560,10 @@ class JwcService:
             )
             if not valid_signature:
                 raise ValueError("附件内容与文件扩展名不匹配或文件已损坏")
+            original=temporary_path.read_bytes()
+            save(url,name,original,extension,source_url=str(article.get('url','')))
             parsed = parse_document(str(temporary_path), filename=name)
+            stored=save(url,name,original,extension,markdown=parsed['markdown'],source_url=str(article.get('url','')))
 
         warnings = []
         if not parsed["markdown"].strip():
@@ -571,6 +578,7 @@ class JwcService:
             },
             "attachment": {
                 "number": attachment_number,
+                "path": stored["path"],
                 "name": name,
                 "url": url,
                 "extension": extension,
@@ -908,6 +916,8 @@ class JwcService:
                 "lastModified": response.get("lastModified"),
             },
         })
+        from .saved_web_files import body
+        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or ''))
         article["lastCheckedAt"] = _iso_now()
         return changed
 

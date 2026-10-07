@@ -24,7 +24,7 @@ export const WECHAT_HELP = `微信聊天
 /help — 查看这些命令
 
 <attachment> — 开始收集本次聊天附件
-</attachment> 或 /attachment [问题] — 结束并提交给模型
+</attachment> 或 /attachment [问题] — 结束收集；没有标签时，提交最近文字和文件
 
 完整记录也可在 SEUdaily 网页或终端查看。`;
 type Inbox = { account: string; id: string; peer: string; text: string; threadId: string; resourceId: string; payload: string; files?:string; documents?:string };
@@ -75,6 +75,13 @@ export class WeChatConversations {
       'CREATE TABLE IF NOT EXISTS wechat_current (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(account,peer))',
       'CREATE TABLE IF NOT EXISTS wechat_delete_confirmations (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, number INTEGER NOT NULL, expiresAt INTEGER NOT NULL, PRIMARY KEY(account,peer))',
     ]);
+    const unnamed=(await this.store.client.execute({sql:"SELECT id,metadata FROM threads WHERE resourceId=? AND title='微信 · 新对话'",args:[WECHAT_RESOURCE]})).rows;
+    for(const thread of unnamed){
+      if(JSON.parse(String(thread.metadata)).titleManual)continue;
+      const first=await this.store.firstUserMessage(String(thread.id),WECHAT_RESOURCE);
+      const text=first ? visible(first).trim() : '';
+      if(text && !/^\/|<\/?(?:upload|attachment)>/i.test(text))await this.store.client.execute({sql:'UPDATE threads SET title=? WHERE id=?',args:['微信 · '+clip(text.replace(/\s+/g,' '),24),String(thread.id)]});
+    }
   }
   async current(account: BotAccount) {
     const result = await this.store.client.execute({ sql: `SELECT s.number,t.id,t.title FROM wechat_current c JOIN wechat_sessions s ON s.threadId=c.threadId JOIN threads t ON t.id=c.threadId WHERE c.account=? AND c.peer=?`, args: [account.botId, account.userId] });
@@ -121,10 +128,16 @@ export class WeChatConversations {
         threadId = 'wechat-' + randomUUID();
         const title = '微信 · ' + (name === 'new' && argument ? clip(argument.replace(/\s+/g,' '), 40) : !command ? clip((text || (JSON.parse(row.files || '[]')[0]?.file_name ?? '上传文件')).replace(/\s+/g,' '), 24) : '新对话');
         const now = new Date().toISOString();
-        await tx.execute({sql:'INSERT INTO threads VALUES(?,?,?,?,?,?)',args:[threadId,WECHAT_RESOURCE,title,JSON.stringify({channel:'wechat'}),now,now]});
+        await tx.execute({sql:'INSERT INTO threads VALUES(?,?,?,?,?,?)',args:[threadId,WECHAT_RESOURCE,title,JSON.stringify({channel:'wechat',titleManual:name==='new' && Boolean(argument)}),now,now]});
         await tx.execute({sql:'INSERT INTO wechat_sessions VALUES(?,?,?,?)',args:[account.botId,account.userId,number,threadId]});
         await tx.execute({sql:'INSERT INTO wechat_current VALUES(?,?,?) ON CONFLICT(account,peer) DO UPDATE SET threadId=excluded.threadId',args:[account.botId,account.userId,threadId]});
         if (name === 'new') reply = `已新建 #${number}「${title.replace(/^微信 · /,'')}」\n直接发消息开始聊天。旧会话已保留，/sessions 可查看。`;
+      }
+      if(!command && text && !hasFiles){
+        const named=(await tx.execute({sql:'SELECT title,metadata FROM threads WHERE id=?',args:[threadId]})).rows[0];
+        if(named && /^微信 · 新对话$/.test(String(named.title)) && !JSON.parse(String(named.metadata)).titleManual) {
+          await tx.execute({sql:'UPDATE threads SET title=? WHERE id=?',args:['微信 · '+clip(text.replace(/\s+/g,' '),24),threadId]});
+        }
       }
       const batch=(await tx.execute({sql:'SELECT files,text FROM wechat_attachment_batches WHERE threadId=? AND account=? AND peer=?',args:[threadId,account.botId,account.userId]})).rows[0];
       if (!command) {
@@ -140,13 +153,25 @@ export class WeChatConversations {
       }
       else if(name==='attachment') {
         const pending=(await tx.execute({sql:"SELECT 1 FROM wechat_messages WHERE threadId=? AND state='file' LIMIT 1",args:[threadId]})).rows.length;
-        const files=JSON.parse(String(batch?.files || '[]'));
+        let files=JSON.parse(String(batch?.files || '[]'));
+        let retrospectiveText='';
+        if(!batch && !end && argument!=='cancel') {
+          const recent=(await tx.execute({sql:"SELECT text,files,documents,state FROM wechat_messages WHERE account=? AND peer=? AND threadId=? AND rowid < (SELECT rowid FROM wechat_messages WHERE account=? AND id=?) ORDER BY rowid DESC LIMIT 100",args:[row.account,row.peer,threadId,row.account,row.id]})).rows;
+          for(const item of recent) {
+            const value=String(item.text).trim();
+            if(/^\//.test(value) || /<\/?(?:upload|attachment)>/i.test(value) || JSON.parse(String(item.documents || '[]')).length)break;
+            const received=JSON.parse(String(item.files || '[]'));
+            if(received.length){files.unshift(...received.flatMap((file:any)=>file.saved ? [file.saved] : []));continue;}
+            if(value){if(retrospectiveText)break;retrospectiveText=value;if(files.length)break;}
+          }
+          files=[...new Map(files.map((file:ReceivedWeChatFile)=>[file.path,file])).values()];
+        }
         if(argument==='cancel' && batch){await tx.execute({sql:'DELETE FROM wechat_attachment_batches WHERE threadId=?',args:[threadId]});reply='已取消本轮附件聊天，已上传的文件仍保存在资料库。';}
-        else if(!batch)reply='请先发送 <attachment>，再发送文件和问题。';
-        else if(pending)reply='附件还在接收，请稍后再次发送 </attachment>。';
+        else if(pending)reply='附件还在接收，请稍后再次发送 /attachment。';
+        else if(!batch && (!files.length || !retrospectiveText && !argument))reply='没有找到本会话最近的文字和文件。可先发文字与文件，再发 /attachment；或使用 <attachment> 开始收集。';
         else if(!files.length)reply='还没有收到附件，请先发送文件，再发送 </attachment>。';
         else {
-          const prompt=[String(batch.text),argument].filter(value=>value.trim()).join('\n') || '请阅读本次上传的附件，概括内容并说明可以帮助我分析哪些问题。';
+          const prompt=[batch ? String(batch.text) : retrospectiveText,argument].filter(value=>value.trim()).join('\n') || '请阅读本次上传的附件，概括内容并说明可以帮助我分析哪些问题。';
           await tx.execute({sql:'UPDATE wechat_messages SET text=?,documents=? WHERE account=? AND id=?',args:[prompt,JSON.stringify(files),row.account,row.id]});
           await tx.execute({sql:'DELETE FROM wechat_attachment_batches WHERE threadId=?',args:[threadId]});
           state='queued';

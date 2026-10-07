@@ -251,7 +251,11 @@ def _download_and_parse(
     timeout_seconds: int,
     max_bytes: int = 50 * 1024 * 1024,
 ) -> dict[str, Any]:
+    from .saved_web_files import cached, save
     url = validate_public_url(attachment["url"])
+    existing=cached(url)
+    if existing and existing.get('parsed'):
+        return {**attachment,**existing}
     extension = attachment["extension"]
     size_bytes = 0
     digest = hashlib.sha256()
@@ -275,9 +279,13 @@ def _download_and_parse(
         valid_signature = signature == b"%PDF-" if extension == ".pdf" else signature[:2] == b"PK"
         if not valid_signature:
             raise ValueError("附件内容与文件扩展名不匹配或文件已损坏")
+        original=temporary_path.read_bytes()
+        save(url,attachment['name'],original,extension,source_url=referer)
         parsed = parse_document(str(temporary_path), filename=attachment["name"])
+        stored=save(url,attachment['name'],original,extension,markdown=parsed['markdown'],source_url=referer)
     return {
         **attachment,
+        "path": stored["path"],
         "sizeBytes": size_bytes,
         "sha256": digest.hexdigest(),
         "markdown": parsed["markdown"],
@@ -328,6 +336,8 @@ def read_web_page(
     parser = _ReadablePageParser(final_url)
     parser.feed(html)
     content = parser.content
+    from .saved_web_files import body
+    body(final_url,parser.title or '网页正文',content)
     candidates: list[dict[str, str]] = []
     for raw_attachment in parser.attachments:
         supported = _supported_attachment(raw_attachment)

@@ -8,6 +8,11 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def isolated_web_originals(monkeypatch, tmp_path):
+    import seudaily.saved_web_files as saved
+    monkeypatch.setattr(saved, 'root', lambda: tmp_path / 'web-files')
+
 import seudaily.jwc as jwc_module
 from seudaily.document_parser import parse_document as real_parse_document
 from seudaily.jwc import JWC_CATEGORIES, CseService, JwcService, _article_id
@@ -389,6 +394,10 @@ def test_read_confirmed_attachment_uses_temp_and_cleans_up(
     assert requests[0][0].full_url == attachment_url
     assert requests[0][0].get_header("Referer") == article_url
     assert parsed_paths and not parsed_paths[0].exists()
+    assert Path(result['attachment']['path']).read_bytes()==pdf_bytes
+    again=service.read_attachment(article_id)
+    assert again['attachment']['path']==result['attachment']['path']
+    assert len(requests)==1
 
 
 def test_read_attachment_rejects_unconfirmed_cross_origin_url() -> None:

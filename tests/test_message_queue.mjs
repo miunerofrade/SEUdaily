@@ -32,7 +32,7 @@ test('shared queue preserves drafts, sends FIFO, pauses on cancel/error, and res
  await request(queue('hold').replace('?','/resume?'),'POST',{});
  await until(async()=>!(await (await request(queue('hold'))).json()).items.length);
  assert.deepEqual(seen,['hold','one','two']);
- await request(queue('error'),'POST',{text:'fail'});await request(queue('error'),'POST',{text:'after-error'});
+ await request(queue('error'),'POST',{text:'fail',interface:'cli'});assert.equal((await agentStore.getThreadById({threadId:'error'})).metadata.channel,'cli');await request(queue('error'),'POST',{text:'after-error'});
  const failed=await until(async()=>{const value=await (await request(queue('error'))).json();return value.items[0]?.state==='failed'&&value;});
  assert.equal(failed.items.length,2);assert.equal(seen.includes('after-error'),false);
  await request(queue('error').replace('?','/'+failed.items[0].id+'?'),'DELETE');
