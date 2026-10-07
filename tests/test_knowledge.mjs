@@ -140,3 +140,39 @@ test('source relocation retains an indexed document and all destinations without
  assert.deepEqual((await f.service.sources(document.id)).sort(),paths.sort());
  await f.service.relocateSources(paths.map(path=>({oldPath,path})));assert.equal(f.calls.length,calls);assert.equal((await f.service.list())[0].state,'indexed');
 });
+
+test('rerank uses the shared key, correct endpoint, validates indices and hides upstream bodies',async t=>{
+ const {cloudRerank}=await import('../src/runtime/knowledge/service.ts');
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);
+ const config={key:'secret-fixture',model:'embedding',rerankModel:'qwen3.7-text-rerank',baseUrl:'https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'};
+ globalThis.fetch=async(url,options)=>{
+  assert.equal(url,'https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank');
+  assert.equal(options.headers.Authorization,'Bearer secret-fixture');
+  assert.deepEqual(JSON.parse(options.body),{model:config.rerankModel,input:{query:'问题',documents:['甲','乙']},parameters:{top_n:2}});
+  return Response.json({output:{results:[{index:0,relevance_score:0.1},{index:1,relevance_score:0.9}]}});
+ };
+ assert.deepEqual((await cloudRerank('问题',['甲','乙'],config,2)).map(item=>item.index),[1,0]);
+ globalThis.fetch=async()=>Response.json({output:{results:[{index:0,relevance_score:0.8},{index:0,relevance_score:0.7}]}});
+ await assert.rejects(cloudRerank('问题',['甲','乙'],config,2),/格式无效/);
+ globalThis.fetch=async()=>new Response('secret-fixture',{status:429});
+ await assert.rejects(cloudRerank('问题',['甲','乙'],config,2),error=>error.message.includes('429')&&!error.message.includes('secret-fixture'));
+ config.rerankModel='qwen3-rerank';
+ globalThis.fetch=async(url,options)=>{assert.match(url,/compatible-api\/v1\/reranks$/);assert.equal(JSON.parse(options.body).query,'问题');return Response.json({results:[{index:0,relevance_score:0.8}]});};
+ assert.equal((await cloudRerank('问题',['甲'],config,1))[0].index,0);
+});
+
+test('search retrieves 32 full candidates, reranks before limiting and falls back on failure',async t=>{
+ const f=await fixture(t);f.config.rerankModel='qwen3.7-text-rerank';
+ const doc=await f.service.enqueue('长文.txt',Buffer.from('测试正文'));await f.service.tick();
+ const candidates=Array.from({length:32},(_,ordinal)=>({documentId:doc.id,id:`${doc.id}:${ordinal}`,ordinal,text:`第${ordinal}段`,page:0}));
+ const resultRef=join(f.root,'full-search.json');await writeFile(resultRef,JSON.stringify({data:{matches:candidates}}));
+ let fail=false;
+ const python=async(action,payload,...args)=>{if(payload.operation==='search'){assert.equal(payload.limit,32);return {status:'completed',resultRef,data:{matches:candidates.slice(0,12)}};}return f.python(action,payload,...args);};
+ const rank=async(query,texts,config,limit)=>{assert.equal(texts.length,32);assert.equal(config.key,f.config.key);if(fail)throw new Error('network');return candidates.slice().reverse().slice(0,limit).map((item,i)=>({index:item.ordinal,relevance_score:1-i/32}));};
+ const service=new KnowledgeService(f.db,f.service.root,python,()=>f.config,f.embed,rank);t.after(()=>service.stop());
+ const first=await service.search('问题');assert.equal(first.matches.length,5);assert.equal(first.matches[0].ordinal,31);
+ assert.equal((await service.search('问题',32)).matches.length,32);
+ fail=true;const fallback=await service.search('问题');assert.equal(fallback.matches[0].ordinal,0);assert.match(fallback.warning,/重排暂时不可用/);
+ await assert.rejects(service.search('问题',33),/1–32/);
+ const abort=new AbortController();abort.abort();await assert.rejects(service.search('问题',5,abort.signal),{name:'AbortError'});
+});

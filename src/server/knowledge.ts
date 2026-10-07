@@ -30,7 +30,7 @@ export function installKnowledgeRoutes(app: Hono) {
     await knowledge.remove(documentId.parse(c.req.param('id')));return c.json({ok:true});
   });
   app.post('/app/knowledge/search',async c=>{
-    const body=z.object({query:z.string().trim().min(1).max(1000),limit:z.number().int().min(1).max(8).default(5)}).parse(await c.req.json());
+    const body=z.object({query:z.string().trim().min(1).max(1000),limit:z.number().int().min(1).max(32).default(5)}).parse(await c.req.json());
     return c.json(await knowledge.search(body.query,body.limit,c.req.raw.signal));
   });
 }

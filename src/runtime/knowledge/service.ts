@@ -6,7 +6,7 @@ import { redactText } from '../../agent/redaction.js';
 
 export const KNOWLEDGE_VERSION = 'recursive-1000-150-v1';
 export const knowledgeExtensions = new Set(['.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.md']);
-export type EmbeddingConfig = { key: string; model: string; baseUrl: string };
+export type EmbeddingConfig = { key: string; model: string; baseUrl: string; rerankModel?: string };
 export type KnowledgeDocument = { id: string; name: string; path: string; state: string; error: string; chunkCount: number; createdAt: number; space: string };
 type Python = (action: string, payload: Record<string, unknown>, signal?: AbortSignal) => Promise<any>;
 type Embed = (texts: string[], config: EmbeddingConfig, signal?: AbortSignal) => Promise<number[][]>;
@@ -15,7 +15,7 @@ export const indexSpace = (config: EmbeddingConfig) => hash(JSON.stringify([conf
 function vectorValid(value: unknown): value is number[] { return Array.isArray(value) && value.length > 0 && value.length <= 8192 && value.every(n=>typeof n === 'number' && Number.isFinite(n)) && value.some(n=>n!==0); }
 
 export async function cloudEmbedding(texts: string[], config: EmbeddingConfig, signal?: AbortSignal): Promise<number[][]> {
-  if (!config.key) throw new Error('请在设置中填写阿里云百炼 API Key');
+  if (!config.key) throw new Error('请在设置中填写阿里云 API Key');
   const url = new URL(config.baseUrl);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('向量服务地址必须是 HTTPS 地址');
   const response = await fetch(config.baseUrl.replace(/\/$/,'') + '/embeddings', {
@@ -36,6 +36,27 @@ export async function cloudEmbedding(texts: string[], config: EmbeddingConfig, s
   return vectors;
 }
 
+export const MAX_KNOWLEDGE_RECALL = 32;
+type Rank = (query: string, texts: string[], config: EmbeddingConfig, limit: number, signal?: AbortSignal) => Promise<{index:number;relevance_score:number}[]>;
+export async function cloudRerank(query: string, texts: string[], config: EmbeddingConfig, limit: number, signal?: AbortSignal) {
+  if (!config.key) throw new Error('请在设置中填写阿里云 API Key');
+  const url=new URL(config.baseUrl);
+  if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash)throw new Error('阿里云服务地址必须是 HTTPS 地址');
+  const compatible=config.rerankModel==='qwen3-rerank';
+  url.pathname=compatible?'/compatible-api/v1/reranks':'/api/v1/services/rerank/text-rerank/text-rerank';
+  const body=compatible?{model:config.rerankModel,query,documents:texts,top_n:limit}:{model:config.rerankModel,input:{query,documents:texts},parameters:{top_n:limit}};
+  const response=await fetch(url.toString(),{method:'POST',redirect:'error',signal:AbortSignal.any([AbortSignal.timeout(30_000),...(signal?[signal]:[])]),headers:{Authorization:`Bearer ${config.key}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!response.ok)throw new Error(`重排服务请求失败（HTTP ${response.status}）`);
+  const data=await response.json() as any,results=compatible?data.results:data.output?.results;
+  if(!Array.isArray(results) || results.length!==Math.min(limit,texts.length))throw new Error('重排服务返回数量不匹配');
+  const seen=new Set<number>();
+  for(const item of results){
+    if(!Number.isInteger(item.index) || item.index<0 || item.index>=texts.length || seen.has(item.index) || typeof item.relevance_score!=='number' || !Number.isFinite(item.relevance_score) || item.relevance_score<0 || item.relevance_score>1)throw new Error('重排服务返回格式无效');
+    seen.add(item.index);
+  }
+  return (results as {index:number;relevance_score:number}[]).sort((a,b)=>b.relevance_score-a.relevance_score);
+}
+
 export class KnowledgeService {
   readonly ready: Promise<void>;
   private timer?: NodeJS.Timeout;
@@ -43,7 +64,7 @@ export class KnowledgeService {
   private stopped = false;
   private abort = new AbortController();
   private mutations: Promise<unknown> = Promise.resolve();
-  constructor(private db: LocalClient, readonly root: string, private python: Python, readonly config: ()=>EmbeddingConfig, private embed: Embed = cloudEmbedding) {
+  constructor(private db: LocalClient, readonly root: string, private python: Python, readonly config: ()=>EmbeddingConfig, private embed: Embed = cloudEmbedding, private rank: Rank = cloudRerank) {
     this.ready = this.initialize();
   }
   private async initialize() {
@@ -205,15 +226,23 @@ export class KnowledgeService {
     }
   }
   async search(query: string, limit=5, signal?: AbortSignal) {
+    if(!Number.isInteger(limit) || limit<1 || limit>MAX_KNOWLEDGE_RECALL)throw new Error('返回片段数量必须在 1–32 之间');
     await this.ready;const config={...this.config()},space=indexSpace(config);
     const rows=(await this.db.execute({sql:"SELECT id,name,path FROM knowledge_documents WHERE state='indexed' AND space=?",args:[space]})).rows;
     if (!rows.length) return {matches:[],summary:'当前配置下没有已完成索引的文档。请先入库，或重建旧模型的索引。'};
     const [vector]=await this.embed([query],config,signal);
-    const result=await this.python('knowledge-index',{operation:'search',root:join(this.root,'index'),space,vector,documentIds:rows.map(row=>String(row.id)),limit},signal);
+    const result=await this.python('knowledge-index',{operation:'search',root:join(this.root,'index'),space,vector,documentIds:rows.map(row=>String(row.id)),limit:MAX_KNOWLEDGE_RECALL},signal);
+    if(result.status && result.status!=='completed')throw new Error(result.summary || '知识库检索失败');
+    const full=result.resultRef ? JSON.parse(await readFile(result.resultRef,'utf8')) : result;
     const documents=new Map(rows.map(row=>[String(row.id),row]));
-    const matches=(result.data?.matches ?? []).flatMap((match:any)=>{
+    const candidates=(full.data?.matches ?? []).slice(0,MAX_KNOWLEDGE_RECALL).flatMap((match:any)=>{
       const document=documents.get(match.documentId);return document ? [{...match,name:String(document.name),path:String(document.path)}] : [];
     });
-    return {matches,summary:matches.length ? `找到 ${matches.length} 个相关片段；请核对内容是否回答问题，不相关时说明没有找到。` : '未找到相关片段。'};
+    let matches=candidates.slice(0,limit),warning='';
+    if(config.rerankModel && candidates.length){
+      try{const ranked=await this.rank(query,candidates.map((item:any)=>item.text),config,limit,signal);matches=ranked.map(item=>({...candidates[item.index],rerankScore:item.relevance_score}));}
+      catch{signal?.throwIfAborted();warning='重排暂时不可用，已按向量相关性返回结果。';}
+    }
+    return {matches,warning,summary:warning + (matches.length ? `找到 ${matches.length} 个相关片段；请核对内容是否回答问题，不相关时说明没有找到。` : '未找到相关片段。')};
   }
 }

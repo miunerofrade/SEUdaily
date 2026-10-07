@@ -8,6 +8,7 @@ import {registerBundledKnowledge} from './builtin.js';
 export const knowledge = new KnowledgeService(agentStore.client,join(runtimeRoot,'knowledge'),runPythonTool,()=>({
   key:envValue('DASHSCOPE_API_KEY')?.trim() || '',
   model:envValue('SEUDAILY_EMBEDDING_MODEL')?.trim() || 'qwen3.7-text-embedding',
+  rerankModel:envValue('SEUDAILY_RERANK_MODEL')?.trim() || 'qwen3.7-text-rerank',
   baseUrl:envValue('SEUDAILY_EMBEDDING_BASE_URL')?.trim() || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
 }));
 

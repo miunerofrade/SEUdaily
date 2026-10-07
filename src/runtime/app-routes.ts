@@ -30,6 +30,7 @@ const editableEnvironment = [
   "TAVILY_API_KEY",
   "DASHSCOPE_API_KEY",
   "SEUDAILY_EMBEDDING_MODEL",
+  "SEUDAILY_RERANK_MODEL",
   "SEUDAILY_EMBEDDING_BASE_URL",
   "SEUDAILY_VPN_BINARY",
   "SEUDAILY_VPN_DNS_SERVER",
@@ -856,7 +857,7 @@ export const appRoutes = [
       }
       const agentInstructionsSaved = typeof body.agentInstructions === "string";
       if (agentInstructionsSaved) await writeFile(agentInstructionsPath, body.agentInstructions as string, "utf8");
-      const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA", "DASHSCOPE_API_KEY", "SEUDAILY_EMBEDDING_MODEL", "SEUDAILY_EMBEDDING_BASE_URL"].includes(name));
+      const restartRequired = Object.keys(values).some((name) => !["SEUDAILY_FULL_ACCESS", "SEUDAILY_FULL_ACCESS_EXTRA", "DASHSCOPE_API_KEY", "SEUDAILY_EMBEDDING_MODEL", "SEUDAILY_RERANK_MODEL", "SEUDAILY_EMBEDDING_BASE_URL"].includes(name));
       return c.json({ saved: Object.keys(values), agentInstructionsSaved, restartRequired });
     },
   }),

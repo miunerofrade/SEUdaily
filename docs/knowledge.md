@@ -4,17 +4,18 @@
 
 ## 配置百炼
 
-在[阿里云百炼](https://help.aliyun.com/zh/model-studio/get-api-key)创建北京地域 API Key。在 Web 的“设置”或终端 `/settings` 中填写“阿里云百炼 API Key”。通过界面保存立即生效，无需重启。密钥无需发给聊天模型。
+在[阿里云百炼](https://help.aliyun.com/zh/model-studio/get-api-key)创建北京地域 API Key。在 Web 的“设置”或终端 `/settings` 中填写“阿里云 API Key”。通过界面保存立即生效，无需重启。密钥无需发给聊天模型。
 
 也可在用户数据目录的 `.env` 中配置，手动编辑后需重启后端：
 
 ```dotenv
 DASHSCOPE_API_KEY=你的百炼密钥
 SEUDAILY_EMBEDDING_MODEL=qwen3.7-text-embedding
+SEUDAILY_RERANK_MODEL=qwen3.7-text-rerank
 SEUDAILY_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-后两项可留空，使用上述默认值。默认采用模型返回的 1024 维向量。官方也推荐业务空间专属地址：`https://你的业务空间ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`，可填入“向量服务地址”。密钥与地址必须属于同一地域。参见[百炼 Embedding 接口文档](https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai/)。
+模型与服务地址可留空，使用上述默认值。默认采用模型返回的 1024 维向量。官方也推荐业务空间专属地址：`https://你的业务空间ID.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`，可填入“向量服务地址”。密钥与地址必须属于同一地域。参见[百炼 Embedding 接口文档](https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai/)。
 
 文件可以在配置密钥前上传，保存配置后后台开始处理。云端收到用于索引的文字片段以及检索问题；原文件保存在本机。
 
@@ -66,6 +67,6 @@ NPM 安装首次处理知识库时自动准备可选 Python 组件；源码开�
 
 通知列表同步正文后，常驻后端自动下载正文缓存中发现的 PDF 附件；尚未读取正文的通知不会仅凭列表猜测附件。其他附件在模型明确读取或通用网页阅读器选中时下载。下载过的附件及解析结果按 URL 复用，显式 refresh 才重新获取（教务附件读取）。原文件按内容 SHA-256 保存在 `.seudaily/web-files/files/<来源域名>/<栏目键>/<通知ID>/`，友好文件名、来源链接、解析文本等位于 `.seudaily/web-files/metadata/`。解析的临时文件会清理，原文件保留。已缓存通知中的全部 PDF 附件由后端自动下载，按 URL 复用、内容 SHA-256 去重后自动加入知识库；图片及其他格式仍按需读取。失败附件每 5 分钟重试，不阻塞其他附件。网页正文 Markdown 保留 PDF 链接，资料库按机构、栏目、通知目录分层显示正文和附件，最多五栏，分隔线可拖动调整栏宽。文件名搜索在后端匹配并分页返回，正文与附件逐个列出。PDF 原件在网页来源目录中可预览、下载，向量副本不重复显示在“上传文件”。所有这些路径都相对于服务的数据目录。
 
-检索工具默认返回 5 个片段，`limit` 最大为 8；当前使用向量相似度检索，没有重排模型。
+每次检索先召回最多 32 个向量片段，使用 `qwen3.7-text-rerank` 重排后默认返回 5 个片段，`limit` 最大为 32。设置里的“阿里云 API Key”供向量嵌入与重排共用，“向量嵌入模型”和“重排模型”分别配置；服务地址沿用嵌入服务的主机和地域（支持业务空间专属地址），重排自动选择原生 API 路径。重排失败时提示并退回向量排序；用户取消会终止请求。更换重排模型不重建向量索引。北京地域 `qwen3.7-text-rerank` 输入价格为每百万 Token 0.5 元、输出不收费，详见[官方价格](https://help.aliyun.com/zh/model-studio/model-pricing)。
 
 资料库 `/app/library` 默认仅返回分类目录；依次传入 `category`、`source`、`section`、`notice` 获取下一层目录或通知文件。文件搜索使用 `query`，文件页默认最多 50 条，`limit` 最大 100，使用 `nextCursor` 加载后续页；不一次传输全库。旧缓存自动复制到通知目录、校验、原子更新元数据后再清理旧路径，RAG 来源引用同步更新，不重建相同内容的向量。
