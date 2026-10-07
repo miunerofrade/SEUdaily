@@ -59,7 +59,7 @@ import { normalizeMathMarkdown } from "./markdown";
 import { RamDiskPanel } from "./ramdisk-panel";
 import { SidebarIcon } from "./sidebar-icons";
 import { addProcessTool, appendProcessText, finalizeProcessAnswer } from "./stream-state";
-import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
+import type { AgentProcessEntry, ChatMessage, Citation, Conversation, DocumentAttachment, ImageAttachment, StreamEvent, ToolResult, ToolRun } from "./types";
 import { FocusPage, LibraryPage, NoticesPage, ProgramsPage, SchedulePage, SettingsPage } from "./workspace-pages";
 
 const STORAGE_KEY = "seudaily.web.conversations.v1";
@@ -462,13 +462,33 @@ function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApp
   </>;
 }
 
-function MessageSources({ tools }: { tools: ToolRun[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const sources = Array.from(new Map(tools.flatMap((tool) => tool.result?.citations ?? []).map((citation) => [citation.url ?? citation.localPath ?? citation.title, citation])).values());
-  if (!sources.length) return null;
-  const previewLimit = 3;
-  const visibleSources = expanded ? sources : sources.slice(0, previewLimit);
-  return <section className="message-sources"><div className="message-sources-title"><Link2 size={14} /><span>来源</span>{sources.length > previewLimit && <button type="button" className="message-sources-toggle" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}><span>{expanded ? "收起" : `展开全部（${sources.length}）`}</span><ChevronRight size={13} /></button>}</div><div className="message-sources-list">{visibleSources.map((citation, index) => citation.url ? <a key={`${citation.id}-${index}`} href={citation.url} target="_blank" rel="noreferrer"><span>[{index + 1}]</span><strong>{citation.title}</strong><Link2 size={12} /></a> : <div key={`${citation.id}-${index}`}><span>[{index + 1}]</span><strong>{citation.title}</strong></div>)}</div></section>;
+function messageSources(message: ChatMessage): Citation[] {
+  return Array.from(new Map((message.tools ?? []).flatMap(tool => tool.result?.citations ?? []).map(citation => [citation.url ?? citation.localPath ?? citation.title, citation])).values());
+}
+
+function SourcesSidebar({ sources, onClose }: { sources: Citation[]; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const trigger = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus({ preventScroll: true });
+    return () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); };
+  }, []);
+  useEffect(() => {
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [onClose]);
+  const groups = [{ label: "文件", items: sources.filter(source => !source.url) }, { label: "网页", items: sources.filter(source => source.url) }];
+  return <aside id="message-sources-panel" className="sources-sidebar" aria-label="回复来源">
+    <header><h2>来源 <span>{sources.length}</span></h2><button ref={closeRef} type="button" className="icon-button" aria-label="关闭来源" title="关闭来源" onClick={onClose}><X size={19} /></button></header>
+    <div className="sources-sidebar-scroll">{groups.filter(group => group.items.length).map(group => <section key={group.label}><h3>{group.label} · {group.items.length}</h3>{group.items.map((source, index) => {
+      const href = source.url ?? (source.localPath ? libraryPreviewUrl(source.localPath) : undefined);
+      let origin = "本地文件";
+      if (source.url) { try { origin = new URL(source.url).hostname; } catch { origin = "网页"; } }
+      const content = <><div className="source-origin">{source.url ? <Link2 size={15} /> : <BookOpen size={15} />}<span>{origin}</span></div><strong>{source.title}</strong>{source.locator && <small>{source.locator}</small>}</>;
+      return href ? <a className="source-entry" key={`${source.id}-${index}`} href={href} target="_blank" rel="noreferrer">{content}</a> : <div className="source-entry" key={`${source.id}-${index}`}>{content}</div>;
+    })}</section>)}</div>
+  </aside>;
 }
 
 function actionRequestFromTool(tool: ToolRun): AgentActionRequest | null {
@@ -557,7 +577,7 @@ function MessageAuthRequests({ tools, disabled, onAuth }: { tools: ToolRun[]; di
   })}</div>{error && <div className="message-action-request-error">{error}</div>}</section>;
 }
 
-function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval, onActionRequest, onAuthRequest, onBranch, versionControls }: {
+function Message({ message, canRegenerate = false, disabled = false, onEdit, onRegenerate, onPreviewImage, onApproval, onActionRequest, onAuthRequest, onBranch, versionControls, onSources, sourcesOpen = false }: {
   message: ChatMessage;
   versionControls?: ReactNode;
   canRegenerate?: boolean;
@@ -569,6 +589,8 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
   onApproval?: (tool: ToolRun, approved: boolean) => void;
   onActionRequest?: (request: AgentActionRequest) => Promise<void>;
   onAuthRequest?: (request: AgentAuthRequest) => Promise<void>;
+  onSources?: (message: ChatMessage) => void;
+  sourcesOpen?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
@@ -612,8 +634,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
-        {!message.streaming && !message.error && <MessageSources tools={message.tools ?? []} />}
-        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}>⑂</button>}</div>}
+        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}>⑂</button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
       </div>
     </article>
   );
@@ -665,6 +686,13 @@ export default function App() {
   const [historyReload, setHistoryReload] = useState(0);
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [sourceMessage, setSourceMessage] = useState<ChatMessage | null>(null);
+  useEffect(() => { setSourceMessage(null); }, [activeId, view, selectedFocusId]);
+  const closeSources = useCallback(() => setSourceMessage(null), []);
+  function openSources(message: ChatMessage) {
+    setRightOpen(false);
+    setSourceMessage(current => current?.id === message.id ? null : message);
+  }
   const vpn = useVpn(rightOpen && view === "chat");
   const ramdisk = useRamDisk(rightOpen && view === "chat");
   const panelToggleRef = useRef<HTMLButtonElement>(null);
@@ -1531,7 +1559,7 @@ export default function App() {
           <button className="icon-button menu-button" onClick={() => setNavOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
           {active.messages.length ? <h1>{active.title}</h1> : <span className="topbar-product">SEUdaily</span>}
           <div className="topbar-actions">
-            <button ref={panelToggleRef} className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => setRightOpen((value) => !value)} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
+            <button ref={panelToggleRef} className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => { setSourceMessage(null); setRightOpen((value) => !value); }} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="5" cy="6" r="2.5" /><path d="M13 6h8" /><circle cx="5" cy="18" r="2.5" /><path d="M13 18h8" /></svg>
             </button>
           </div>
@@ -1552,7 +1580,7 @@ export default function App() {
           ) : (
             <div className="message-list">
               {conversationError && <div className="page-state error">{conversationError}</div>}
-              {active.messages.map((message) => <div key={message.id}><Message message={message} versionControls={versionPicker(message)} disabled={sending} canRegenerate={true} onBranch={message=>void branchConversation(message)} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} /></div>)}
+              {active.messages.map((message) => <div key={message.id}><Message message={message} onSources={openSources} sourcesOpen={sourceMessage?.id === message.id} versionControls={versionPicker(message)} disabled={sending} canRegenerate={true} onBranch={message=>void branchConversation(message)} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} /></div>)}
               <div ref={messageEndRef} />
             </div>
           )}
@@ -1563,7 +1591,7 @@ export default function App() {
         <div className="workspace-scroll">
             {view === "schedule" && <SchedulePage />}
             {view === "programs" && <ProgramsPage />}
-            {view === "focus" && <FocusPage selectedFocusId={selectedFocusId} onSelectedFocusChange={setSelectedFocusId} onHistoryChange={() => void syncServerHistory()} renderMessage={(message, controls) => <Message message={message} disabled={controls.disabled} onEdit={controls.onEdit} onAuthRequest={controls.onAuth} onActionRequest={controls.onAction} onApproval={controls.onApproval} versionControls={controls.versions} />} />}
+            {view === "focus" && <FocusPage selectedFocusId={selectedFocusId} onSelectedFocusChange={setSelectedFocusId} onHistoryChange={() => void syncServerHistory()} renderMessage={(message, controls) => <Message message={message} onSources={openSources} sourcesOpen={sourceMessage?.id === message.id} disabled={controls.disabled} onEdit={controls.onEdit} onAuthRequest={controls.onAuth} onActionRequest={controls.onAction} onApproval={controls.onApproval} versionControls={controls.versions} />} />}
           {view === "library" && <LibraryPage />}
           {view === "notices" && <NoticesPage />}
           {view === "settings" && <SettingsPage />}
@@ -1595,6 +1623,7 @@ export default function App() {
         </div>
         <div className="inspector-footer"><span>课程凭据不会发送到对话内容中</span><VpnLicense /></div>
       </aside>
+      {sourceMessage && <SourcesSidebar sources={messageSources(sourceMessage)} onClose={closeSources} />}
       {previewImage && attachmentSource(previewImage) && <div className="preview-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }}><div className="image-preview-dialog" role="dialog" aria-modal="true" aria-label="图片预览"><button type="button" className="preview-close" aria-label="关闭预览" onClick={() => setPreviewImage(null)}><X size={19} /></button><img src={attachmentSource(previewImage)} alt={previewImage.name} /></div></div>}
       <RuntimePreparationNotice />
       {deleteTarget && (
