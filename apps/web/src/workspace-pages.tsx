@@ -862,8 +862,8 @@ export function LibraryPage() {
   }
 
   return <div className="workspace-page library-page">
-    <PageHeader title="资料库" description="" action={<div className="schedule-actions"><button className="page-action" aria-expanded={knowledgeOpen} onClick={() => setKnowledgeOpen(current => !current)}>{knowledgeOpen ? "收起知识库" : "知识库"}</button><button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button></div>} />
-    {knowledgeOpen && <KnowledgePanel selectedPath={selectedFilePath || undefined} onFilesChanged={load} />}
+    <PageHeader title="资料库" description="" action={<div className="schedule-actions"><button className="page-action" aria-expanded={knowledgeOpen} onClick={() => setKnowledgeOpen(current => !current)}>{knowledgeOpen ? "收起搜索" : "搜索资料"}</button><button className="page-action" disabled={loading} onClick={() => void load()}><RefreshCw size={15} />刷新</button></div>} />
+    {knowledgeOpen && <KnowledgePanel />}
     <PageState loading={loading} error={error}>
       <div className={`column-browser columns-${columnCount}`} onKeyDown={(event) => { const selectedFile = selectedFiles.find((file) => file.path === selectedFilePath); if (!selectedFile) return; if (event.key === " ") { event.preventDefault(); void openPreview(selectedFile); } else if (event.key === "Delete") { event.preventDefault(); setDeleteTarget(selectedFile); } }}>
         <div className="browser-column">
