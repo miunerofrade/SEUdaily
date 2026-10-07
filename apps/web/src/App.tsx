@@ -32,7 +32,6 @@ import {
   RefreshCw,
   SquareTerminal,
   Sparkles,
-  TriangleAlert,
   Trash2,
   Wrench,
   X,
@@ -383,7 +382,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
     <div className={`tool-activity ${open ? "open" : ""}`}>
       <button type="button" className="tool-activity-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span className={`tool-activity-status ${runningTool ? "running" : failedCount ? "failed" : "done"}`}>
-          {failedCount && !runningTool ? <TriangleAlert size={19} /> : focusTool ? <ToolGlyph name={focusTool.name} size={19} /> : <Bot size={19} />}
+          {failedCount && !runningTool ? <CircleAlert size={19} className="error-icon" /> : focusTool ? <ToolGlyph name={focusTool.name} size={19} /> : <Bot size={19} />}
         </span>
         <span>{statusText}</span>
         <ChevronRight className="tool-activity-chevron" size={18} />
@@ -402,7 +401,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
               if (!tool) return null;
               return (
                 <div className="tool-activity-item" key={entry.id}>
-                  <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" || tool.state === "approval-requested" ? <TriangleAlert size={18} /> : <ToolGlyph name={tool.name} size={18} />}</span>
+                  <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" || tool.state === "approval-requested" ? <CircleAlert size={18} className={tool.state === "failed" ? "error-icon" : undefined} /> : <ToolGlyph name={tool.name} size={18} />}</span>
                   <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong><ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
                 </div>
               );
@@ -636,7 +635,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         ) : message.streaming && !hasProcess ? (
           <div className="thinking"><span /><span /><span /> 正在思考</div>
         ) : null}
-        {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
+        {message.error && <div className="message-error"><CircleAlert size={16} className="error-icon" />{message.error}</div>}
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
         {!message.streaming && !message.error && <div className="message-meta"><MessageTime timestamp={message.createdAt} />{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.5" /><circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" /><path d="M6 7.5v9M18 7.5A11.5 11.5 0 0 1 6 16.5" /></svg></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
