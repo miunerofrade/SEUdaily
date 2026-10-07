@@ -19,7 +19,6 @@ import {
   ChevronRight,
   CircleAlert,
   CircleStop,
-  GitBranch,
   FileAudio,
   FileText,
   Hand,
@@ -634,7 +633,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
-        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><GitBranch size={18} strokeWidth={1.8} /></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
+        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.5" /><circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" /><path d="M6 7.5v9M18 7.5A11.5 11.5 0 0 1 6 16.5" /></svg></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
       </div>
     </article>
   );
