@@ -19,7 +19,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleStop,
-  Copy,
+  GitBranch,
   FileAudio,
   FileText,
   Hand,
@@ -307,7 +307,7 @@ function CopyButton({ text, label = "复制", iconOnly = false }: { text: string
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  return <button type="button" className={`copy-button ${iconOnly ? "icon-only" : ""}`} onClick={copy} aria-label={copied ? "已复制" : label} title={copied ? "已复制" : label}>{copied ? <Check size={14} /> : <Copy size={14} />}{!iconOnly && <span>{copied ? "已复制" : label}</span>}</button>;
+  return <button type="button" className={`copy-button ${iconOnly ? "icon-only" : ""}`} onClick={copy} aria-label={copied ? "已复制" : label} title={copied ? "已复制" : label}>{copied ? <Check size={14} /> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 8V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-2" /><rect x="3" y="8" width="13" height="13" rx="3" /></svg>}{!iconOnly && <span>{copied ? "已复制" : label}</span>}</button>;
 }
 
 function CodeBlock({ children }: { children?: ReactNode }) {
@@ -634,7 +634,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
-        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}>⑂</button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
+        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><GitBranch size={18} strokeWidth={1.8} /></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
       </div>
     </article>
   );
