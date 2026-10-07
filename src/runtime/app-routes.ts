@@ -1,4 +1,4 @@
-import {webLibraryNames} from './web-library.js';
+import {webLibraryEntries} from './web-library.js';
 import { redactText } from '../agent/redaction.js';
 import { parseEnv, readEnvFile, updateEnvFile } from "./environment-settings.js";
 import { existsSync } from 'node:fs';
@@ -205,7 +205,7 @@ async function fullResultData(result: ToolResult): Promise<unknown> {
   }
 }
 
-type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
+type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string; sources?: string[] };
 
 const libraryRoots = [resolve(projectRoot, "exports"), resolve(projectRoot, ".seudaily", "uploads", "images"), resolve(projectRoot, '.seudaily', 'uploads', 'documents'), resolve(projectRoot, '.seudaily', 'knowledge', 'files'), resolve(projectRoot,'.seudaily','web-files','files')];
 
@@ -608,9 +608,9 @@ export const appRoutes = [
         const document=indexed.get(file.path);
         return document ? [{...file,name:document.name,category:'documents',course:'上传文件',teacher:'本地文件'}] : [];
       }));
-      const webNames=await webLibraryNames(projectRoot);
+      const webEntries=await webLibraryEntries(projectRoot);
       const webFiles=await walkFiles(resolve(projectRoot,'.seudaily','web-files','files'));
-      files.push(...webFiles.map(file=>({...file,name:webNames.get(file.path) || file.name,category:'web',course:'网页与通知',teacher:'本地缓存'})));
+      files.push(...webFiles.map(file=>({...file,name:webEntries.get(file.path)?.name || file.name,sources:webEntries.get(file.path)?.sources || ['未分类'],category:'web',course:'网页与通知',teacher:'本地缓存'})));
       files.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return c.json({ root, files, count: files.length });
     },

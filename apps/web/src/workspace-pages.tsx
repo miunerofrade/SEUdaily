@@ -815,6 +815,7 @@ export function FocusPage({
 export function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>([]);
   const [category, setCategory] = useState("documents");
+  const [source, setSource] = useState("");
   const [course, setCourse] = useState("");
   const [teacher, setTeacher] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<LibraryFile | null>(null);
@@ -833,10 +834,11 @@ export function LibraryPage() {
   const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
   const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
   const flatCategory = ["documents","web"].includes(category);
-  const selectedFiles = flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
-  const columnCount = flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
+  const sources = [...new Set(visible.flatMap(file => file.sources?.length ? file.sources : ["未分类"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
+  const selectedFiles = category === "web" ? visible.filter(file => (file.sources?.length ? file.sources : ["未分类"]).includes(source)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
+  const columnCount = category === "web" ? (source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);
 
-  function chooseCategory(next: string) { setCategory(next); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
+  function chooseCategory(next: string) { setCategory(next); setSource(""); setCourse(""); setTeacher(""); setSelectedFilePath(""); }
   function chooseCourse(next: string) { setCourse(next); setTeacher(""); setSelectedFilePath(""); }
   function chooseTeacher(next: string) { setTeacher(next); setSelectedFilePath(""); }
   async function openPreview(file: LibraryFile) {
@@ -866,13 +868,16 @@ export function LibraryPage() {
         <div className="browser-column">
           <div className="browser-column-list">{categories.map((item) => <button key={item.id} className={category === item.id ? "selected" : ""} onClick={() => chooseCategory(item.id)}><Folder size={17} /><span>{item.label}</span><ChevronRight size={15} /></button>)}</div>
         </div>
+        {category === "web" && <div className="browser-column">
+          <div className="browser-column-list">{sources.length ? sources.map(item => <button key={item} className={source === item ? "selected" : ""} onClick={() => { setSource(item); setSelectedFilePath(""); }}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无网页资料</div>}</div>
+        </div>}
         {category && !flatCategory && <div className="browser-column">
           <div className="browser-column-list">{courses.length ? courses.map((item) => <button key={item} className={course === item ? "selected" : ""} onClick={() => chooseCourse(item)}><Folder size={17} /><span>{item}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无课程资料</div>}</div>
         </div>}
         {course && <div className="browser-column">
           <div className="browser-column-list">{teachers.length ? teachers.map((item) => <button key={item} className={teacher === item ? "selected" : ""} onClick={() => chooseTeacher(item)}><UserRound size={17} /><span>{item || "未分类"}</span><ChevronRight size={15} /></button>) : <div className="browser-column-empty">暂无教师信息</div>}</div>
         </div>}
-        {((course && teacher) || flatCategory) && <div className="browser-column browser-file-column">
+        {((course && teacher) || (flatCategory && (category !== "web" || source))) && <div className="browser-column browser-file-column">
           <div className="browser-column-list">{selectedFiles.length ? selectedFiles.map((file) => <button key={file.path} className={selectedFilePath === file.path ? "selected" : ""} aria-selected={selectedFilePath === file.path} onClick={() => setSelectedFilePath(file.path)} onDoubleClick={() => void openPreview(file)}>{file.category === "images" ? <FileImage size={17} /> : <FileText size={17} />}<span>{friendlyFileName(file)}</span></button>) : <div className="browser-column-empty">暂无文件</div>}</div>
         </div>}
       </div>

@@ -508,7 +508,7 @@ export type ScheduleResponse = {
   warnings?: string[];
 };
 
-export type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string };
+export type LibraryFile = { path: string; relativePath: string; name: string; size: number; updatedAt: string; type: string; category: string; course: string; teacher: string; sources?: string[] };
 export type NoticeItem = { id: string; title: string; url: string; publishedAt?: string; category?: string; detailStatus?: string };
 export type TrainingPlanSource = {
   title: string;
