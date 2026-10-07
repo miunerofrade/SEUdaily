@@ -172,13 +172,19 @@ function loadConversations(): Conversation[] {
   }
 }
 
-function humanTime(timestamp: number) {
+function MessageTime({ timestamp }: { timestamp: number }) {
+  const expiresAt = timestamp + 24 * 60 * 60 * 1000;
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    setNow(Date.now());
+    const remaining = expiresAt - Date.now();
+    if (!Number.isFinite(remaining) || remaining < 0) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(remaining + 1, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [expiresAt]);
+  if (!Number.isFinite(timestamp) || now > expiresAt) return null;
   const date = new Date(timestamp);
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }
-  return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+  return <time dateTime={date.toISOString()}>{date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</time>;
 }
 
 function titleFromPrompt(prompt: string) {
@@ -609,7 +615,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
           {visibleUserContent(message.content) && <span>{visibleUserContent(message.content)}</span>}
         </div>}
         {!editing && versionControls}
-        {!editing && <div className="user-meta"><time>{humanTime(message.createdAt)}</time><CopyButton text={visibleUserContent(message.content)} label="复制提示词" iconOnly />{onEdit && <button type="button" className="message-action" aria-label="编辑提示词" title="编辑提示词" disabled={disabled} onClick={() => setEditing(true)}><Pencil size={14} /></button>}</div>}
+        {!editing && <div className="user-meta"><MessageTime timestamp={message.createdAt} /><CopyButton text={visibleUserContent(message.content)} label="复制提示词" iconOnly />{onEdit && <button type="button" className="message-action" aria-label="编辑提示词" title="编辑提示词" disabled={disabled} onClick={() => setEditing(true)}><Pencil size={14} /></button>}</div>}
       </article>
     );
   }
@@ -633,7 +639,7 @@ function Message({ message, canRegenerate = false, disabled = false, onEdit, onR
         {message.error && <div className="message-error"><TriangleAlert size={16} />{message.error}</div>}
         {!message.streaming && !message.error && <MessageAuthRequests tools={message.tools ?? []} disabled={disabled} onAuth={onAuthRequest} />}
         {!message.streaming && !message.error && <MessageActionRequests tools={message.tools ?? []} disabled={disabled} onAction={onActionRequest} />}
-        {!message.streaming && !message.error && <div className="message-meta"><time>{humanTime(message.createdAt)}</time>{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.5" /><circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" /><path d="M6 7.5v9M18 7.5A11.5 11.5 0 0 1 6 16.5" /></svg></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
+        {!message.streaming && !message.error && <div className="message-meta"><MessageTime timestamp={message.createdAt} />{message.content && <CopyButton text={message.content} label="复制回答" iconOnly />}{canRegenerate && <button type="button" className="message-action" aria-label="重新生成" title="重新生成" disabled={disabled} onClick={() => onRegenerate?.(message)}><RefreshCw size={14} /></button>}{onBranch && <button type="button" className="message-action" title="分支为新会话" aria-label="分支为新会话" disabled={disabled} onClick={()=>onBranch(message)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2.5" /><circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" /><path d="M6 7.5v9M18 7.5A11.5 11.5 0 0 1 6 16.5" /></svg></button>}{onSources && messageSources(message).length > 0 && <button type="button" className={`message-action source-action ${sourcesOpen ? "is-open" : ""}`} title="来源" aria-label="来源" aria-expanded={sourcesOpen} aria-controls="message-sources-panel" onClick={() => onSources(message)}><BookOpen size={17} /></button>}</div>}
       </div>
     </article>
   );
