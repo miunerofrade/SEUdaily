@@ -603,10 +603,11 @@ export const appRoutes = [
       const sources = new Set(await knowledge.sources());
       files.push(...documents.filter(file=>!sources.has(file.path)).map(file => ({ ...file, name:resolveDocumentContexts([basename(file.path,extname(file.path))])[0]?.name || file.name, category:'documents',course:'上传文件',teacher:'本地文件' })));
       const indexed = new Map((await knowledge.list()).map(document=>[document.path,document]));
+      const builtinIds=await knowledge.builtinIds();
       const originals = await walkFiles(resolve(projectRoot,'.seudaily','knowledge','files'));
       files.push(...originals.flatMap(file=>{
         const document=indexed.get(file.path);
-        return document ? [{...file,name:document.name,category:'documents',course:'上传文件',teacher:'本地文件'}] : [];
+        return document ? [{...file,name:document.name,category:builtinIds.has(document.id)?'references':'documents',course:builtinIds.has(document.id)?'参考资料':'上传文件',teacher:'本地文件'}] : [];
       }));
       const webEntries=await webLibraryEntries(projectRoot);
       const webFiles=await walkFiles(resolve(projectRoot,'.seudaily','web-files','files'));

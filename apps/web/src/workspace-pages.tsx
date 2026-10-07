@@ -830,11 +830,11 @@ export function LibraryPage() {
   const [error, setError] = useState("");
   const load = useCallback(async () => { setLoading(true); setError(""); try { setFiles((await fetchLibrary()).files); } catch (reason) { setError(reason instanceof Error ? reason.message : "资料读取失败"); } finally { setLoading(false); } }, []);
   useEffect(() => { void load(); }, [load]);
-  const categories = [{id:"documents",label:"上传文件"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
+  const categories = [{id:"documents",label:"上传文件"}, {id:"references",label:"参考资料"}, {id:"web",label:"网页与通知"}, { id: "knowledge", label: "课程笔记" }, { id: "subtitle", label: "课程字幕" }, { id: "media", label: "课程媒体" }, { id: "images", label: "临时图片" }];
   const visible = files.filter((file) => file.category === category);
   const courses = useMemo(() => [...new Set(visible.map((file) => file.course))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible]);
   const teachers = useMemo(() => [...new Set(visible.filter((file) => file.course === course).map((file) => file.teacher))].sort((a, b) => a.localeCompare(b, "zh-CN")), [visible, course]);
-  const flatCategory = ["documents","web"].includes(category);
+  const flatCategory = ["documents","references","web"].includes(category);
   const sources = [...new Set(visible.flatMap(file => file.sources?.length ? file.sources : ["未分类"]))].sort((a,b)=>a.localeCompare(b,"zh-CN"));
   const selectedFiles = category === "web" ? visible.filter(file => (file.sources?.length ? file.sources : ["未分类"]).includes(source)) : flatCategory ? visible : visible.filter((file) => file.course === course && file.teacher === teacher);
   const columnCount = category === "web" ? (source ? 3 : 2) : flatCategory ? 2 : 1 + (category ? 1 : 0) + (course ? 1 : 0) + (teacher ? 1 : 0);

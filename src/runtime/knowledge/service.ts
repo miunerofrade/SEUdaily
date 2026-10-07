@@ -50,6 +50,7 @@ export class KnowledgeService {
     await mkdir(join(this.root,'files'),{recursive:true,mode:0o700});
     await this.db.execute(`CREATE TABLE IF NOT EXISTS knowledge_documents (id TEXT PRIMARY KEY,name TEXT NOT NULL,path TEXT NOT NULL,extension TEXT NOT NULL,state TEXT NOT NULL,error TEXT NOT NULL,space TEXT NOT NULL,chunkCount INTEGER NOT NULL,createdAt INTEGER NOT NULL)`);
     await this.db.execute("CREATE TABLE IF NOT EXISTS knowledge_sources (path TEXT PRIMARY KEY, documentId TEXT NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE)");
+    await this.db.execute("CREATE TABLE IF NOT EXISTS knowledge_builtin_sources (id TEXT PRIMARY KEY, documentId TEXT NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE)");
     await this.db.execute("UPDATE knowledge_documents SET state='queued',error='' WHERE state='processing'");
   }
   private serialize<T>(operation:()=>Promise<T>): Promise<T> {
@@ -97,6 +98,24 @@ export class KnowledgeService {
     await this.ready;
     const result=await this.db.execute(id ? {sql:'SELECT path FROM knowledge_sources WHERE documentId=?',args:[id]} : 'SELECT path FROM knowledge_sources');
     return result.rows.map(row=>String(row.path));
+  }
+  async enqueueBuiltin(id:string,name:string,bytes:Buffer) {
+    await this.ready;
+    const previous=(await this.db.execute({sql:'SELECT documentId FROM knowledge_builtin_sources WHERE id=?',args:[id]})).rows[0];
+    const result=await this.enqueue(name,bytes);
+    await this.serialize(()=>this.db.execute({sql:'INSERT INTO knowledge_builtin_sources VALUES(?,?) ON CONFLICT(id) DO UPDATE SET documentId=excluded.documentId',args:[id,result.id]}));
+    const document=(await this.db.execute({sql:'SELECT state,space FROM knowledge_documents WHERE id=?',args:[result.id]})).rows[0];
+    if(document?.state==='failed' || (document?.state==='indexed' && document.space!==indexSpace(this.config())))await this.retry(result.id);
+    if(previous && previous.documentId!==result.id) {
+      const oldId=String(previous.documentId);
+      const owners=(await this.db.execute({sql:'SELECT id FROM knowledge_builtin_sources WHERE documentId=?',args:[oldId]})).rows;
+      if(!owners.length && !(await this.sources(oldId)).length)await this.remove(oldId);
+    }
+    return result;
+  }
+  async builtinIds():Promise<Set<string>> {
+    await this.ready;
+    return new Set((await this.db.execute('SELECT documentId FROM knowledge_builtin_sources')).rows.map(row=>String(row.documentId)));
   }
   async retry(id: string) {
     await this.ready;
@@ -150,7 +169,9 @@ export class KnowledgeService {
       if (!text.trim()) {await this.db.execute({sql:"UPDATE knowledge_documents SET state='needs_ocr',error='未提取到文字，扫描文件需等待 OCR' WHERE id=?",args:[id]});return;}
       if (text.length>2_000_000) throw new Error('解析文本超过 200 万字符，请拆分文件后上传');
       const split=await this.python('knowledge-index',{operation:'split',text},signal);
-      const chunks=split.data?.chunks as {text:string;page:number;ordinal:number}[];
+      if (split.status && split.status !== 'completed') throw new Error(split.summary || '文件分块失败');
+      const fullSplit=split.resultRef ? JSON.parse(await readFile(split.resultRef,'utf8')) : split;
+      const chunks=fullSplit.data?.chunks as {text:string;page:number;ordinal:number}[];
       if (!Array.isArray(chunks) || !chunks.length || chunks.length>5000) throw new Error('分块结果无效或超过 5000 块');
       const cache=join(this.root,'vectors',space);await mkdir(cache,{recursive:true,mode:0o700});
       const vectors: number[][]=[];

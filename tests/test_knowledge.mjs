@@ -84,3 +84,49 @@ test('first-use knowledge dependency progress is tracked without crashing on unk
   setPreparation('knowledge','ready','知识库就绪');
   assert.equal(preparationStatus().knowledge.state,'ready');
 });
+
+test('bundled references auto-register without a key, deduplicate restarts and replace obsolete versions',async t=>{
+ const f=await fixture(t);f.config.key='';
+ const first=await f.service.enqueueBuiltin('handbook','学生手册.md',Buffer.from('学校规章原文'));
+ assert.equal((await f.service.list())[0].state,'waiting_config');
+ assert.deepEqual([...await f.service.builtinIds()],[first.id]);
+ assert.equal((await f.service.enqueueBuiltin('handbook','学生手册.md',Buffer.from('学校规章原文'))).duplicate,true);
+ assert.equal((await f.service.list()).length,1);assert.equal(f.calls.length,0);
+ f.config.key='fixture-key';await f.service.tick();assert.equal((await f.service.list())[0].state,'indexed');
+ const calls=f.calls.length;await f.service.enqueueBuiltin('handbook','学生手册.md',Buffer.from('学校规章原文'));await f.service.tick();assert.equal(f.calls.length,calls);
+ const replacement=await f.service.enqueueBuiltin('handbook','学生手册.md',Buffer.from('修正后的学校规章'));
+ assert.equal((await f.service.list()).length,1);assert.deepEqual([...await f.service.builtinIds()],[replacement.id]);
+ assert.notEqual(replacement.id,first.id);await f.service.tick();
+ f.config.model='changed-model';await f.service.enqueueBuiltin('handbook','学生手册.md',Buffer.from('修正后的学校规章'));
+ assert.equal((await f.service.list())[0].state,'queued');await f.service.tick();assert.equal((await f.service.list())[0].state,'indexed');
+});
+
+import {createHash} from 'node:crypto';
+import {mkdir} from 'node:fs/promises';
+import {registerBundledKnowledge} from '../src/runtime/knowledge/builtin.ts';
+
+test('package manifest discovers originals and verifies every file before registering',async t=>{
+ const f=await fixture(t),directory=join(f.root,'references');await mkdir(directory);
+ const bytes=Buffer.from('体育考核分值参考');await writeFile(join(directory,'体育手册.md'),bytes);
+ const item={id:'sports-guide',file:'体育手册.md',sha256:createHash('sha256').update(bytes).digest('hex')};
+ await writeFile(join(directory,'manifest.json'),JSON.stringify({documents:[item]}));
+ assert.equal(await registerBundledKnowledge(f.service,directory),1);
+ assert.equal((await f.service.list())[0].name,'体育手册.md');
+ await writeFile(join(directory,'manifest.json'),JSON.stringify({documents:[item,{...item,id:'another',file:'../outside.md'}]}));
+ await assert.rejects(registerBundledKnowledge(f.service,directory),/条目无效/);
+ await writeFile(join(directory,'体育手册.md'),'意外变更');
+ await writeFile(join(directory,'manifest.json'),JSON.stringify({documents:[item]}));
+ await assert.rejects(registerBundledKnowledge(f.service,directory),/校验失败/);
+ assert.equal((await f.service.list()).length,1);
+});
+
+
+test('indexing uses the full split result rather than the twelve-chunk tool preview',async t=>{
+ const f=await fixture(t),chunks=Array.from({length:25},(_,ordinal)=>({text:`参考资料第${ordinal}段`,page:0,ordinal}));
+ const resultRef=join(f.root,'full-split.json');await writeFile(resultRef,JSON.stringify({data:{chunks}}));
+ const python=async(action,payload,...args)=>payload.operation==='split' ? {status:'completed',data:{chunks:chunks.slice(0,12)},resultRef} : f.python(action,payload,...args);
+ const service=new KnowledgeService(f.db,f.service.root,python,()=>f.config,f.embed);await service.ready;
+ t.after(()=>service.stop());await service.enqueue('长手册.md',Buffer.from('长文档'));await service.tick();
+ assert.equal((await service.list())[0].chunkCount,25);assert.equal(f.rows.size,25);
+ assert.equal(f.calls.flat().length,25);assert.equal([...f.rows.values()].at(-1).text,'参考资料第24段');
+});

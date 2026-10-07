@@ -89,6 +89,7 @@
     "docs/wechat.md",
     "deploy/",
     "dist/THIRD_PARTY_NOTICES.txt",
-    "docs/knowledge.md"
+    "docs/knowledge.md",
+    "docs/references/"
   ]
 }

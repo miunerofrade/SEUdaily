@@ -1,0 +1,14 @@
+{
+  "documents": [
+    {
+      "id": "student-handbook-2025",
+      "file": "东南大学大学生手册2025-校订版.md",
+      "sha256": "da8790e52db123bd40f5d238c67f986b84e99f01b830754c2bb0e6eba698c148"
+    },
+    {
+      "id": "sports-guide",
+      "file": "东南大学学生体育指导手册-校订版.md",
+      "sha256": "6f60025152e657f01b9572d581e297deb94556ef07fe2c573255b7c0008d2bb7"
+    }
+  ]
+}
