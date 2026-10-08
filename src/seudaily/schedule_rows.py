@@ -1,4 +1,5 @@
 """Timetable row normalization and date calculations."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +8,8 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from .campus_api import CampusAPIError
+
 
 def week_for_date(start_date: str, target: date) -> int:
     start = date.fromisoformat(start_date)
@@ -70,8 +73,16 @@ def _normalize_rows(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         weekday = cls._integer(row.get("SKXQ") or row.get("XQJ"))
         start_period = cls._integer(row.get("KSJC") or row.get("JCQZ"))
         end_period = cls._integer(row.get("JSJC") or row.get("JCZZ"))
-        if not course_name or start_period is None or end_period is None:
-            continue
+        if (
+            not course_name
+            or start_period is None
+            or end_period is None
+            or start_period < 1
+            or end_period < start_period
+        ):
+            raise CampusAPIError(
+                "课表记录缺少课程名或有效节次，学校字段可能发生变化；原缓存已保留"
+            )
         periods = list(range(start_period, end_period + 1))
         classroom = str(
             row.get("JASMC") or row.get("SKDD") or row.get("CDMC") or ""
@@ -146,9 +157,7 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
     return found
 
 
-def _normalize_dom_records(
-    cls, records: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def _normalize_dom_records(cls, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     weekdays = {
         "星期一": 1,
@@ -170,9 +179,7 @@ def _normalize_dom_records(
             ),
             None,
         )
-        weekday_text = next(
-            (part for part in details if part in weekdays), ""
-        )
+        weekday_text = next((part for part in details if part in weekdays), "")
         if period_index is None:
             continue
         start_period, end_period = details[period_index].split("-", 1)
@@ -189,4 +196,3 @@ def _normalize_dom_records(
             }
         )
     return cls._normalize_rows(rows)
-

@@ -40,51 +40,10 @@ import { ManagementForm } from "./form.js";
 import { FocusManager } from "./focus.js";
 import { courseForm, semesterForm, programStatusForm } from "./management.js";
 
-const color = {
-  accent: "#80cbc4",
-  muted: "#8993a4",
-  strong: "#a8bfff",
-  text: "#dce1ea",
-  border: "#64738a",
-};
-const fit = (value: any, width: number) => {
-  let text = clean(String(value ?? "")).replace(/\n/g, " "),
-    out = "";
-  if (stringWidth(text) > width) {
-    for (const char of text) {
-      if (stringWidth(out + char) > width - 1) break;
-      out += char;
-    }
-    text = out + "…";
-  }
-  return text + " ".repeat(Math.max(0, width - stringWidth(text)));
-};
-const wrap = (text: string, width: number) =>
-  text.split("\n").flatMap((line) => {
-    const result: string[] = [];
-    let value = "",
-      used = 0;
-    for (const char of line) {
-      const size = stringWidth(char);
-      if (value && used + size > width) {
-        result.push(value);
-        value = "";
-        used = 0;
-      }
-      value += char;
-      used += size;
-    }
-    result.push(value);
-    return result;
-  });
-const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
-const states: Record<string, string> = {
-  completed: "已修读",
-  studying: "修读中",
-  not_taken: "未修读",
-  upcoming: "待开课",
-  unscheduled: "未排定",
-};
+import { color, weekdays, states } from './theme.js';
+import { fit, wrap } from './course-layout.js';
+import { CourseDetail, TranscriptLines, CourseResults } from './panels.js';
+
 type Page = "chat" | "schedule" | "programs" | "focus" | "notices";
 
 export function App({ session, copy = copySelection }: {
@@ -1274,81 +1233,9 @@ export function App({ session, copy = copySelection }: {
             />
           </Box>
         ) : detail ? (
-          <Box
-            borderStyle="round"
-            borderColor={color.accent}
-            flexDirection="column"
-            paddingX={2}
-          >
-            <Text bold color={color.accent}>
-              {detail.courseName ?? detail.name}
-            </Text>
-            <Text>课程代码：{detail.courseCode ?? detail.code}</Text>
-            {page === "schedule" ? (
-              <>
-                <Text>教师：{detail.teacherName}</Text>
-                <Text>地点：{detail.classroom}</Text>
-                <Text>
-                  时间：周{weekdays[detail.weekday - 1]} · 第{" "}
-                  {detail.startPeriod}–{detail.endPeriod} 节
-                  {" · " +
-                    (periodTimes[detail.startPeriod]?.split("–")[0] ?? "—") +
-                    "–" +
-                    (periodTimes[detail.endPeriod]?.split("–")[1] ?? "—")}
-                </Text>
-                <Text wrap="wrap">周次：{detail.weeks?.join("、")}</Text>
-              </>
-            ) : (
-              <>
-                <Text>
-                  学分：{detail.credits} · {states[detail.status]}
-                </Text>
-                <Text>
-                  分类：{detail.group} · {detail.nature}
-                </Text>
-                <Text>
-                  学期：
-                  {detail.displaySemester ??
-                    detail.semesterLabel ??
-                    detail.semester}
-                </Text>
-                <Text wrap="wrap">
-                  备注：
-                  {[detail.choiceNote, detail.note]
-                    .filter(Boolean)
-                    .join(" · ") || "暂无"}
-                </Text>
-              </>
-            )}
-            <Text color={color.muted}>{page === 'schedule' ? (!term || term === schedule.currentSemester ? 'e 编辑课程 · Esc 返回列表' : '历史课表只读 · Esc 返回列表') : 's 修改修读状态 · Esc 返回列表'}</Text>
-          </Box>
+          <CourseDetail detail={detail} page={page} term={term} currentSemester={schedule.currentSemester} />
         ) : page === "chat" ? (
-          displayLines.slice(top, top + height).map((line, i) => (
-            <Text key={i} backgroundColor={line[0]?.user ? "#394858" : undefined}>
-              {line.map((span, j) => (
-                <Text
-                  key={j}
-                  color={
-                    span.user
-                      ? "#dde7f1"
-                      : span.color ?? (span.role === "你"
-                      ? color.accent
-                      : span.role === "SEUdaily"
-                        ? color.strong
-                        : span.code
-                          ? "#e5c07b"
-                          : span.muted
-                            ? color.muted
-                            : color.text)
-                  }
-                  backgroundColor={span.backgroundColor}
-                  bold={span.bold}
-                >
-                  {span.text}
-                </Text>
-              ))}
-            </Text>
-          ))
+          <TranscriptLines lines={displayLines.slice(top, top + height)} />
         ) : (
           <>
             <Box flexShrink={0}>
@@ -1378,92 +1265,12 @@ export function App({ session, copy = copySelection }: {
                   programSemester === "all" ? "全部学期" : programSemester,
                 )}
             </Box>
-            {isGrid ? (
-              <Timetable
-                courses={choices}
-                width={width}
-                start={tableTop}
-                count={gridCount}
-                dayStart={dayStart}
-                selection={gridSelection}
-                register={(index, element, items) => {
-                  gridCells.current[index] = { element, items };
-                }}
-              />
-            ) : page === "programs" ? (
-              <Box
-                flexDirection="column"
-                height={Math.max(1, height - 4)}
-                overflow="hidden"
-              >
-                {programView.rows
-                  .slice(tableTop, tableTop + height - 4)
-                  .map((row, index) => (
-                    <Box
-                      key={index}
-                      height={1}
-                      flexShrink={0}
-                      ref={(element) => {
-                        tableRows.current[index] = element;
-                      }}
-                    >
-                      <Text
-                        bold={row.kind === "title" || row.kind === "group"}
-                        color={
-                          row.index === selected
-                            ? "#20242c"
-                            : row.kind === "title"
-                            ? color.accent
-                            : row.kind === "border" || row.kind === "muted"
-                              ? color.muted
-                              : color.text
-                        }
-                        backgroundColor={row.index === selected ? "#80cbc4" : undefined}
-                      >
-                        {row.text}
-                      </Text>
-                    </Box>
-                  ))}
-              </Box>
-            ) : (
-              <>
-                <Text bold color={color.muted}>
-                  {" "}
-                  {headers
-                    .slice(0, cells.length)
-                    .map((h, i) => fit(h, cells[i]))
-                    .join(" ")}
-                </Text>
-                {choices
-                  .slice(tableTop, tableTop + visibleCount)
-                  .map((c: any, i: number) => (
-                    <Box
-                      key={i}
-                      ref={(element) => {
-                        tableRows.current[i] = element;
-                      }}
-                      height={1}
-                      flexShrink={0}
-                    >
-                      <Text
-                        backgroundColor={tableTop + i === selected ? "#80cbc4" : undefined}
-                        color={
-                          tableTop + i === selected ? "#20242c" : color.text
-                        }
-                      >
-                        {tableTop + i === selected ? "› " : "  "}
-                        {row(c)
-                          .slice(0, cells.length)
-                          .map((v, i) => fit(v, cells[i]))
-                          .join(" ")}
-                      </Text>
-                    </Box>
-                  ))}
-                {!choices.length && (
-                  <Text color={color.muted}>没有匹配课程。</Text>
-                )}
-              </>
-            )}
+            <CourseResults page={page} isGrid={isGrid} choices={choices} width={width} height={height}
+              tableTop={tableTop} gridCount={gridCount} dayStart={dayStart} gridSelection={gridSelection}
+              selected={selected} programRows={programView.rows} cells={cells} headers={headers}
+              visibleCount={visibleCount} row={row}
+              registerGrid={(index, element, items) => { gridCells.current[index] = { element, items }; }}
+              registerRow={(index, element) => { tableRows.current[index] = element; }} />
           </>
         )}
       </Box>

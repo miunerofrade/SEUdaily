@@ -4,10 +4,10 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import ts from 'typescript';
 import {AgentStore} from '../src/agent/storage.ts';
-const source=await readFile(new URL('../src/runtime/app-routes.ts',import.meta.url),'utf8');
+const source=await readFile(new URL('../src/runtime/conversation-title.ts',import.meta.url),'utf8');
 const ast=ts.createSourceFile('routes.ts',source,ts.ScriptTarget.Latest,true);
 const names=new Set(['compactTitleInput','cleanGeneratedTitle','fallbackConversationTitle','requestConversationTitle','generateFirstTurnTitle']);
-const code=ts.transpileModule(ast.statements.filter(s=>ts.isFunctionDeclaration(s)&&names.has(s.name?.text)).map(s=>s.getText(ast)).join('\n'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const code=ts.transpileModule(ast.statements.filter(s=>ts.isFunctionDeclaration(s)&&names.has(s.name?.text)).map(s=>s.getText(ast)).join('\n').replace(/^export /gm,''),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 test('old unnamed multi-turn title uses original topic; generated and named histories are protected',async(t)=>{
  const store=new AgentStore(':memory:');t.after(()=>store.close());
  await store.ensureThread({threadId:'old',resourceId:'local'});

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -12,6 +11,8 @@ from typing import Any
 
 from .browser_runtime import browser_runtime
 from .campus_auth import CampusAuthError, CampusSession
+from .campus_api import CampusAPIError, dataset_rows, post_rows
+from .json_store import write_json_atomic
 from .cancellation import TaskCancelledError
 from .campus_network import network_category
 from .runtime_paths import env_value
@@ -19,22 +20,17 @@ from .academic_calendar import AcademicCalendar
 from . import schedule_customizations, schedule_rows
 
 
-DEFAULT_SCHEDULE_URL = (
-    "https://ehall.seu.edu.cn/jwapp/sys/wdkb/*default/index.do"
+from .campus_endpoints import (
+    DEFAULT_SCHEDULE_URL,
+    DEFAULT_SCHEDULE_APP_ID,
+    DEFAULT_SCHEDULE_LAUNCH_URL,
+    SCHEDULE_DATA_URL,
+    SCHEDULE_METADATA_ROOT,
+    USER_AGENT as DEFAULT_USER_AGENT,
 )
-DEFAULT_SCHEDULE_APP_ID = "4770397878132218"
-DEFAULT_SCHEDULE_LAUNCH_URL = (
-    f"https://ehall.seu.edu.cn/appShow?appId={DEFAULT_SCHEDULE_APP_ID}"
-)
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
+from .browser_auth import login_fields
+
 SEMESTER_CODE_PATTERN = re.compile(r"^\d{4}-\d{4}-\d+$")
-SCHEDULE_DATA_URL = (
-    "https://ehall.seu.edu.cn/jwapp/sys/wdkb/modules/xskcb/xskcb.do"
-)
 
 
 class _SchedulePageLoadTimeout(TimeoutError):
@@ -112,12 +108,8 @@ class ScheduleService:
         )
 
     def _try_fill_login(self, page) -> str | None:
-        username_field = page.locator(
-            "input[placeholder*='一卡通'], input[placeholder*='唯一ID'], .input-username-pc"
-        ).first
-        password_field = page.locator(
-            "input[type='password'], input[placeholder*='密码']"
-        ).first
+        username_field, password_field, login_button = login_fields(page)
+
         if username_field.count() == 0 or not username_field.is_visible():
             return None
         if not self.username or not self.password:
@@ -129,23 +121,10 @@ class ScheduleService:
         if captcha.count() and captcha.is_visible():
             return "captcha_required"
 
-        page.locator("button:has-text('登 录'), .login-button-pc").first.click()
+        login_button.click()
         return "submitted"
 
-    @staticmethod
-    def _write_json_atomic(path: Path, payload: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            json.dump(payload, temp_file, ensure_ascii=False, indent=2)
-            temp_name = temp_file.name
-        os.replace(temp_name, path)
+    _write_json_atomic = staticmethod(write_json_atomic)
 
     def _save_cookies(self, page) -> None:
         self._write_json_atomic(self.cookie_file, page.context.cookies())
@@ -166,23 +145,33 @@ class ScheduleService:
             session_reset = self._clear_saved_session()
         if self.target_url == DEFAULT_SCHEDULE_URL:
             try:
-                with CampusSession(self.cookie_file, username=self.username,
-                                   password=self.password,
-                                   load_saved_cookies=not reset_session) as session:
+                with CampusSession(
+                    self.cookie_file,
+                    username=self.username,
+                    password=self.password,
+                    load_saved_cookies=not reset_session,
+                ) as session:
                     session.ensure_authenticated(self.entry_url)
-                return {"status": "authorized", "cookieFile": str(self.cookie_file.resolve()),
-                        "sessionReset": session_reset, "authenticationMethod": "http"}
+                return {
+                    "status": "authorized",
+                    "cookieFile": str(self.cookie_file.resolve()),
+                    "sessionReset": session_reset,
+                    "authenticationMethod": "http",
+                }
             except CampusAuthError as error:
                 if error.status == "sms_required":
                     return error.result()
                 # Keep the visible login entry for CAPTCHA and other interactive checks.
                 pass
         from .optional_runtime import ensure_dependencies
+
         ensure_dependencies("browser")
-        from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
-        with self._page(
-            visible=True, load_saved_cookies=not reset_session
-        ) as page:
+        from playwright.sync_api import (
+            Error as PlaywrightError,
+            TimeoutError as PlaywrightTimeoutError,
+        )
+
+        with self._page(visible=True, load_saved_cookies=not reset_session) as page:
             try:
                 page.goto(self.entry_url, wait_until="domcontentloaded", timeout=30000)
                 deadline = time.monotonic() + timeout_seconds
@@ -264,9 +253,8 @@ class ScheduleService:
             if not cached.get("currentSemester"):
                 cached["currentSemester"] = cached["selectedSemester"]
                 changed = True
-            if (
-                not cached.get("currentSemesterLabel")
-                and cached.get("selectedSemesterLabel")
+            if not cached.get("currentSemesterLabel") and cached.get(
+                "selectedSemesterLabel"
             ):
                 cached["currentSemesterLabel"] = cached["selectedSemesterLabel"]
                 changed = True
@@ -318,6 +306,7 @@ class ScheduleService:
         include_available_semesters: bool = False,
     ) -> dict[str, Any]:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
         label = page.locator("#dqxnxq2")
         try:
             page.wait_for_function(
@@ -364,9 +353,7 @@ class ScheduleService:
             }
             for item in items
             if isinstance(item, dict)
-            and SEMESTER_CODE_PATTERN.fullmatch(
-                str(item.get("value") or "").strip()
-            )
+            and SEMESTER_CODE_PATTERN.fullmatch(str(item.get("value") or "").strip())
         ]
         dialog = page.get_by_role("dialog").filter(has_text="更改学年学期").last
         if selection_is_current:
@@ -444,14 +431,18 @@ class ScheduleService:
 
     _source_key = staticmethod(schedule_customizations._source_key)
 
-    _default_customizations = staticmethod(schedule_customizations._default_customizations)
+    _default_customizations = staticmethod(
+        schedule_customizations._default_customizations
+    )
 
     def _load_customizations(self) -> dict[str, Any]:
         return schedule_customizations._load_customizations(self)
 
     _valid_iso_date = staticmethod(schedule_customizations._valid_iso_date)
 
-    _normalize_editable_course = staticmethod(schedule_customizations._normalize_editable_course)
+    _normalize_editable_course = staticmethod(
+        schedule_customizations._normalize_editable_course
+    )
 
     def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
         return schedule_customizations.save_customizations(self, payload)
@@ -494,30 +485,26 @@ class ScheduleService:
         for option in available_semesters:
             value = str(option.get("value") or "").strip()
             label = str(option.get("label") or value).strip()
-            if not SEMESTER_CODE_PATTERN.fullmatch(value) or int(value[:4]) < self._earliest_sync_year() or value in seen:
+            if (
+                not SEMESTER_CODE_PATTERN.fullmatch(value)
+                or int(value[:4]) < self._earliest_sync_year()
+                or value in seen
+            ):
                 continue
             seen.add(value)
             try:
-                response = page.request.post(
+                rows = post_rows(
+                    page,
                     SCHEDULE_DATA_URL,
-                    form={"*order": "+KSJC", "XNXQDM": value, "pageSize": 10000, "pageNumber": 1},
-                    timeout=30000,
+                    "xskcb",
+                    {
+                        "*order": "+KSJC",
+                        "XNXQDM": value,
+                        "pageSize": 10000,
+                        "pageNumber": 1,
+                    },
                 )
-                if not response.ok:
-                    failures.append(
-                        {
-                            "value": value,
-                            "label": label,
-                            "message": f"HTTP {response.status}",
-                        }
-                    )
-                    continue
-                payload = response.json()
-                dataset = payload.get("datas", {}).get("xskcb", {}) if isinstance(payload, dict) else {}
-                if not isinstance(dataset, dict) or not isinstance(dataset.get("rows"), list):
-                    failures.append({"value": value, "label": label, "message": "课表接口未返回有效排课数据，原缓存已保留。"})
-                    continue
-                courses = self._normalize_rows(self._rows_from_payload(payload))
+                courses = self._normalize_rows(rows)
                 for course in courses:
                     course["semester"] = value
                 result = {
@@ -551,7 +538,9 @@ class ScheduleService:
             except Exception as exc:
                 if isinstance(exc, (CampusAuthError, TaskCancelledError)):
                     raise
-                if network_category("get-schedule", {"targetUrl": self.target_url}, exc):
+                if network_category(
+                    "get-schedule", {"targetUrl": self.target_url}, exc
+                ):
                     raise
                 failures.append(
                     {
@@ -564,53 +553,96 @@ class ScheduleService:
         return {
             "prefetchedSemesters": prefetched,
             "prefetchFailures": failures,
-            "prefetchCounts": {
-                item["value"]: item["count"] for item in prefetched
-            },
+            "prefetchCounts": {item["value"]: item["count"] for item in prefetched},
         }
 
     def _fetch_api_schedule(
-        self, page, semester, *, include_available_semesters, prefetch_available_semesters
+        self,
+        page,
+        semester,
+        *,
+        include_available_semesters,
+        prefetch_available_semesters,
     ) -> dict[str, Any] | None:
         """Use the same authenticated endpoints as the portal, without UI switching."""
-        base = "https://ehall.seu.edu.cn/jwapp/sys/wdkb/modules/jshkcb/"
+        base = SCHEDULE_METADATA_ROOT
         metadata = {}
         for name in ("dqxnxq", "xnxqcx"):
-            response = page.request.post(base + name + ".do", form={"*order": "+DM", "pageSize": 10000}, timeout=30000)
-            if response.status in {401, 403}:
-                return {"status": "auth_required", "message": "课表登录会话不存在或已失效，请重新授权。"}
-            if not response.ok:
-                return {"status": "failed", "message": f"课表学期接口请求失败：HTTP {response.status}"}
-            try:
-                payload = response.json()
-            except ValueError:
-                return None
-            rows = payload.get("datas", {}).get(name, {}).get("rows") if isinstance(payload, dict) else None
-            if not isinstance(rows, list) or not rows:
-                return None
+            rows = post_rows(
+                page, base + name + ".do", name, {"*order": "+DM", "pageSize": 10000}
+            )
+            if not rows or any(
+                not SEMESTER_CODE_PATTERN.fullmatch(str(row.get("DM") or ""))
+                for row in rows
+            ):
+                raise CampusAPIError(f"课表学期接口 {name} 返回的数据无效")
             metadata[name] = rows
         current = str(metadata["dqxnxq"][0].get("DM") or "").strip()
         current_label = str(metadata["dqxnxq"][0].get("MC") or current).strip()
         if not SEMESTER_CODE_PATTERN.fullmatch(current):
             return None
-        available = [{"value": str(row.get("DM") or "").strip(), "label": str(row.get("MC") or "").strip()}
-                     for row in metadata["xnxqcx"] if isinstance(row, dict) and SEMESTER_CODE_PATTERN.fullmatch(str(row.get("DM") or "").strip()) and int(str(row["DM"]).strip()[:4]) >= self._earliest_sync_year()]
+        available = [
+            {
+                "value": str(row.get("DM") or "").strip(),
+                "label": str(row.get("MC") or "").strip(),
+            }
+            for row in metadata["xnxqcx"]
+            if isinstance(row, dict)
+            and SEMESTER_CODE_PATTERN.fullmatch(str(row.get("DM") or "").strip())
+            and int(str(row["DM"]).strip()[:4]) >= self._earliest_sync_year()
+        ]
         selected = str(semester or current).strip()
-        info = {"requestedSemester": semester, "currentSemester": current, "currentSemesterLabel": current_label,
-                "selectedSemester": selected, "selectedSemesterLabel": next((item["label"] for item in available if item["value"] == selected), current_label),
-                "availableSemesters": available if include_available_semesters or prefetch_available_semesters else []}
+        info = {
+            "requestedSemester": semester,
+            "currentSemester": current,
+            "currentSemesterLabel": current_label,
+            "selectedSemester": selected,
+            "selectedSemesterLabel": next(
+                (item["label"] for item in available if item["value"] == selected),
+                current_label,
+            ),
+            "availableSemesters": available
+            if include_available_semesters or prefetch_available_semesters
+            else [],
+        }
         if selected not in {item["value"] for item in available}:
-            return {"status": "semester_not_found", "found": False, **info, "message": "请求的学期不在课表系统可选列表中。"}
+            return {
+                "status": "semester_not_found",
+                "found": False,
+                **info,
+                "message": "请求的学期不在课表系统可选列表中。",
+            }
         batch = self._prefetch_remote_semesters(
-            page, available_semesters=available if prefetch_available_semesters else [item for item in available if item["value"] == selected],
-            current_semester=current, current_semester_label=current_label,
+            page,
+            available_semesters=available
+            if prefetch_available_semesters
+            else [item for item in available if item["value"] == selected],
+            current_semester=current,
+            current_semester_label=current_label,
         )
-        cache_file = self.cache_file if selected == current else self._cache_file_for_semester(selected)
+        cache_file = (
+            self.cache_file
+            if selected == current
+            else self._cache_file_for_semester(selected)
+        )
         cached = self._load_cache_file(cache_file) or {"courses": [], "count": 0}
-        result = {**cached, **info, **batch, "found": True, "source": "api", "cacheFile": str(cache_file.resolve()),
-                  "status": "partial" if batch["prefetchFailures"] else "fresh" if cached["courses"] else "empty"}
+        result = {
+            **cached,
+            **info,
+            **batch,
+            "found": True,
+            "source": "api",
+            "cacheFile": str(cache_file.resolve()),
+            "status": "partial"
+            if batch["prefetchFailures"]
+            else "fresh"
+            if cached["courses"]
+            else "empty",
+        }
         if batch["prefetchFailures"]:
-            result["message"] = "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
+            result["message"] = (
+                "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
+            )
         if selected in batch["prefetchCounts"]:
             self._write_json_atomic(cache_file, result)
         self._save_cookies(page)
@@ -625,26 +657,33 @@ class ScheduleService:
     ) -> dict[str, Any]:
         if self.target_url == DEFAULT_SCHEDULE_URL:
             try:
-                with CampusSession(self.cookie_file, username=self.username,
-                                   password=self.password) as session:
+                with CampusSession(
+                    self.cookie_file, username=self.username, password=self.password
+                ) as session:
                     session.ensure_authenticated(self.entry_url)
                     api_result = self._fetch_api_schedule(
-                        session, semester,
+                        session,
+                        semester,
                         include_available_semesters=include_available_semesters,
-                        prefetch_available_semesters=prefetch_available_semesters)
+                        prefetch_available_semesters=prefetch_available_semesters,
+                    )
                     if api_result is not None:
                         return api_result
             except CampusAuthError as error:
                 return error.result()
         from .optional_runtime import ensure_dependencies
+
         ensure_dependencies("browser")
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
         payloads: list[tuple[str, Any]] = []
         with self._page(visible=False) as page:
+
             def collect(response) -> None:
-                if not response.url.endswith(
-                    "/modules/xskcb/xskcb.do"
-                ) or not response.ok:
+                if (
+                    not response.url.endswith("/modules/xskcb/xskcb.do")
+                    or not response.ok
+                ):
                     return
                 try:
                     payload = response.json()
@@ -678,8 +717,7 @@ class ScheduleService:
                     page,
                     semester,
                     include_available_semesters=(
-                        include_available_semesters
-                        or prefetch_available_semesters
+                        include_available_semesters or prefetch_available_semesters
                     ),
                 )
             except _SchedulePageLoadTimeout:
@@ -747,7 +785,9 @@ class ScheduleService:
                         if selected_semester == semester_info["currentSemester"]
                         else self._cache_file_for_semester(selected_semester)
                     )
-                    courses = json.loads(selected_cache.read_text(encoding="utf-8"))["courses"]
+                    courses = json.loads(selected_cache.read_text(encoding="utf-8"))[
+                        "courses"
+                    ]
                     source = "api"
             self._save_cookies(page)
 
@@ -765,7 +805,9 @@ class ScheduleService:
             result["message"] = "页面已通过认证，但这个学期没有课表数据。"
         if prefetch_result.get("prefetchFailures"):
             result["status"] = "partial"
-            result["message"] = "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
+            result["message"] = (
+                "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
+            )
         cache_file = (
             self.cache_file
             if selected_semester == semester_info["currentSemester"]
@@ -778,12 +820,19 @@ class ScheduleService:
     def calendar(self) -> AcademicCalendar:
         return AcademicCalendar(self.cache_file.parent / "calendar")
 
-    def get_calendar(self, *, refresh: bool = False, local_only: bool = False) -> dict[str, Any]:
+    def get_calendar(
+        self, *, refresh: bool = False, local_only: bool = False
+    ) -> dict[str, Any]:
         cached = self.calendar.view()
         if not local_only and (refresh or not cached.get("attachments")):
             cached = self.calendar.sync(self._write_json_atomic)
-        return {**cached, "status": "completed" if cached.get("attachments") else "partial",
-                "message": "学校校历与节假日调课通知" if cached.get("attachments") else "校历暂不可用"}
+        return {
+            **cached,
+            "status": "completed" if cached.get("attachments") else "partial",
+            "message": "学校校历与节假日调课通知"
+            if cached.get("attachments")
+            else "校历暂不可用",
+        }
 
     def get_schedule(
         self,
@@ -803,11 +852,20 @@ class ScheduleService:
         )
         if local_only:
             if cached is None:
-                result = {"status": "empty", "message": "本地没有可用的课表缓存。",
-                          "count": 0, "courses": [], "localOnly": True}
+                result = {
+                    "status": "empty",
+                    "message": "本地没有可用的课表缓存。",
+                    "count": 0,
+                    "courses": [],
+                    "localOnly": True,
+                }
                 customizations = self._load_customizations()
-                if not requested and (customizations["customCourses"] or customizations["dateOverrides"]):
-                    return self._filter_by_date(self._apply_customizations(result), target_date)
+                if not requested and (
+                    customizations["customCourses"] or customizations["dateOverrides"]
+                ):
+                    return self._filter_by_date(
+                        self._apply_customizations(result), target_date
+                    )
                 return result
             result = {
                 **cached,
@@ -817,16 +875,11 @@ class ScheduleService:
             }
             view = result if requested else self._apply_customizations(result)
             return self._filter_by_date(view, target_date)
-        if (
-            cached is not None
-            and not refresh
-        ):
+        if cached is not None and not refresh:
             result = {
                 **cached,
                 "status": "cached",
-                "cacheFile": str(
-                    self._cache_file_for_semester(requested).resolve()
-                ),
+                "cacheFile": str(self._cache_file_for_semester(requested).resolve()),
             }
             view = result if requested else self._apply_customizations(result)
             return self._filter_by_date(view, target_date)
@@ -839,15 +892,31 @@ class ScheduleService:
             )
         except TaskCancelledError:
             raise
-        except Exception:
+        except Exception as error:
             if cached is None:
                 raise
-            result = {**cached, "status": "cached", "stale": True,
-                      "message": "课表同步暂时失败，使用上次缓存；数据可能已过期。"}
-        if cached is not None and result.get("status") not in {"fresh", "cached", "completed", "empty", "partial", "auth_required"}:
-            result = {**cached, "status": "cached", "stale": True,
-                      "syncFailure": result.get("status"),
-                      "message": "课表同步失败，使用上次缓存；数据可能已过期。"}
+            result = {
+                **cached,
+                "status": "cached",
+                "stale": True,
+                "syncFailure": str(error),
+                "message": "课表同步暂时失败，使用上次缓存；数据可能已过期。",
+            }
+        if cached is not None and result.get("status") not in {
+            "fresh",
+            "cached",
+            "completed",
+            "empty",
+            "partial",
+            "auth_required",
+        }:
+            result = {
+                **cached,
+                "status": "cached",
+                "stale": True,
+                "syncFailure": result.get("status"),
+                "message": "课表同步失败，使用上次缓存；数据可能已过期。",
+            }
         if result.get("status") in {"fresh", "cached", "completed", "empty", "partial"}:
             result["calendar"] = self.calendar.sync(self._write_json_atomic)
         if result.get("status") == "auth_required" and cached is not None:
@@ -884,17 +953,25 @@ class ScheduleService:
         }
         week = self.week_for_date(start_text, target) if start_text else None
         if start_text:
-            filter_info.update({"applied": True, "semesterStartDate": start_text, "week": week})
+            filter_info.update(
+                {"applied": True, "semesterStartDate": start_text, "week": week}
+            )
         else:
             filter_info["reason"] = "missing_semester_start_date"
         courses = [
             dict(course)
             for course in result.get("courses") or []
-            if start_text and int(course.get("weekday") or 0) == target.isoweekday()
-            and (not course.get("weeks") or week in {int(item) for item in course.get("weeks") or []})
+            if start_text
+            and int(course.get("weekday") or 0) == target.isoweekday()
+            and (
+                not course.get("weeks")
+                or week in {int(item) for item in course.get("weeks") or []}
+            )
         ]
         course_by_source = {
-            str(course.get("sourceKey") or course.get("scheduleId") or f"course-{index}"): course
+            str(
+                course.get("sourceKey") or course.get("scheduleId") or f"course-{index}"
+            ): course
             for index, course in enumerate(courses)
         }
         for override in customizations.get("dateOverrides") or []:
@@ -921,8 +998,16 @@ class ScheduleService:
         )
         return {
             **result,
-            "status": ("completed" if filtered else "empty") if start_text else "partial",
-            **({"message": "未配置学期起始日期，仅展示明确指定日期的课程，周期课程无法按日期筛选。"} if not start_text else {}),
+            "status": ("completed" if filtered else "empty")
+            if start_text
+            else "partial",
+            **(
+                {
+                    "message": "未配置学期起始日期，仅展示明确指定日期的课程，周期课程无法按日期筛选。"
+                }
+                if not start_text
+                else {}
+            ),
             "count": len(filtered),
             "courses": filtered,
             "dateFilter": {**filter_info, "matchedCount": len(filtered)},

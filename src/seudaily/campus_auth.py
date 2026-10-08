@@ -1,10 +1,10 @@
 """SEU's normal CAS password login and portal requests, without a browser."""
+
 from __future__ import annotations
 
 import base64
 import json
 import os
-import tempfile
 import threading
 import time
 import uuid
@@ -18,11 +18,11 @@ from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 from .cancellation import raise_if_cancelled
 from .campus_device import device_fingerprint
+from .json_store import write_json_atomic
 from .runtime_paths import env_value
 from .vpn import campus_proxy
 
-AUTH_ROOT = "https://auth.seu.edu.cn/auth/casback"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+from .campus_endpoints import AUTH_ROOT, USER_AGENT
 
 
 class CampusAuthError(RuntimeError):
@@ -32,8 +32,16 @@ class CampusAuthError(RuntimeError):
 
     def result(self) -> dict:
         # Both frontends attach their manual login entry to auth_required.
-        status = "auth_required" if self.status in {"captcha_required", "credentials_missing"} else self.status
-        return {"status": status, "message": str(self), "authenticationReason": self.status}
+        status = (
+            "auth_required"
+            if self.status in {"captcha_required", "credentials_missing"}
+            else self.status
+        )
+        return {
+            "status": status,
+            "message": str(self),
+            "authenticationReason": self.status,
+        }
 
 
 class CampusSMSRequired(CampusAuthError):
@@ -42,8 +50,12 @@ class CampusSMSRequired(CampusAuthError):
         self.challenge = challenge
 
     def result(self):
-        return {"status": "auth_required", "message": str(self),
-                "authenticationReason": "sms_required", "challengeId": self.challenge.id}
+        return {
+            "status": "auth_required",
+            "message": str(self),
+            "authenticationReason": "sms_required",
+            "challengeId": self.challenge.id,
+        }
 
 
 _sms_challenges = {}
@@ -52,6 +64,7 @@ _sms_lock = threading.RLock()
 
 class SMSChallenge:
     """Keep the CAS cookie jar and login payload only in worker memory."""
+
     def __init__(self, session, payload, stop_before):
         self.id = uuid.uuid4().hex
         self.session, self.payload, self.stop_before = session, payload, stop_before
@@ -82,7 +95,9 @@ class SMSChallenge:
             remaining = 60 - (time.monotonic() - self.sent_at)
             if self.sent_at and remaining > 0:
                 return {"status": "completed", "retryAfter": int(remaining) + 1}
-            result = self.session._auth_post("sendStage2Code", {"userId": self.session.username})
+            result = self.session._auth_post(
+                "sendStage2Code", {"userId": self.session.username}
+            )
             if result.get("code") != 200:
                 raise CampusAuthError("auth_required", "短信发送失败，请稍后重试。")
             self.sent_at = time.monotonic()
@@ -99,17 +114,29 @@ class SMSChallenge:
             self.check_expiry()
             key = self.session._auth_post("getChiperKey", {})
             public = load_der_public_key(base64.urlsafe_b64decode(key["publicKey"]))
-            encrypt = lambda value: base64.b64encode(public.encrypt(value.encode(), PKCS1v15())).decode()
-            result = self.session._auth_post("casLogin", {
-                **self.payload, "password": encrypt(self.session.password),
-                "mobileVerifyCode": encrypt(code)})
+            encrypt = lambda value: base64.b64encode(
+                public.encrypt(value.encode(), PKCS1v15())
+            ).decode()
+            result = self.session._auth_post(
+                "casLogin",
+                {
+                    **self.payload,
+                    "password": encrypt(self.session.password),
+                    "mobileVerifyCode": encrypt(code),
+                },
+            )
             if result.get("code") != 200:
-                raise CampusAuthError("auth_required", "短信验证码未通过，请检查后重试。")
+                raise CampusAuthError(
+                    "auth_required", "短信验证码未通过，请检查后重试。"
+                )
             redirect = result.get("redirectUrl")
             if not redirect:
                 raise CampusAuthError("auth_required", "统一认证未提供业务跳转地址。")
             try:
-                self.session.get(f"{AUTH_ROOT}/loginRedirect?redirectUrl={redirect}", stop_before=self.stop_before)
+                self.session.get(
+                    f"{AUTH_ROOT}/loginRedirect?redirectUrl={redirect}",
+                    stop_before=self.stop_before,
+                )
                 self.session.ensure_authenticated(self.session.entry_url)
             except _CapturedRedirect as captured:
                 self.callback = captured.url
@@ -133,9 +160,12 @@ class _CapturedRedirect(Exception):
 def _campus_url(url: str) -> str:
     parsed = urlsplit(url)
     host = parsed.hostname or ""
-    if (parsed.scheme not in {"http", "https"} or
-            not (host == "seu.edu.cn" or host.endswith(".seu.edu.cn")) or
-            parsed.username or parsed.password):
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not (host == "seu.edu.cn" or host.endswith(".seu.edu.cn"))
+        or parsed.username
+        or parsed.password
+    ):
         raise CampusAuthError("auth_required", "认证跳转不属于校园系统，已停止。")
     return url
 
@@ -143,13 +173,24 @@ def _campus_url(url: str) -> str:
 class CampusSession:
     """A short-lived HTTP client; existing Playwright cookie files stay compatible."""
 
-    def __init__(self, cookie_file: str | Path, *, username=None, password=None,
-                 load_saved_cookies=True, use_vpn=True):
+    def __init__(
+        self,
+        cookie_file: str | Path,
+        *,
+        username=None,
+        password=None,
+        load_saved_cookies=True,
+        use_vpn=True,
+    ):
         self.cookie_file = Path(cookie_file)
         self.username = username or env_value("SEUDAILY_USERNAME")
         self.password = password or env_value("SEUDAILY_PASSWORD")
-        self.client = httpx.Client(proxy=campus_proxy() if use_vpn else None, trust_env=False, timeout=30,
-                                   headers={"User-Agent": USER_AGENT})
+        self.client = httpx.Client(
+            proxy=campus_proxy() if use_vpn else None,
+            trust_env=False,
+            timeout=30,
+            headers={"User-Agent": USER_AGENT},
+        )
         self.url = ""
         self.entry_url = ""
         self.pending_sms = None
@@ -173,30 +214,50 @@ class CampusSession:
             return
         for item in saved:
             domain = item["domain"]
-            self.client.cookies.jar.set_cookie(Cookie(
-                version=0, name=item["name"], value=item["value"],
-                port=None, port_specified=False, domain=domain,
-                domain_specified=domain.startswith("."), domain_initial_dot=domain.startswith("."),
-                path=item.get("path", "/"), path_specified=True,
-                secure=item.get("secure", False),
-                expires=int(item["expires"]) if item.get("expires", -1) > 0 else None,
-                discard=item.get("expires", -1) <= 0, comment=None, comment_url=None,
-                rest={"SameSite": item.get("sameSite", "Lax"),
-                      **({"HttpOnly": None} if item.get("httpOnly") else {})}, rfc2109=False))
+            self.client.cookies.jar.set_cookie(
+                Cookie(
+                    version=0,
+                    name=item["name"],
+                    value=item["value"],
+                    port=None,
+                    port_specified=False,
+                    domain=domain,
+                    domain_specified=domain.startswith("."),
+                    domain_initial_dot=domain.startswith("."),
+                    path=item.get("path", "/"),
+                    path_specified=True,
+                    secure=item.get("secure", False),
+                    expires=int(item["expires"])
+                    if item.get("expires", -1) > 0
+                    else None,
+                    discard=item.get("expires", -1) <= 0,
+                    comment=None,
+                    comment_url=None,
+                    rest={
+                        "SameSite": item.get("sameSite", "Lax"),
+                        **({"HttpOnly": None} if item.get("httpOnly") else {}),
+                    },
+                    rfc2109=False,
+                )
+            )
 
     def cookies(self):
-        return [{"name": c.name, "value": c.value, "domain": c.domain,
-                 "path": c.path, "expires": c.expires if c.expires is not None else -1,
-                 "secure": c.secure, "httpOnly": c.has_nonstandard_attr("HttpOnly"),
-                 "sameSite": c.get_nonstandard_attr("SameSite", "Lax")} for c in self.client.cookies.jar]
+        return [
+            {
+                "name": c.name,
+                "value": c.value,
+                "domain": c.domain,
+                "path": c.path,
+                "expires": c.expires if c.expires is not None else -1,
+                "secure": c.secure,
+                "httpOnly": c.has_nonstandard_attr("HttpOnly"),
+                "sameSite": c.get_nonstandard_attr("SameSite", "Lax"),
+            }
+            for c in self.client.cookies.jar
+        ]
 
     def save(self):
-        self.cookie_file.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                                         dir=self.cookie_file.parent, delete=False) as file:
-            json.dump(self.cookies(), file)
-            name = file.name
-        os.replace(name, self.cookie_file)
+        write_json_atomic(self.cookie_file, self.cookies())
 
     def get(self, url: str, *, stop_before=None):
         for _ in range(12):
@@ -213,15 +274,28 @@ class CampusSession:
         raise CampusAuthError("auth_required", "校园系统认证跳转次数过多，请重新授权。")
 
     def _auth_post(self, endpoint, payload):
-        response = self.client.post(f"{AUTH_ROOT}/{endpoint}", json=payload,
-                                    headers={"Origin": "https://auth.seu.edu.cn",
-                                             "Referer": "https://auth.seu.edu.cn/dist/"})
+        response = self.client.post(
+            f"{AUTH_ROOT}/{endpoint}",
+            json=payload,
+            headers={
+                "Origin": "https://auth.seu.edu.cn",
+                "Referer": "https://auth.seu.edu.cn/dist/",
+            },
+        )
         if not response.is_success:
-            raise CampusAuthError("auth_required", f"统一认证接口请求失败（HTTP {response.status_code}）。")
+            raise CampusAuthError(
+                "auth_required",
+                f"统一认证接口请求失败（HTTP {response.status_code}）。",
+            )
         try:
-            return response.json()
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError("Expected authentication object")
+            return result
         except ValueError:
-            raise CampusAuthError("auth_required", "统一认证接口没有返回有效数据。") from None
+            raise CampusAuthError(
+                "auth_required", "统一认证接口没有返回有效数据。"
+            ) from None
 
     @staticmethod
     def _service(url):
@@ -232,9 +306,14 @@ class CampusSession:
     @staticmethod
     def _check_login(result):
         if result.get("code") == 502 or result.get("needStage2Validation"):
-            raise CampusAuthError("captcha_required", "统一认证需要二次验证，请在登录窗口完成。")
+            raise CampusAuthError(
+                "captcha_required", "统一认证需要二次验证，请在登录窗口完成。"
+            )
         if result.get("code") != 200:
-            raise CampusAuthError("auth_required", "统一认证未通过，可能需要验证码或检查账号密码；请在登录窗口完成。")
+            raise CampusAuthError(
+                "auth_required",
+                "统一认证未通过，可能需要验证码或检查账号密码；请在登录窗口完成。",
+            )
 
     def capture_auth_redirect(self, entry_url, callback_matches):
         """Authenticate, but leave the one-use service ticket for its consumer."""
@@ -242,7 +321,9 @@ class CampusSession:
             self.ensure_authenticated(entry_url, stop_before=callback_matches)
         except _CapturedRedirect as captured:
             return captured.url
-        raise CampusAuthError("auth_required", "统一认证未提供预期回调，请使用登录窗口。")
+        raise CampusAuthError(
+            "auth_required", "统一认证未提供预期回调，请使用登录窗口。"
+        )
 
     def ensure_authenticated(self, entry_url, *, stop_before=None):
         # eHall itself and each launched application have separate CAS services.
@@ -253,35 +334,60 @@ class CampusSession:
             response = self.get(entry_url, stop_before=stop_before)
             if urlsplit(self.url).hostname != "auth.seu.edu.cn":
                 if not response.is_success:
-                    raise CampusAuthError("launch_failed", f"校园应用启动失败（HTTP {response.status_code}）。")
+                    raise CampusAuthError(
+                        "launch_failed",
+                        f"校园应用启动失败（HTTP {response.status_code}）。",
+                    )
                 self.save()
                 return
             service = self._service(self.url)
             if not service:
-                raise CampusAuthError("auth_required", "统一认证页面缺少业务系统地址，请使用登录窗口。")
+                raise CampusAuthError(
+                    "auth_required", "统一认证页面缺少业务系统地址，请使用登录窗口。"
+                )
             _campus_url(service)
-            result = self._auth_post("verifyTgt", {"service": service, "loginType": "account"})
+            result = self._auth_post(
+                "verifyTgt", {"service": service, "loginType": "account"}
+            )
             password_login = not result.get("success")
             if password_login:
                 if password_submitted:
-                    raise CampusAuthError("auth_required", "认证会话未能保持，请使用登录窗口。")
+                    raise CampusAuthError(
+                        "auth_required", "认证会话未能保持，请使用登录窗口。"
+                    )
                 if not self.username or not self.password:
-                    raise CampusAuthError("credentials_missing", "登录会话已失效，且未配置校园账号密码。")
+                    raise CampusAuthError(
+                        "credentials_missing", "登录会话已失效，且未配置校园账号密码。"
+                    )
                 captcha = self.client.get(f"{AUTH_ROOT}/needCaptcha").json()
                 if captcha.get("code") == 4000:
-                    raise CampusAuthError("captcha_required", "统一认证需要验证码，请在登录窗口完成。")
+                    raise CampusAuthError(
+                        "captcha_required", "统一认证需要验证码，请在登录窗口完成。"
+                    )
                 key = self._auth_post("getChiperKey", {})
                 public = load_der_public_key(base64.urlsafe_b64decode(key["publicKey"]))
-                encrypted = base64.b64encode(public.encrypt(self.password.encode(), PKCS1v15())).decode()
+                encrypted = base64.b64encode(
+                    public.encrypt(self.password.encode(), PKCS1v15())
+                ).decode()
                 try:
                     fingerprint = device_fingerprint()
                 except (OSError, ValueError) as error:
-                    raise CampusAuthError("auth_required", "无法读取或保存校园设备标识，请检查数据目录中的 .seudaily/campus-device.json。") from error
+                    raise CampusAuthError(
+                        "auth_required",
+                        "无法读取或保存校园设备标识，请检查数据目录中的 .seudaily/campus-device.json。",
+                    ) from error
                 login_payload = {
-                    "service": service, "username": self.username, "password": encrypted,
-                    "captcha": "", "rememberMe": False, "loginType": "account",
-                    "wxBinded": False, "mobilePhoneNum": "", "mobileVerifyCode": "",
-                    "fingerPrint": fingerprint}
+                    "service": service,
+                    "username": self.username,
+                    "password": encrypted,
+                    "captcha": "",
+                    "rememberMe": False,
+                    "loginType": "account",
+                    "wxBinded": False,
+                    "mobilePhoneNum": "",
+                    "mobileVerifyCode": "",
+                    "fingerPrint": fingerprint,
+                }
                 result = self._auth_post("casLogin", login_payload)
                 if result.get("code") == 502:
                     self.pending_sms = SMSChallenge(self, login_payload, stop_before)
@@ -290,10 +396,15 @@ class CampusSession:
                 self._check_login(result)
             redirect = result.get("redirectUrl")
             if not redirect:
-                raise CampusAuthError("auth_required", "统一认证未提供业务跳转地址，请使用登录窗口。")
+                raise CampusAuthError(
+                    "auth_required", "统一认证未提供业务跳转地址，请使用登录窗口。"
+                )
             if password_login:
                 # This value is already URL-encoded; use it exactly as the login UI.
-                response = self.get(f"{AUTH_ROOT}/loginRedirect?redirectUrl={redirect}", stop_before=stop_before)
+                response = self.get(
+                    f"{AUTH_ROOT}/loginRedirect?redirectUrl={redirect}",
+                    stop_before=stop_before,
+                )
             else:
                 response = self.get(redirect, stop_before=stop_before)
             if response.is_success and urlsplit(self.url).hostname != "auth.seu.edu.cn":
@@ -305,9 +416,21 @@ class CampusSession:
         _campus_url(url)
         for attempt in range(2):
             raise_if_cancelled()
-            response = self.client.post(url, data=form, headers=headers, timeout=timeout / 1000)
-            expired = (response.status_code in {401, 403} or response.is_redirect or
-                       "text/html" in response.headers.get("content-type", ""))
+            response = self.client.post(
+                url, data=form, headers=headers, timeout=timeout / 1000
+            )
+            # A forbidden response or a maintenance HTML page is not proof of expired auth.
+            html = "text/html" in response.headers.get("content-type", "")
+            login_html = html and any(
+                marker in response.text.lower()
+                for marker in ("auth.seu.edu.cn", "authserver/login", "cas/login")
+            )
+            location = response.headers.get("location", "").lower()
+            login_redirect = response.is_redirect and any(
+                marker in location
+                for marker in ("auth.seu.edu.cn", "authserver/login", "cas/login")
+            )
+            expired = response.status_code == 401 or login_redirect or login_html
             if not expired:
                 return PortalResponse(response)
             if attempt == 0 and self.entry_url:
@@ -318,6 +441,7 @@ class CampusSession:
 
 class PortalResponse:
     """The small response interface used by the existing campus data parsers."""
+
     def __init__(self, response):
         self._response = response
         self.status = response.status_code

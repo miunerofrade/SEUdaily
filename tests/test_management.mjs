@@ -16,7 +16,7 @@ test('TUI edits embedding credentials separately from the chat model and submits
   }},show:()=>{}};
   const form = await settingsForm(session);
   const key = form.fields.find(field=>field.key==='DASHSCOPE_API_KEY');
-  assert.match(key.label,/阿里云百炼/);
+  assert.match(key.label,/阿里云 API Key/);
   assert.equal(key.secret,true);
   assert.equal(key.value,'');
   const values = Object.fromEntries(form.fields.map(field=>[field.key,field.value]));

@@ -1,0 +1,8 @@
+{
+  ".pdf": {"mediaType": "application/pdf", "parser": true},
+  ".docx": {"mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "parser": true},
+  ".xlsx": {"mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "parser": true},
+  ".pptx": {"mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "parser": true},
+  ".txt": {"mediaType": "text/plain", "parser": false},
+  ".md": {"mediaType": "text/markdown", "parser": false}
+}

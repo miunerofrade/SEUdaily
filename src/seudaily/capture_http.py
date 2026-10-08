@@ -1,5 +1,6 @@
 """Course resources obtained from APIs; media processing remains an explicit fallback."""
 from pathlib import Path
+from .campus_endpoints import COURSE_ENDPOINTS
 
 from .campus_auth import CampusAuthError
 from .cancellation import TaskCancelledError, raise_if_cancelled
@@ -48,7 +49,7 @@ def capture_lessons(client, course, lessons, worker, export_dir, stop_event, *,
                     subtitle_missing = False
                     logs.append(f"第 {period} 节官方字幕已通过 HTTP 保存。")
             if slides_missing:
-                data = client.get("/v1/course/ai/ppt", {"courseId": lesson["courseId"]}).get("data") or {}
+                data = client.get(COURSE_ENDPOINTS["slides"], {"courseId": lesson["courseId"]}).get("data") or {}
                 if data.get("docList"):
                     client.save_slides(lesson["courseId"], slides)
                     slides_missing = False

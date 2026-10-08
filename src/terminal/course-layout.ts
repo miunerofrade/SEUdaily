@@ -1,21 +1,7 @@
 import stringWidth from "string-width";
 import { clean } from "./client.js";
-export const periodTimes = [
-  "",
-  "08:00–08:45",
-  "08:50–09:35",
-  "09:50–10:35",
-  "10:40–11:25",
-  "11:30–12:15",
-  "14:00–14:45",
-  "14:50–15:35",
-  "15:50–16:35",
-  "16:40–17:25",
-  "17:30–18:15",
-  "19:00–19:45",
-  "19:50–20:35",
-  "20:40–21:25",
-];
+import { periodTimes } from '../shared/course-periods.js';
+export { periodTimes } from '../shared/course-periods.js';
 export function fit(value: unknown, width: number) {
   const text = clean(value).replace(/\n/g, " ");
   if (stringWidth(text) <= width)

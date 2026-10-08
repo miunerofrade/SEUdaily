@@ -22,18 +22,22 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
+from .json_store import write_json_atomic
+from .web_download import read_chunks
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
 from .vpn import CampusProxyHandler, campus_proxy
 
 
 _CAMPUS_ACCESS_NOTICE = re.compile(
     r"(?:当前\s*ip并非校内地址|仅允许校内地址访问|仅限(?:校园网|校内)(?:用户|地址)?访问|"
-    r"(?:请|需要|必须)[^。\n]{0,30}(?:校园网|VPN)[^。\n]{0,20}访问)", re.I,
+    r"(?:请|需要|必须)[^。\n]{0,30}(?:校园网|VPN)[^。\n]{0,20}访问)",
+    re.I,
 )
 
 
 class _NoticeResponse:
     """Preserve the inspected prefix when streaming an attachment."""
+
     def __init__(self, response, prefix):
         self.response = response
         self.prefix = prefix
@@ -60,18 +64,36 @@ class _NoticeOpener:
         self.handlers = handlers
 
     def _open(self, request, timeout, proxy=None):
-        proxy_handler = CampusProxyHandler({"http": proxy, "https": proxy}) if proxy else ProxyHandler({})
+        proxy_handler = (
+            CampusProxyHandler({"http": proxy, "https": proxy})
+            if proxy
+            else ProxyHandler({})
+        )
         # Search requests share their cookie jar across direct and VPN requests.
-        handlers = [HTTPCookieProcessor(h.cookiejar) if isinstance(h, HTTPCookieProcessor) else h for h in self.handlers]
+        handlers = [
+            HTTPCookieProcessor(h.cookiejar)
+            if isinstance(h, HTTPCookieProcessor)
+            else h
+            for h in self.handlers
+        ]
         opener = build_opener(proxy_handler, *handlers)
         # urllib mutates requests for proxy transport; each attempt gets a fresh copy.
-        fresh = Request(request.full_url, data=request.data, headers=dict(request.header_items()), method=request.get_method())
+        fresh = Request(
+            request.full_url,
+            data=request.data,
+            headers=dict(request.header_items()),
+            method=request.get_method(),
+        )
         response = opener.open(fresh, timeout=timeout)
         try:
             prefix = response.read(8192)
             text = prefix.decode("utf-8", errors="replace")
-            gate = re.search(r'<div[^>]*class=[\'"]wp_error_msg[\'"][^>]*>(.*?)</div>', text, re.S)
-            if gate and _CAMPUS_ACCESS_NOTICE.search(unescape(re.sub(r"<[^>]*>", " ", gate[1]))):
+            gate = re.search(
+                r'<div[^>]*class=[\'"]wp_error_msg[\'"][^>]*>(.*?)</div>', text, re.S
+            )
+            if gate and _CAMPUS_ACCESS_NOTICE.search(
+                unescape(re.sub(r"<[^>]*>", " ", gate[1]))
+            ):
                 raise PermissionError("该通知仅限校园网或校园 VPN 访问")
             return _NoticeResponse(response, prefix)
         except BaseException:
@@ -97,83 +119,22 @@ def public_opener(*handlers):
     return _NoticeOpener(handlers)
 
 
-_ARTICLE_PATH = re.compile(
-    r"/(\d{4})/(\d{2})(\d{2})/c\d+a(\d+)/page\.(?:htm|psp)$"
-)
-_SPACE = re.compile(r"\s+")
-_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
-
-def _load_notice_sources(path: Path) -> dict:
-    """Only known sites and public WebPlus list paths; no extraction DSL."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not {"jwc", "cse"}.issubset(data):
-        raise ValueError("通知栏目配置需要 jwc/cse")
-    result = {}
-    for site, source in data.items():
-        if (not isinstance(source,dict) or not isinstance(source.get('name'),str) or not source['name'].strip()
-                or source.get('host') != site+'.seu.edu.cn'):
-            raise ValueError(f"无效通知机构配置：{site}")
-        if site not in {'jwc','cse'}:
-            if 'categories' in source:
-                raise ValueError("额外来源仅支持机构名称，不支持抓取栏目")
-            continue
-        categories=source.get('categories')
-        if not isinstance(categories, dict) or not categories:
-            raise ValueError("通知栏目配置不能为空")
-        result[site] = {'name':source['name'],'host':source['host'],'categories':{}}
-        for key, entry in categories.items():
-            if (not re.fullmatch(r"[a-z][a-z0-9_]*", key)
-                    or not isinstance(entry, list) or len(entry) != 2
-                    or not all(isinstance(value, str) for value in entry)
-                    or not entry[0].strip()
-                    or not re.fullmatch(r"/[A-Za-z0-9_]+/list\.htm", entry[1])):
-                raise ValueError(f"无效通知栏目配置：{site}/{key}")
-            result[site]['categories'][key] = (entry[0], entry[1])
-        paths = [entry[1] for entry in result[site]['categories'].values()]
-        if len(paths) != len(set(paths)):
-            raise ValueError(f"通知栏目路径重复：{site}")
-    return result
-
-
-def _load_notice_categories(path: Path) -> dict[str, dict[str, tuple[str, str]]]:
-    return {key:source['categories'] for key,source in _load_notice_sources(path).items()}
-
-
-_NOTICE_SOURCES = _load_notice_sources(Path(__file__).with_name("notice_categories.json"))
-_NOTICE_CATEGORIES = {key:source['categories'] for key,source in _NOTICE_SOURCES.items()}
-JWC_CATEGORIES = _NOTICE_CATEGORIES["jwc"]
-CSE_CATEGORIES = _NOTICE_CATEGORIES["cse"]
-
-
-@dataclass(frozen=True)
-class WebplusSiteConfig:
-    key: str
-    name: str
-    id_prefix: str
-    categories: dict[str, tuple[str, str]]
-    title_classes: frozenset[str]
-    date_classes: frozenset[str]
-    content_classes: frozenset[str]
-
-
-JWC_CONFIG = WebplusSiteConfig(
-    key="jwc",
-    name=_NOTICE_SOURCES['jwc']['name'],
-    id_prefix="seu-jwc",
-    categories=JWC_CATEGORIES,
-    title_classes=frozenset({"Article_Title"}),
-    date_classes=frozenset({"Article_PublishDate"}),
-    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
-)
-
-CSE_CONFIG = WebplusSiteConfig(
-    key="cse",
-    name=_NOTICE_SOURCES['cse']['name'],
-    id_prefix="seu-cse",
-    categories=CSE_CATEGORIES,
-    title_classes=frozenset({"arti_title", "Article_Title"}),
-    date_classes=frozenset({"arti_update", "Article_PublishDate"}),
-    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
+from .webplus_page import (
+    _ARTICLE_PATH,
+    _SPACE,
+    _VOID_TAGS,
+    _load_notice_sources,
+    _load_notice_categories,
+    _NOTICE_SOURCES,
+    _NOTICE_CATEGORIES,
+    JWC_CATEGORIES,
+    CSE_CATEGORIES,
+    WebplusSiteConfig,
+    JWC_CONFIG,
+    CSE_CONFIG,
+    _clean,
+    _article_id,
+    _PageParser,
 )
 
 
@@ -183,107 +144,6 @@ def _now() -> datetime:
 
 def _iso_now() -> str:
     return _now().isoformat()
-
-
-def _clean(text: str) -> str:
-    return _SPACE.sub(" ", text).strip()
-
-
-def _article_id(url: str, prefix: str = "seu-jwc") -> str:
-    match = _ARTICLE_PATH.search(urlparse(url).path)
-    if match:
-        return f"{prefix}-{match.group(4)}"
-    return f"{prefix}-{hashlib.sha256(url.encode('utf-8')).hexdigest()[:20]}"
-
-
-class _PageParser(HTMLParser):
-    def __init__(self, base_url: str, config: WebplusSiteConfig = JWC_CONFIG) -> None:
-        super().__init__(convert_charrefs=True)
-        self.base_url = base_url
-        self.config = config
-        self.anchors: list[dict[str, str]] = []
-        self._anchor: dict[str, Any] | None = None
-        self._capture_stack: list[set[str]] = []
-        self._title_parts: list[str] = []
-        self._date_parts: list[str] = []
-        self._content_parts: list[str] = []
-        self._content_depth = 0
-        self.embedded_files: list[dict[str, str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        values = dict(attrs)
-        classes = set((values.get("class") or "").split())
-        if tag not in _VOID_TAGS:
-            self._capture_stack.append(classes)
-        if classes & self.config.content_classes:
-            self._content_depth += 1
-        elif self._content_depth and tag not in _VOID_TAGS:
-            self._content_depth += 1
-        if tag == "a" and values.get("href"):
-            self._anchor = {
-                "href": urljoin(self.base_url, values["href"] or ""),
-                "parts": [],
-                "inContent": self._content_depth > 0,
-            }
-        if self._content_depth or "wp_pdf_player" in classes:
-            source = values.get("pdfsrc") or values.get("src") or values.get("data")
-            if source:
-                metadata = values.get("sudyfile-attr") or ""
-                title_match = re.search(r"['\"]title['\"]\s*:\s*['\"]([^'\"]+)", metadata)
-                self.embedded_files.append({
-                    "url": self._unwrap_file_url(urljoin(self.base_url, source)),
-                    "name": _clean(title_match.group(1)) if title_match else "",
-                })
-
-    @staticmethod
-    def _unwrap_file_url(url: str) -> str:
-        parsed = urlparse(url)
-        file_values = parse_qs(parsed.query).get("file")
-        if file_values:
-            return urljoin(url, unquote(file_values[0]))
-        return url
-
-    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.handle_starttag(tag, attrs)
-
-    def handle_endtag(self, tag: str) -> None:
-        classes = self._capture_stack.pop() if self._capture_stack else set()
-        if tag == "a" and self._anchor is not None:
-            self.anchors.append({
-                "href": self._anchor["href"],
-                "text": _clean("".join(self._anchor["parts"])),
-                "inContent": str(self._anchor["inContent"]),
-            })
-            self._anchor = None
-        if self._content_depth:
-            self._content_depth -= 1
-        if classes & self.config.content_classes:
-            self._content_depth = 0
-
-    def handle_data(self, data: str) -> None:
-        if self._anchor is not None:
-            self._anchor["parts"].append(data)
-        active = set().union(*self._capture_stack) if self._capture_stack else set()
-        if active & self.config.title_classes:
-            self._title_parts.append(data)
-        if active & self.config.date_classes:
-            self._date_parts.append(data)
-        if self._content_depth:
-            self._content_parts.append(data)
-
-    @property
-    def title(self) -> str:
-        return _clean("".join(self._title_parts))
-
-    @property
-    def published_at(self) -> str:
-        value = _clean("".join(self._date_parts))
-        match = re.search(r"\d{4}-\d{2}-\d{2}", value)
-        return match.group(0) if match else value
-
-    @property
-    def content(self) -> str:
-        return _clean(" ".join(self._content_parts))
 
 
 class JwcService:
@@ -334,8 +194,7 @@ class JwcService:
         for item in list(remote_by_url.values())[:limit]:
             source_category = item.get("_sourceCategory")
             stored_item = {
-                key: value for key, value in item.items()
-                if not key.startswith("_")
+                key: value for key, value in item.items() if not key.startswith("_")
             }
             article = articles.setdefault(
                 item["url"],
@@ -361,7 +220,9 @@ class JwcService:
         results = []
         for article in chosen:
             public = self._public_article(article)
-            public["detailStatus"] = "cached" if article.get("contentHash") else "queued"
+            public["detailStatus"] = (
+                "cached" if article.get("contentHash") else "queued"
+            )
             results.append(public)
         return {
             "status": "completed",
@@ -413,13 +274,16 @@ class JwcService:
         warnings: list[str] = []
         if freshness != "cache_only":
             try:
-                self._refresh_index(state, selected, pages=3 if freshness == "archive" else 1)
+                self._refresh_index(
+                    state, selected, pages=3 if freshness == "archive" else 1
+                )
                 network_checked = True
             except Exception as exc:
                 warnings.append(f"远端刷新失败，返回本地结果: {exc}")
         cutoff = (_now() - timedelta(days=recent_days)).date().isoformat()
         articles = [
-            item for item in state["articles"]
+            item
+            for item in state["articles"]
             if item.get("category") in selected
             and (time_scope != "recent" or item.get("publishedAt", "") >= cutoff)
         ]
@@ -497,7 +361,8 @@ class JwcService:
                 "url": final_url,
                 "publishedAt": (
                     f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-                    if match else ""
+                    if match
+                    else ""
                 ),
             }
             self._apply_article_response(article, response)
@@ -508,9 +373,7 @@ class JwcService:
         if not attachments:
             raise ValueError(f"该{site_label}通知没有已确认的附件")
         if not 1 <= attachment_number <= len(attachments):
-            raise ValueError(
-                f"附件序号超出范围：该通知共有 {len(attachments)} 个附件"
-            )
+            raise ValueError(f"附件序号超出范围：该通知共有 {len(attachments)} 个附件")
 
         attachment = attachments[attachment_number - 1]
         name = str(attachment.get("name") or f"附件 {attachment_number}")
@@ -537,62 +400,37 @@ class JwcService:
             supported = "、".join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))
             raise ValueError(f"暂不支持解析该附件格式；支持：{supported}")
 
-        from .saved_web_files import cached, save
-        existing=cached(url)
-        if existing and not refresh:
-            if not existing.get('parsed'):
-                parsed = parse_document(existing['path'], filename=name)
-                existing = save(url,name,Path(existing['path']).read_bytes(),extension,markdown=parsed['markdown'],source_url=str(article.get('url','')),source_name=self.config.name)
-            return {'status':'completed','message':f'已读取{site_label}附件：{name}','article':article,'attachment':{**existing,'number':attachment_number,'extension':extension,'extractionMode':'text_layer' if extension=='.pdf' else 'document_structure'},'warnings':[]}
-        sha256 = hashlib.sha256()
-        size_bytes = 0
-        with tempfile.TemporaryDirectory(
-            prefix=f"seudaily-{self.config.key}-attachment-"
-        ) as temp_dir:
-            temporary_path = Path(temp_dir) / f"attachment{extension}"
-            request = Request(
-                url,
-                headers={
-                    "User-Agent": "SEUdaily/1.0 (+local academic search)",
-                    "Referer": str(article.get("url") or self.base_url),
-                },
-            )
-            with public_opener().open(request, timeout=self.timeout_seconds) as response:
-                final_url = urlparse(response.geturl())
-                if (
-                    final_url.scheme not in {"http", "https"}
-                    or not final_url.hostname
-                    or final_url.hostname.lower() != base_host
-                ):
-                    raise ValueError(f"附件下载被重定向到了非{site_label}域名")
-                content_length = response.headers.get("Content-Length")
-                if content_length and int(content_length) > max_bytes:
-                    raise ValueError("附件超过 50 MB，已拒绝下载")
-                with temporary_path.open("wb") as target:
-                    while chunk := response.read(1024 * 1024):
-                        size_bytes += len(chunk)
-                        if size_bytes > max_bytes:
-                            raise ValueError("附件超过 50 MB，已停止下载")
-                        target.write(chunk)
-                        sha256.update(chunk)
+        def validate_attachment_url(value):
+            parsed = urlparse(value)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or parsed.hostname != base_host
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError(f"附件下载被重定向到了非{site_label}域名")
+            return value
 
-            with temporary_path.open("rb") as downloaded:
-                signature = downloaded.read(5)
-            valid_signature = (
-                signature == b"%PDF-"
-                if extension == ".pdf"
-                else signature[:2] == b"PK"
-            )
-            if not valid_signature:
-                raise ValueError("附件内容与文件扩展名不匹配或文件已损坏")
-            original=temporary_path.read_bytes()
-            save(url,name,original,extension,source_url=str(article.get('url','')),source_name=self.config.name)
-            parsed = parse_document(str(temporary_path), filename=name)
-            stored=save(url,name,original,extension,markdown=parsed['markdown'],source_url=str(article.get('url','')),source_name=self.config.name)
+        from .web_attachments import read_attachment
 
-        warnings = []
-        if not parsed["markdown"].strip():
-            warnings.append("附件没有可提取的文本层，可能是扫描版文档，需要 OCR。")
+        stored = read_attachment(
+            public_opener(),
+            url,
+            name,
+            extension,
+            referer=str(article.get("url") or self.base_url),
+            timeout=self.timeout_seconds,
+            max_bytes=max_bytes,
+            validate_url=validate_attachment_url,
+            parse_document=parse_document,
+            refresh=refresh,
+            source_name=self.config.name,
+        )
+        warnings = (
+            []
+            if stored.get("markdown", "").strip()
+            else ["附件没有可提取的文本层，可能是扫描版文档，需要 OCR。"]
+        )
         return {
             "status": "completed",
             "message": f"已读取{site_label}附件：{name}",
@@ -602,16 +440,12 @@ class JwcService:
                 if article.get(key) is not None
             },
             "attachment": {
+                **stored,
                 "number": attachment_number,
-                "path": stored["path"],
-                "name": name,
-                "url": url,
                 "extension": extension,
-                "sizeBytes": size_bytes,
-                "sha256": sha256.hexdigest(),
-                "extractionMode": "text_layer" if extension == ".pdf" else "document_structure",
-                "markdown": parsed["markdown"],
-                "charCount": parsed["charCount"],
+                "extractionMode": "text_layer"
+                if extension == ".pdf"
+                else "document_structure",
             },
             "warnings": warnings,
         }
@@ -649,7 +483,9 @@ class JwcService:
                 return {"status": "empty", "completed": 0}
             completed: set[str] = set()
             failures: list[dict[str, str]] = []
-            with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs))) as executor:
+            with ThreadPoolExecutor(
+                max_workers=min(max_workers, len(jobs))
+            ) as executor:
                 futures = {
                     executor.submit(self._refresh_article, dict(job)): job
                     for job in jobs
@@ -660,16 +496,20 @@ class JwcService:
                         future.result()
                         completed.add(job["id"])
                     except Exception as exc:
-                        failures.append({
-                            "id": job["id"],
-                            "url": job.get("url", ""),
-                            "error": str(exc),
-                            "failedAt": _iso_now(),
-                        })
+                        failures.append(
+                            {
+                                "id": job["id"],
+                                "url": job.get("url", ""),
+                                "error": str(exc),
+                                "failedAt": _iso_now(),
+                            }
+                        )
             attempted = {job["id"] for job in jobs}
             with self._queue_lock():
                 current = self._read_queue()
-                self._write_queue([job for job in current if job.get("id") not in attempted])
+                self._write_queue(
+                    [job for job in current if job.get("id") not in attempted]
+                )
             self._update_failures(completed, failures)
             return {
                 "status": "completed" if not failures else "partial",
@@ -687,7 +527,14 @@ class JwcService:
             for article in articles:
                 existing[article["id"]] = {
                     key: article.get(key)
-                    for key in ("id", "url", "title", "publishedAt", "category", "categoryLabel")
+                    for key in (
+                        "id",
+                        "url",
+                        "title",
+                        "publishedAt",
+                        "category",
+                        "categoryLabel",
+                    )
                 }
                 existing[article["id"]]["url"] = self._normalize_url(article["url"])
             self._write_queue(list(existing.values()))
@@ -699,18 +546,19 @@ class JwcService:
             "-m",
             "seudaily.cli",
             "jwc-worker",
-            json.dumps({
-                "site": self.config.key,
-                "baseUrl": self.base_url,
-                "cacheDir": str(self.cache_dir),
-                "timeoutSeconds": self.timeout_seconds,
-            }),
+            json.dumps(
+                {
+                    "site": self.config.key,
+                    "baseUrl": self.base_url,
+                    "cacheDir": str(self.cache_dir),
+                    "timeoutSeconds": self.timeout_seconds,
+                }
+            ),
         ]
         creationflags = 0
         if os.name == "nt":
             creationflags = (
-                subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.CREATE_NO_WINDOW
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             )
         subprocess.Popen(
             command,
@@ -754,9 +602,7 @@ class JwcService:
 
     def _write_queue(self, jobs: list[dict[str, Any]]) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        temp = self.queue_file.with_suffix(".tmp")
-        temp.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.replace(self.queue_file)
+        write_json_atomic(self.queue_file, jobs)
 
     def _update_failures(
         self,
@@ -774,12 +620,7 @@ class JwcService:
         for failure in failures:
             existing[failure["id"]] = failure
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        temp = self.failures_file.with_suffix(".tmp")
-        temp.write_text(
-            json.dumps(list(existing.values()), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        temp.replace(self.failures_file)
+        write_json_atomic(self.failures_file, list(existing.values()))
 
     def _load_index(self) -> dict[str, Any]:
         if not self.index_file.exists():
@@ -811,14 +652,19 @@ class JwcService:
             detail_file = self.articles_dir / f"{article.get('id', '')}.json"
             if detail_file.exists():
                 detail = json.loads(detail_file.read_text(encoding="utf-8"))
-                for key in ("content", "attachments", "contentHash", "validators", "lastCheckedAt"):
+                for key in (
+                    "content",
+                    "attachments",
+                    "contentHash",
+                    "validators",
+                    "lastCheckedAt",
+                ):
                     if detail.get(key) is not None:
                         article[key] = detail[key]
         return data
 
     def _save_index(self, state: dict[str, Any]) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        temp = self.index_file.with_suffix(".tmp")
         stored = {
             **state,
             "articles": [
@@ -830,10 +676,11 @@ class JwcService:
                 for article in state["articles"]
             ],
         }
-        temp.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.replace(self.index_file)
+        write_json_atomic(self.index_file, stored)
 
-    def _fetch(self, url: str, validators: dict[str, str] | None = None) -> dict[str, Any]:
+    def _fetch(
+        self, url: str, validators: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         headers = {"User-Agent": "SEUdaily/1.0 (+local academic search)"}
         validators = validators or {}
         if validators.get("etag"):
@@ -842,8 +689,12 @@ class JwcService:
             headers["If-Modified-Since"] = validators["lastModified"]
         request = Request(url, headers=headers)
         try:
-            with public_opener().open(request, timeout=self.timeout_seconds) as response:
-                raw = response.read()
+            with public_opener().open(
+                request, timeout=self.timeout_seconds
+            ) as response:
+                raw = read_chunks(
+                    iter(lambda: response.read(65536), b""), max_bytes=5 * 1024 * 1024
+                )
                 encoding = response.headers.get_content_charset() or "utf-8"
                 return {
                     "notModified": False,
@@ -865,14 +716,17 @@ class JwcService:
             label, path = self.config.categories[category]
             category_state = state["categories"].setdefault(category, {})
             for page in range(1, pages + 1):
-                page_path = path if page == 1 else path.replace("list.htm", f"list{page}.htm")
+                page_path = (
+                    path if page == 1 else path.replace("list.htm", f"list{page}.htm")
+                )
                 url = urljoin(self.base_url, page_path)
                 validator_key = f"page{page}"
                 validators = category_state.get("validators", {}).get(validator_key, {})
                 response = self._fetch(url, validators)
                 category_state.setdefault("validators", {})[validator_key] = {
                     "etag": response.get("etag") or validators.get("etag"),
-                    "lastModified": response.get("lastModified") or validators.get("lastModified"),
+                    "lastModified": response.get("lastModified")
+                    or validators.get("lastModified"),
                 }
                 if response["notModified"]:
                     continue
@@ -884,18 +738,23 @@ class JwcService:
                     title = link["text"]
                     if not match or not title:
                         continue
-                    item = articles.setdefault(link_url, {
-                        "id": _article_id(link_url, self.config.id_prefix),
-                        "url": link_url,
-                        "firstSeenAt": _iso_now(),
-                    })
-                    item.update({
-                        "title": title,
-                        "publishedAt": f"{match.group(1)}-{match.group(2)}-{match.group(3)}",
-                        "category": category,
-                        "categoryLabel": label,
-                        "lastSeenAt": _iso_now(),
-                    })
+                    item = articles.setdefault(
+                        link_url,
+                        {
+                            "id": _article_id(link_url, self.config.id_prefix),
+                            "url": link_url,
+                            "firstSeenAt": _iso_now(),
+                        },
+                    )
+                    item.update(
+                        {
+                            "title": title,
+                            "publishedAt": f"{match.group(1)}-{match.group(2)}-{match.group(3)}",
+                            "category": category,
+                            "categoryLabel": label,
+                            "lastSeenAt": _iso_now(),
+                        }
+                    )
             category_state["lastCheckedAt"] = _iso_now()
         state["articles"] = list(articles.values())
 
@@ -904,12 +763,15 @@ class JwcService:
     ) -> bool:
         parser = _PageParser(response["url"], self.config)
         parser.feed(response["html"])
+        if not parser.content_seen and not parser.embedded_files:
+            raise ValueError("通知正文结构未识别，学校页面可能已变更；保留已有缓存")
         title = parser.title or article.get("title", "")
         content = parser.content
         attachments = [
             {"name": link["text"], "url": link["href"]}
             for link in parser.anchors
-            if link["inContent"] == "True" and link["href"].startswith(("http://", "https://"))
+            if link["inContent"] == "True"
+            and link["href"].startswith(("http://", "https://"))
         ]
         for embedded in parser.embedded_files:
             embedded_url = embedded["url"]
@@ -918,10 +780,12 @@ class JwcService:
                 r"[0-9a-f-]{20,}\.pdf", filename, re.IGNORECASE
             ):
                 filename = f"{title}.pdf"
-            attachments.append({
-                "name": embedded.get("name") or filename or "嵌入附件",
-                "url": embedded_url,
-            })
+            attachments.append(
+                {
+                    "name": embedded.get("name") or filename or "嵌入附件",
+                    "url": embedded_url,
+                }
+            )
         attachments = list({item["url"]: item for item in attachments}.values())
         digest_source = json.dumps(
             {"title": title, "content": content, "attachments": attachments},
@@ -930,20 +794,38 @@ class JwcService:
         )
         digest = hashlib.sha256(digest_source.encode("utf-8")).hexdigest()
         changed = digest != article.get("contentHash")
-        article.update({
-            "title": title,
-            "publishedAt": parser.published_at or article.get("publishedAt"),
-            "content": content,
-            "attachments": attachments,
-            "contentHash": digest,
-            "validators": {
-                "etag": response.get("etag"),
-                "lastModified": response.get("lastModified"),
-            },
-        })
+        article.update(
+            {
+                "title": title,
+                "publishedAt": parser.published_at or article.get("publishedAt"),
+                "content": content,
+                "attachments": attachments,
+                "contentHash": digest,
+                "validators": {
+                    "etag": response.get("etag"),
+                    "lastModified": response.get("lastModified"),
+                },
+            }
+        )
         from .saved_web_files import body
-        links = '\n\n## 附件\n\n' + '\n'.join(f"- [{item['name']}]({item['url']})" for item in attachments if not item['url'].endswith('.gif')) if attachments else ''
-        body(str(article['url']),str(article.get('title') or '通知正文'),str(article.get('content') or '') + links,source_name=self.config.name,notice=article)
+
+        links = (
+            "\n\n## 附件\n\n"
+            + "\n".join(
+                f"- [{item['name']}]({item['url']})"
+                for item in attachments
+                if not item["url"].endswith(".gif")
+            )
+            if attachments
+            else ""
+        )
+        body(
+            str(article["url"]),
+            str(article.get("title") or "通知正文"),
+            str(article.get("content") or "") + links,
+            source_name=self.config.name,
+            notice=article,
+        )
         article["lastCheckedAt"] = _iso_now()
         return changed
 
@@ -961,24 +843,24 @@ class JwcService:
             return False
         changed = self._apply_article_response(article, response)
         self.articles_dir.mkdir(parents=True, exist_ok=True)
-        detail_file.write_text(
-            json.dumps({
+        write_json_atomic(
+            detail_file,
+            {
                 **self._public_article(article),
                 "validators": article.get("validators", {}),
-            }, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+            },
         )
         if changed:
             version_dir = self.versions_dir / article["id"]
             version_dir.mkdir(parents=True, exist_ok=True)
             version_file = version_dir / f"{article['contentHash']}.json"
             if not version_file.exists():
-                version_file.write_text(
-                    json.dumps({
+                write_json_atomic(
+                    version_file,
+                    {
                         "capturedAt": _iso_now(),
                         **self._public_article(article),
-                    }, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
+                    },
                 )
         return changed
 
@@ -1024,7 +906,11 @@ class JwcService:
     def _normalize_url(self, url: str) -> str:
         parsed = urlparse(url)
         base = urlparse(self.base_url)
-        if parsed.scheme == "http" and parsed.hostname == base.hostname and base.scheme == "https":
+        if (
+            parsed.scheme == "http"
+            and parsed.hostname == base.hostname
+            and base.scheme == "https"
+        ):
             return parsed._replace(scheme="https", netloc=base.netloc).geturl()
         return url
 
@@ -1036,7 +922,9 @@ class JwcService:
         )
         opener = public_opener(HTTPCookieProcessor())
         headers = {"User-Agent": "Mozilla/5.0 (SEUdaily)", "Referer": list_url}
-        with opener.open(Request(list_url, headers=headers), timeout=self.timeout_seconds) as response:
+        with opener.open(
+            Request(list_url, headers=headers), timeout=self.timeout_seconds
+        ) as response:
             encoding = response.headers.get_content_charset() or "utf-8"
             listing_html = response.read().decode(encoding, errors="replace")
         search_form_match = re.search(
@@ -1063,10 +951,14 @@ class JwcService:
             if not search_path_match:
                 raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
             search_page = urljoin(list_url, search_path_match.group(1))
-            with opener.open(Request(search_page, headers=headers), timeout=self.timeout_seconds) as response:
+            with opener.open(
+                Request(search_page, headers=headers), timeout=self.timeout_seconds
+            ) as response:
                 encoding = response.headers.get_content_charset() or "utf-8"
                 search_html = response.read().decode(encoding, errors="replace")
-        endpoint_match = re.search(r"url:'([^']*searchCon/create\.rst\?[^']+)'", search_html)
+        endpoint_match = re.search(
+            r"url:'([^']*searchCon/create\.rst\?[^']+)'", search_html
+        )
         if not endpoint_match:
             raise RuntimeError(f"无法解析站内搜索接口: {search_page}")
         endpoint = urljoin(search_page, endpoint_match.group(1))
@@ -1098,25 +990,33 @@ class JwcService:
 
     def _parse_search_results(self, html: str) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        blocks = re.findall(r'<div class="result_item clearfix">(.*?)(?=<div class="result_item clearfix">|$)', html, re.S)
+        blocks = re.findall(
+            r'<div class="result_item clearfix">(.*?)(?=<div class="result_item clearfix">|$)',
+            html,
+            re.S,
+        )
         for block in blocks:
             article_id = re.search(r'name="id" value="(\d+)"', block)
-            link = re.search(r'<h3 class="item_title">\s*<a href=[\'\"]([^\'\"]+)', block)
+            link = re.search(
+                r'<h3 class="item_title">\s*<a href=[\'\"]([^\'\"]+)', block
+            )
             title = re.search(r'<h3 class="item_title">.*?>(.*?)</a>', block, re.S)
-            date = re.search(r'发布时间\s*[:：]\s*(\d{4}-\d{2}-\d{2})', block)
-            category = re.search(r'目录\s*[:：]\s*([^<]+)', block)
+            date = re.search(r"发布时间\s*[:：]\s*(\d{4}-\d{2}-\d{2})", block)
+            category = re.search(r"目录\s*[:：]\s*([^<]+)", block)
             if not article_id or not link or not title:
                 continue
             result_url = self._normalize_url(urljoin(self.base_url, link.group(1)))
-            results.append({
-                "id": f"{self.config.id_prefix}-{article_id.group(1)}",
-                "url": result_url,
-                "title": _clean(re.sub(r"<[^>]+>", "", title.group(1))),
-                "publishedAt": date.group(1) if date else "",
-                "categoryLabel": _clean(category.group(1)) if category else "",
-                "firstSeenAt": _iso_now(),
-                "lastSeenAt": _iso_now(),
-            })
+            results.append(
+                {
+                    "id": f"{self.config.id_prefix}-{article_id.group(1)}",
+                    "url": result_url,
+                    "title": _clean(re.sub(r"<[^>]+>", "", title.group(1))),
+                    "publishedAt": date.group(1) if date else "",
+                    "categoryLabel": _clean(category.group(1)) if category else "",
+                    "firstSeenAt": _iso_now(),
+                    "lastSeenAt": _iso_now(),
+                }
+            )
         return results
 
     @staticmethod
@@ -1124,9 +1024,19 @@ class JwcService:
         return {
             key: article.get(key)
             for key in (
-                "id", "title", "publishedAt", "category", "categoryLabel", "url",
-                "content", "attachments", "contentHash", "firstSeenAt", "lastSeenAt",
-                "lastCheckedAt", "detailChanged",
+                "id",
+                "title",
+                "publishedAt",
+                "category",
+                "categoryLabel",
+                "url",
+                "content",
+                "attachments",
+                "contentHash",
+                "firstSeenAt",
+                "lastSeenAt",
+                "lastCheckedAt",
+                "detailChanged",
             )
             if article.get(key) is not None
         }

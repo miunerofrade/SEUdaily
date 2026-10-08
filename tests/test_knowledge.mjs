@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {LocalClient} from '../src/agent/sqlite.ts';
@@ -175,4 +175,40 @@ test('search retrieves 32 full candidates, reranks before limiting and falls bac
  fail=true;const fallback=await service.search('问题');assert.equal(fallback.matches[0].ordinal,0);assert.match(fallback.warning,/重排暂时不可用/);
  await assert.rejects(service.search('问题',33),/1–32/);
  const abort=new AbortController();abort.abort();await assert.rejects(service.search('问题',5,abort.signal),{name:'AbortError'});
+});
+
+test('failed index results cannot mark a document indexed', async t=>{
+ const f=await fixture(t);
+ const python=async(action,payload,...args)=>payload.operation==='index' ? {status:'failed',summary:'索引写入失败'} : f.python(action,payload,...args);
+ const service=new KnowledgeService(f.db,f.service.root,python,()=>f.config,f.embed);t.after(()=>service.stop());
+ await service.enqueue('文档.md',Buffer.from('正文'));await service.tick();
+ const [document]=await service.list();assert.equal(document.state,'failed');assert.match(document.error,/索引写入失败/);
+ assert.equal((await service.search('正文')).matches.length,0);
+});
+
+test('transient embedding failures have bounded durable retries and reuse successful vectors', async t=>{
+ const {RetryableKnowledgeError}=await import('../src/runtime/knowledge/service.ts');
+ const f=await fixture(t);let calls=0,fail=true;
+ const embed=async texts=>{calls++;if(fail)throw new RetryableKnowledgeError('HTTP 429');return texts.map(()=>[1,0]);};
+ const service=new KnowledgeService(f.db,f.service.root,f.python,()=>f.config,embed);t.after(()=>service.stop());
+ const doc=await service.enqueue('通知.md',Buffer.from('原文'));await service.tick();
+ assert.equal((await service.list())[0].state,'queued');await service.tick();assert.equal(calls,1);
+ const restarted=new KnowledgeService(f.db,f.service.root,f.python,()=>f.config,embed);await restarted.ready;t.after(()=>restarted.stop());
+ await restarted.tick();assert.equal(calls,1);
+ for(let attempt=2;attempt<=5;attempt++){
+  await f.db.execute({sql:'UPDATE knowledge_retries SET nextAttemptAt=0 WHERE documentId=?',args:[doc.id]});await restarted.tick();
+ }
+ assert.equal(calls,5);assert.equal((await restarted.list())[0].state,'failed');
+ fail=false;await restarted.retry(doc.id);await restarted.tick();assert.equal((await restarted.list())[0].state,'indexed');
+ assert.equal((await f.db.execute('SELECT * FROM knowledge_retries')).rows.length,0);
+});
+
+test('failed vector deletion preserves the original for retry instead of reporting success', async t=>{
+ const f=await fixture(t),doc=await f.service.enqueue('保留.md',Buffer.from('不可丢失的原文'));
+ await f.service.tick();let fail=true;
+ const python=async(action,payload,...args)=>payload.operation==='delete'&&fail ? {status:'failed',summary:'删除失败'} : f.python(action,payload,...args);
+ const service=new KnowledgeService(f.db,f.service.root,python,()=>f.config,f.embed);t.after(()=>service.stop());
+ await assert.rejects(service.remove(doc.id),/索引删除失败/);
+ const [stored]=await service.list();assert.equal(stored.state,'deleting');assert.equal(await readFile(stored.path,'utf8'),'不可丢失的原文');
+ fail=false;await service.remove(doc.id);assert.equal((await service.list()).length,0);
 });

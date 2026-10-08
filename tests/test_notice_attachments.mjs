@@ -29,3 +29,17 @@ test('failed downloads back off, do not register missing originals and do not bl
  await writeFile(join(root,'jwc','articles','1.json'),JSON.stringify({id:'1',attachments:[{url:'https://jwc.seu.edu.cn/a.pdf'},{url:'https://jwc.seu.edu.cn/b.pdf'}]}));let calls=0;
  const worker=new NoticeAttachments(root,async()=>{calls++;throw Error('offline');},{enqueue:async()=>assert.fail('must not register missing original')});await worker.tick();assert.equal(calls,2);await worker.tick();assert.equal(calls,2);await worker.stop();
 });
+
+test('failed PDF jobs retain backoff across restart and changed articles resume discovery', async t => {
+ const root=await mkdtemp(join(tmpdir(),'notice-pdf-journal-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const directory=join(root,'jwc','articles');await mkdir(directory,{recursive:true});
+ const path=join(directory,'1.json'),article={id:'1',attachments:[{name:'a.pdf',url:'https://jwc.seu.edu.cn/a.pdf'}]};
+ await writeFile(path,JSON.stringify(article));let calls=0;
+ const python=async()=>{calls++;throw new Error('offline');},knowledge={enqueue:async()=>assert.fail('missing file')};
+ const first=new NoticeAttachments(root,python,knowledge);await first.tick();await first.stop();
+ const journal=JSON.parse(await readFile(join(root,'notice-attachment-jobs.json'),'utf8'));
+ assert.equal(journal.jobs[0].attempts,1);assert.ok(journal.jobs[0].nextAttemptAt>Date.now());
+ const second=new NoticeAttachments(root,python,knowledge);await second.tick();assert.equal(calls,1,'restart must respect the saved retry deadline');
+ article.attachments.push({name:'b.pdf',url:'https://jwc.seu.edu.cn/b.pdf'});await writeFile(path,JSON.stringify(article));
+ await second.tick();assert.equal(calls,3,'changed article queues the updated batch');await second.stop();
+});

@@ -20,12 +20,9 @@ from .summary import AISummarizer
 from .runtime_paths import env_value
 
 
-DEFAULT_PORTAL_URL = "https://cvs.seu.edu.cn"
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
+from .campus_endpoints import DEFAULT_PORTAL_URL, USER_AGENT as DEFAULT_USER_AGENT, COURSE_ENDPOINTS
+from .browser_auth import login_fields
+
 
 
 def _required(value: str | None, name: str) -> str:
@@ -380,11 +377,11 @@ class CourseService:
             with self._page(visible=True) as page:
                 page.goto(ENTRY_URL, wait_until="domcontentloaded", timeout=30000)
                 if urlsplit(page.url).hostname == "auth.seu.edu.cn" and self.username and self.password:
-                    user = page.locator("input[placeholder*='一卡通'], .input-username-pc").first
+                    user, password, login_button = login_fields(page)
                     user.wait_for(state="visible", timeout=10000)
                     user.fill(self.username)
-                    page.locator("input[type='password']").first.fill(self.password)
-                    page.locator("button:has-text('登 录'), .login-button-pc, .ant-btn-primary").first.click()
+                    password.fill(self.password)
+                    login_button.click()
                 page.wait_for_url(lambda url: urlsplit(url).hostname == "cvs.seu.edu.cn" and
                     urlsplit(url).path.startswith("/jy-application-resourcemanage-ui/"), timeout=120000)
                 # Interactive verification may issue new SSO cookies after the first submit.
@@ -397,7 +394,10 @@ class CourseService:
                 "logs": ["课程应用登录态已建立。"]}
 
     def _semester_info(self, client, semester=None):
-        terms = client.get("/v1/list/termYear")
+        terms = client.get(COURSE_ENDPOINTS["terms"])
+        if (not isinstance(terms, list) or any(not isinstance(term, dict) or
+                any(key not in term for key in ("acyeCode", "acteTerm", "id")) for term in terms)):
+            raise CourseAPIError("课程学期接口返回格式无效，学校字段可能发生变化")
         names = [f"{term['acyeCode']}学年第{term['acteTerm']}学期" for term in terms]
         requested = (semester or "").strip()
         if requested.casefold() in {"all", "全部", "全部学期"}:
@@ -417,6 +417,8 @@ class CourseService:
     def _courses(rows):
         courses = []
         for index, row in enumerate(rows):
+            if not isinstance(row, dict) or not row.get("subjName") or row.get("teclId") is None:
+                raise CourseAPIError("课程列表缺少 subjName/teclId，学校字段可能发生变化")
             semester = str(row.get("acteName") or "")
             if row.get("acyeBeginYear") is not None:
                 semester = f"{row['acyeBeginYear']}-{row['acyeEndYear']}学年第{semester}学期"
@@ -435,9 +437,9 @@ class CourseService:
         params = {"page.orders[0].asc": "false", "page.orders[0].field": "updateTime"}
         if term is not None:
             params["acteId"] = term
-        path = "/v1/group_subject_vod_list/t-1"
+        path = COURSE_ENDPOINTS["courses"]
         if query:
-            path = "/v1/union/vod_live_new"
+            path = COURSE_ENDPOINTS["search"]
             params.update({"unionName": query, "courStatus": 1})
         courses = self._courses(client.records(path, params))
         return courses, info
@@ -464,10 +466,12 @@ class CourseService:
         return result
 
     def _lessons(self, client, course):
-        rows = client.records("/v1/subject_vod_list_new", {"teclIds": course["teclId"],
+        rows = client.records(COURSE_ENDPOINTS["lessons"], {"teclIds": course["teclId"],
             "page.orders[0].asc": "false", "page.orders[0].field": "courBeginTime"})
         lessons = []
         for index, row in enumerate(rows):
+            if not isinstance(row, dict) or not row.get("courBeginTime") or row.get("id") is None:
+                raise CourseAPIError("课次列表缺少 courBeginTime/id，学校字段可能发生变化")
             stamp = str(row["courBeginTime"])
             period = row.get("letiNumber")
             lessons.append({"sequence": index + 1, "title": f"第{period}节", "periodNumber": period,
@@ -619,7 +623,7 @@ class CourseService:
         if course_id:
             play = client.play(int(course_id[0]))
         elif tecl_id:
-            meta = client.get("/v1/getVodCourseVideo", {"teclId": int(tecl_id[0])}).get("data") or {}
+            meta = client.get(COURSE_ENDPOINTS["video"], {"teclId": int(tecl_id[0])}).get("data") or {}
             if not meta.get("courId"):
                 raise CourseAPIError("课程链接没有可用课次。")
             play = client.play(meta["courId"])

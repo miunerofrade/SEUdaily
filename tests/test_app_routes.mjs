@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 import {redactText} from '../src/agent/redaction.ts';
 import { z } from 'zod';
+import { atomicWrite } from '../src/runtime/atomic-file.ts';
 const diskSource = await fs.readFile(new URL('../src/shared/disk-size.ts', import.meta.url), 'utf8');
 const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const { diskSize } = await import(`data:text/javascript;base64,${Buffer.from(diskCompiled).toString('base64')}`);
@@ -16,6 +17,9 @@ const { diskSize } = await import(`data:text/javascript;base64,${Buffer.from(dis
 const source = await fs.readFile(new URL('../src/runtime/app-routes.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('app-routes.ts', source, ts.ScriptTarget.Latest, true);
 const functions = new Set(['isWithinDirectory', 'safeLibraryTarget', 'libraryIdentity', 'walkFiles', 'readEnvFile', 'encodeEnvValue', 'persistEnvFile', 'updateEnvFile']);
+const librarySource = await fs.readFile(new URL('../src/runtime/library-files.ts', import.meta.url), 'utf8');
+const libraryAst = ts.createSourceFile('library-files.ts', librarySource, ts.ScriptTarget.Latest, true);
+const libraryDeclarations = libraryAst.statements.filter(statement=>!ts.isImportDeclaration(statement)).map(statement=>statement.getText(libraryAst)).join('\n');
 const declarations = ast.statements.filter((statement) =>
   ts.isFunctionDeclaration(statement) && functions.has(statement.name?.text) ||
   ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ['libraryRoots', 'envWriteQueue', 'appRoutes'].includes(declaration.name.getText(ast)))
@@ -23,13 +27,13 @@ const declarations = ast.statements.filter((statement) =>
 const envSource = await fs.readFile(new URL('../src/runtime/environment-settings.ts', import.meta.url), 'utf8');
 const envAst = ts.createSourceFile('environment-settings.ts', envSource, ts.ScriptTarget.Latest, true);
 const envDeclarations = envAst.statements.filter(statement => !ts.isImportDeclaration(statement)).map(statement => statement.getText(envAst)).join('\n');
-const compiled = ts.transpileModule(envDeclarations + '\n' + declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const compiled = ts.transpileModule(envDeclarations + '\n' + libraryDeclarations + '\n' + declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 
 async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   const calls = [];
-  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText, resolveDocumentContexts:()=>[],
+  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText, atomicWrite, resolveDocumentContexts:()=>[],
     require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{list:async()=>[],sources:async()=>[],enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
     runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
     resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });

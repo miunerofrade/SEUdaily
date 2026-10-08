@@ -4,14 +4,28 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx"}
+import json
+
+SUPPORTED_DOCUMENT_EXTENSIONS = {
+    extension
+    for extension, format in json.loads(
+        Path(__file__).with_name("document_formats.json").read_text(encoding="utf-8")
+    ).items()
+    if format["parser"]
+}
 
 
 def _cell_text(value: object) -> str:
     """Turn spreadsheet/document values into compact, Markdown-safe text."""
     if value is None:
         return ""
-    return str(value).replace("\r\n", "\n").replace("\r", "\n").replace("|", "\\|").replace("\n", "<br>")
+    return (
+        str(value)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("|", "\\|")
+        .replace("\n", "<br>")
+    )
 
 
 def _markdown_table(rows: Iterable[Iterable[object]]) -> str:
@@ -21,7 +35,10 @@ def _markdown_table(rows: Iterable[Iterable[object]]) -> str:
         return ""
     width = max(len(row) for row in normalized)
     normalized = [row + [""] * (width - len(row)) for row in normalized]
-    lines = ["| " + " | ".join(normalized[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
+    lines = [
+        "| " + " | ".join(normalized[0]) + " |",
+        "| " + " | ".join(["---"] * width) + " |",
+    ]
     lines.extend("| " + " | ".join(row) + " |" for row in normalized[1:])
     return "\n".join(lines)
 
@@ -56,10 +73,16 @@ def _parse_docx(source: Path) -> str:
 
     document = Document(str(source))
     blocks: list[str] = []
-    content = document.iter_inner_content() if hasattr(document, "iter_inner_content") else [*document.paragraphs, *document.tables]
+    content = (
+        document.iter_inner_content()
+        if hasattr(document, "iter_inner_content")
+        else [*document.paragraphs, *document.tables]
+    )
     for block in content:
         if isinstance(block, Table):
-            table = _markdown_table([[cell.text for cell in row.cells] for row in block.rows])
+            table = _markdown_table(
+                [[cell.text for cell in row.cells] for row in block.rows]
+            )
             if table:
                 blocks.append(table)
             continue
@@ -113,7 +136,9 @@ def _parse_pptx(source: Path) -> str:
         blocks: list[str] = []
         for shape in _iter_ppt_shapes(slide.shapes):
             if getattr(shape, "has_table", False):
-                table = _markdown_table([[cell.text for cell in row.cells] for row in shape.table.rows])
+                table = _markdown_table(
+                    [[cell.text for cell in row.cells] for row in shape.table.rows]
+                )
                 if table:
                     blocks.append(table)
             elif getattr(shape, "has_text_frame", False):
@@ -135,6 +160,7 @@ def parse_document(path: str, filename: str | None = None) -> dict[str, Any]:
         raise FileNotFoundError(f"文档不存在：{source}")
 
     from .optional_runtime import ensure_dependencies
+
     ensure_dependencies("documents")
 
     parsers = {
