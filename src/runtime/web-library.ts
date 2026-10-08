@@ -1,19 +1,16 @@
-import {createHash, randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import {readFile, readdir, realpath, mkdir, writeFile, rename, unlink, lstat, copyFile} from 'node:fs/promises';
-import {resolve, relative, isAbsolute, basename, dirname} from 'node:path';
+import {resolve, basename, dirname} from 'node:path';
 import noticeSources from '../seudaily/notice_categories.json' with {type:'json'};
 
-function within(root: string, path: string) {
-  const child=relative(root,path);
-  return Boolean(child) && child!=='..' && !child.startsWith('../') && !child.startsWith('..\\') && !isAbsolute(child);
-}
+import {within,sha256,webFilesLayout,webMetadataPath,validSourceId,validNoticeId,validSectionId,webFilesProtocol} from './web-file-store.js';
 
 type Source = {id:string; name:string};
 type Notice = {id:string;title:string;url:string};
 type Entry = {legacyPaths:string[];notice:Notice;name:string; sources:string[]; sections:{source:string;label:string}[]};
 function sourceIdentity(item: any): Source {
-  if(item.source && typeof item.source.id==='string' && /^[a-z0-9][a-z0-9.-]*$/.test(item.source.id)
+  if(item.source && typeof item.source.id==='string' && validSourceId(item.source.id)
       && typeof item.source.name==='string' && item.source.name.trim())return {
         id:item.source.id,name:Object.values(noticeSources).find(source=>source.host===item.source.id)?.name || item.source.name,
       };
@@ -22,11 +19,11 @@ function sourceIdentity(item: any): Source {
       const url=new URL(value);
       if(!['http:','https:'].includes(url.protocol) || !url.hostname)continue;
       const host=url.hostname;
-      return {id:/^[a-z0-9][a-z0-9.-]*$/.test(host)?host:createHash('sha256').update(host).digest('hex'),
+      return {id:validSourceId(host)?host:sha256(host),
         name:Object.values(noticeSources).find(source=>source.host===host)?.name || host};
     } catch { /* Older records may have no URL. */ }
   }
-  return {id:'unclassified',name:'未分类'};
+  return {...webFilesProtocol.fallbackSource};
 }
 
 async function atomicMetadata(path:string,item:unknown) {
@@ -40,8 +37,7 @@ async function atomicMetadata(path:string,item:unknown) {
 /** Keep the flat layout readable while migrating local originals, without network requests. */
 async function loadEntries(project:string): Promise<Map<string,Entry>> {
   const canonical=await realpath(project);
-  const root=resolve(project,'.seudaily','web-files');
-  const files=resolve(root,'files'),metadata=resolve(root,'metadata');
+  const {root,files,metadata}=webFilesLayout(resolve(project,'.seudaily'));
   for(const directory of [root,files,metadata]) {
     await mkdir(directory,{recursive:true,mode:0o700});
     if(!within(canonical,await realpath(directory)))throw new Error('网页资料目录越界');
@@ -65,8 +61,8 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
         const article=JSON.parse(await readFile(resolve(directory,entry.name),'utf8'));
         if(typeof article.url!=='string')continue;
         const section={source:sourceIdentity({url:article.url}).name,label:String(article.categoryLabel || (noticeSources as any)[site]?.categories?.[article.category]?.[0] || '其他资料')};
-        const notice={id:/^[a-z0-9-]+$/i.test(article.id || '') ? article.id : createHash('sha256').update(article.url).digest('hex'),title:String(article.title || '网页资料'),url:article.url};
-        const sectionId=/^[a-z0-9_-]+$/i.test(article.category || '') ? article.category : 'other';
+        const notice={id:validNoticeId(article.id) ? article.id : sha256(article.url),title:String(article.title || '网页资料'),url:article.url};
+        const sectionId=validSectionId(article.category) ? article.category : webFilesProtocol.fallbackSection;
         articleNotices.set(article.url,{notice,sectionId});
         for(const attachment of article.attachments || [])if(typeof attachment.url==='string')articleNotices.set(attachment.url,{notice,sectionId});
         articleSections.set(article.url,section);
@@ -75,8 +71,8 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
         const title=String(article.title || '通知正文');
         const links=(article.attachments || []).filter((item:any)=>/\.pdf(?:$|[?#])/i.test(item.url || '')).map((item:any)=>`- [${item.name}](${item.url})`).join('\n');
         const bytes=Buffer.from('# '+title+'\n\n来源：'+article.url+'\n\n'+String(article.content || '')+(links?'\n\n## 附件\n\n'+links:''));
-        const digest=createHash('sha256').update(bytes).digest('hex');
-        const record=resolve(metadata,createHash('sha256').update(article.url).digest('hex')+'.json');
+        const digest=sha256(bytes);
+        const record=webMetadataPath(resolve(project,'.seudaily'),article.url);
         // Preserve deletion intent: a record with a missing original is not recreated.
         const old=await readFile(record,'utf8').then(JSON.parse).catch(()=>null);
         if(old && !(await lstat(old.path).catch(()=>null)))continue;
@@ -105,19 +101,19 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       const source=sourceIdentity(item);
       const section=articleSections.get(item.url) || articleSections.get(item.sourceUrl) || item.noticeSection || {source:source.name,label:'其他资料'};
       const context=articleNotices.get(item.url) || articleNotices.get(item.sourceUrl);
-      const notice=context?.notice || item.notice || {id:createHash('sha256').update(item.sourceUrl || item.url || oldPath).digest('hex'),title:item.name.replace(/\.[^.]+$/,''),url:item.sourceUrl || item.url || ''};
-      if(!/^[a-z0-9-]+$/i.test(notice.id))throw new Error('通知目录标识无效');
-      const sectionId=context?.sectionId || (/^[a-z0-9_-]+$/i.test(item.sectionId || '') ? item.sectionId : 'other');
+      const notice=context?.notice || item.notice || {id:sha256(item.sourceUrl || item.url || oldPath),title:item.name.replace(/\.[^.]+$/,''),url:item.sourceUrl || item.url || ''};
+      if(!validNoticeId(notice.id))throw new Error('通知目录标识无效');
+      const sectionId=context?.sectionId || (validSectionId(item.sectionId) ? item.sectionId : webFilesProtocol.fallbackSection);
       let path=oldPath;
       const details=await lstat(oldPath).catch(()=>null);
       const destination=resolve(await sourceDirectory(source,sectionId,notice.id),basename(oldPath));
       if(details?.isFile() && destination!==oldPath) {
-        const bytes=await readFile(oldPath),digest=createHash('sha256').update(bytes).digest('hex');
+        const bytes=await readFile(oldPath),digest=sha256(bytes);
         if(typeof item.sha256==='string' && digest!==item.sha256)throw new Error('网页原文件校验失败');
         if(destination!==oldPath) {
           originals.set(oldPath,digest);
           try {await copyFile(oldPath,destination,constants.COPYFILE_EXCL);}catch(error:any){if(error.code!=='EEXIST')throw error;}
-          if(!(await lstat(destination)).isFile() || createHash('sha256').update(await readFile(destination)).digest('hex')!==digest)throw new Error('网页迁移目标文件冲突');
+          if(!(await lstat(destination)).isFile() || sha256(await readFile(destination))!==digest)throw new Error('网页迁移目标文件冲突');
           path=destination;
         }
       }
@@ -132,13 +128,13 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
       brokenMetadata=true;
     }
   }
-  if(!brokenMetadata)for(const [path,digest] of originals)if(!entries.has(path) && !remaining.has(path) && createHash('sha256').update(await readFile(path)).digest('hex')===digest)await unlink(path);
+  if(!brokenMetadata)for(const [path,digest] of originals)if(!entries.has(path) && !remaining.has(path) && sha256(await readFile(path))===digest)await unlink(path);
   // Keep flat originals if damaged records prevent us from proving all references moved.
   if(!brokenMetadata)for(const entry of await readdir(files,{withFileTypes:true})) {
     if(!entry.isFile() || remaining.has(resolve(files,entry.name)))continue;
     const oldPath=resolve(files,entry.name);
     if(originals.has(oldPath)) {
-      if(createHash('sha256').update(await readFile(oldPath)).digest('hex')===originals.get(oldPath))await unlink(oldPath);
+      if(sha256(await readFile(oldPath))===originals.get(oldPath))await unlink(oldPath);
       continue;
     }
     const path=resolve(await sourceDirectory({id:'unclassified',name:'未分类'}),entry.name);
@@ -147,7 +143,7 @@ async function loadEntries(project:string): Promise<Map<string,Entry>> {
     if(!Buffer.from(await readFile(oldPath)).equals(await readFile(path)))continue;
     await unlink(oldPath);
   }
-  if(!brokenMetadata)for(const [path,digest] of obsoleteBodies)if(!entries.has(path) && createHash('sha256').update(await readFile(path)).digest('hex')===digest)await unlink(path);
+  if(!brokenMetadata)for(const [path,digest] of obsoleteBodies)if(!entries.has(path) && sha256(await readFile(path))===digest)await unlink(path);
   return entries;
 }
 

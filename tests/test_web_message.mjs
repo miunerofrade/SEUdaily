@@ -1,0 +1,22 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {tsImport} from 'tsx/esm/api';
+const options={parentURL:import.meta.url,tsconfig:new URL('../apps/web/tsconfig.json',import.meta.url).pathname};
+const {Message}=await tsImport('../apps/web/src/chat/message.tsx',options);
+const {SourcesSidebar}=await tsImport('../apps/web/src/chat/sources-sidebar.tsx',options);
+const render=(component,props)=>renderToStaticMarkup(createElement(component,props));
+test('extracted message rendering keeps Markdown, errors, sources and prompt actions',()=>{
+ const citation={id:'file-1',type:'file',title:'指南.pdf',localPath:'/tmp/guide.pdf',locator:'第 2 页'};
+ const message={id:'reply',role:'assistant',createdAt:Date.now(),content:'**结论**\n\n```js\nconst x = 1;\n```',tools:[{id:'call',name:'search-knowledge',state:'failed',result:{status:'failed',summary:'检索失败',citations:[citation]}}]};
+ const html=render(Message,{message,onSources:()=>{},onBranch:()=>{},canRegenerate:true});
+ assert.match(html,/<strong>结论<\/strong>/);assert.match(html,/class="hljs"/);assert.match(html,/已完成思考，1 项操作失败/);assert.match(html,/lucide-circle-alert/);
+ assert.match(html,/aria-label="来源"/);assert.match(html,/aria-label="分支为新会话"/);assert.match(html,/aria-label="复制回答"/);assert.match(html,/<time /);
+ assert.doesNotMatch(html,/message-sources-list/);
+ assert.doesNotMatch(render(Message,{message:{...message,createdAt:Date.now()-25*3600_000}}),/<time /);
+ const user=render(Message,{message:{id:'user',role:'user',createdAt:Date.now(),content:'提问'},onEdit:()=>{}});
+ assert.match(user,/提问/);assert.match(user,/编辑提示词/);
+ const sidebar=render(SourcesSidebar,{sources:[citation,{id:'web',type:'web',title:'通知',url:'https://jwc.seu.edu.cn/notice'}],onClose:()=>{}});
+ assert.match(sidebar,/第 2 页/);assert.match(sidebar,/jwc.seu.edu.cn/);assert.match(sidebar,/关闭来源/);assert.match(sidebar,/library\/preview/);
+});

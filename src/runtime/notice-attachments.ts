@@ -1,6 +1,6 @@
-import {readFile,readdir,realpath} from 'node:fs/promises';
-import {join,relative,isAbsolute} from 'node:path';
-import {createHash} from 'node:crypto';
+import {readFile,readdir} from 'node:fs/promises';
+import {join} from 'node:path';
+import {readSavedWebFile} from './web-file-store.js';
 
 /** Cached articles are the durable queue: completed URLs reuse saved originals, failures back off. */
 export class NoticeAttachments {
@@ -26,15 +26,14 @@ export class NoticeAttachments {
           const url=attachment.url;
           if(this.registered.has(url) || (this.retryAfter.get(url)||0)>Date.now())continue;
           try{
-            const metadata=join(this.root,'web-files','metadata',createHash('sha256').update(url).digest('hex')+'.json');
-            let item:any;try{item=JSON.parse(await readFile(metadata,'utf8'));}catch{}
-            let bytes:Buffer|undefined;
-            if(item?.path){const path=await realpath(item.path).catch(()=>undefined);if(path){const child=relative(await realpath(join(this.root,'web-files','files')),path);if(child && child!=='..' && !child.startsWith('../') && !child.startsWith('..\\') && !isAbsolute(child))bytes=await readFile(path).catch(()=>undefined);}}
-            if(!bytes || createHash('sha256').update(bytes).digest('hex')!==item.sha256) {
+            let saved=await readSavedWebFile(this.root,url);
+            if(!saved) {
               const result=await this.python('sync-notice-pdf',{site,articleId:article.id,attachmentNumber:index+1},this.abort.signal);
               if(result.status!=='completed')throw new Error(result.summary || '附件下载失败');
-              item=JSON.parse(await readFile(metadata,'utf8'));bytes=await readFile(item.path);
+              saved=await readSavedWebFile(this.root,url);
+              if(!saved)throw new Error('下载的网页原文件校验失败');
             }
+            const {item,bytes}=saved;
             if(!bytes.subarray(0,5).equals(Buffer.from('%PDF-')))throw new Error('附件不是 PDF');
             await this.knowledge.enqueue(item.name,bytes,undefined,item.path);
             this.registered.add(url);this.retryAfter.delete(url);

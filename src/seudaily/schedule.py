@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import tempfile
 import time
-import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +16,7 @@ from .cancellation import TaskCancelledError
 from .campus_network import network_category
 from .runtime_paths import env_value
 from .academic_calendar import AcademicCalendar
+from . import schedule_customizations, schedule_rows
 
 
 DEFAULT_SCHEDULE_URL = (
@@ -443,554 +442,41 @@ class ScheduleService:
             "availableSemesters": available,
         }
 
-    @staticmethod
-    def _source_key(course: dict[str, Any]) -> str:
-        """Identity for user overlays that excludes mutable room/week metadata."""
-        identity = {
-            key: course.get(key)
-            for key in (
-                "courseCode",
-                "courseName",
-                "teacherName",
-                "weekday",
-                "startPeriod",
-                "endPeriod",
-            )
-        }
-        encoded = json.dumps(
-            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-        return f"source-{hashlib.sha256(encoded).hexdigest()[:16]}"
+    _source_key = staticmethod(schedule_customizations._source_key)
 
-    @staticmethod
-    def _default_customizations() -> dict[str, Any]:
-        return {
-            "version": 1,
-            "semester": {"name": "", "startDate": "", "totalWeeks": 16},
-            "overrides": {},
-            "customCourses": [],
-            "dateOverrides": [],
-        }
+    _default_customizations = staticmethod(schedule_customizations._default_customizations)
 
     def _load_customizations(self) -> dict[str, Any]:
-        defaults = self._default_customizations()
-        if not self.customization_file.exists():
-            return defaults
-        try:
-            saved = json.loads(self.customization_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return defaults
-        if not isinstance(saved, dict) or saved.get("version") != 1:
-            return defaults
-        return {
-            **defaults,
-            **saved,
-            "semester": {**defaults["semester"], **(saved.get("semester") or {})},
-            "overrides": saved.get("overrides") if isinstance(saved.get("overrides"), dict) else {},
-            "customCourses": saved.get("customCourses") if isinstance(saved.get("customCourses"), list) else [],
-            "dateOverrides": saved.get("dateOverrides") if isinstance(saved.get("dateOverrides"), list) else [],
-        }
+        return schedule_customizations._load_customizations(self)
 
-    @staticmethod
-    def _valid_iso_date(value: Any, field: str, *, optional: bool = False) -> str:
-        text = str(value or "").strip()
-        if optional and not text:
-            return ""
-        try:
-            date.fromisoformat(text)
-        except ValueError as exc:
-            raise ValueError(f"{field} 必须是 YYYY-MM-DD 日期") from exc
-        return text
+    _valid_iso_date = staticmethod(schedule_customizations._valid_iso_date)
 
-    @staticmethod
-    def _normalize_editable_course(course: dict[str, Any], *, custom: bool) -> dict[str, Any]:
-        name = str(course.get("courseName") or "").strip()
-        if not name:
-            raise ValueError("courseName 不能为空")
-        weekday = int(course.get("weekday") or 0)
-        start = int(course.get("startPeriod") or 0)
-        end = int(course.get("endPeriod") or start)
-        if not 1 <= weekday <= 7:
-            raise ValueError("weekday 必须在 1 到 7 之间")
-        if not 1 <= start <= end <= 13:
-            raise ValueError("课程节次必须在 1 到 13 之间")
-        weeks = sorted({int(item) for item in course.get("weeks") or [] if int(item) > 0})
-        normalized = {
-            "courseName": name,
-            "teacherName": str(course.get("teacherName") or "").strip(),
-            "weekday": weekday,
-            "startPeriod": start,
-            "endPeriod": end,
-            "weeklyPeriods": list(range(start, end + 1)),
-            "weeks": weeks,
-            "classroom": str(course.get("classroom") or "").strip(),
-            "courseCode": str(course.get("courseCode") or "").strip(),
-        }
-        if custom:
-            custom_id = str(course.get("customId") or "").strip()
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", custom_id):
-                raise ValueError("customId 缺失或格式无效")
-            normalized["customId"] = custom_id
-        return normalized
+    _normalize_editable_course = staticmethod(schedule_customizations._normalize_editable_course)
 
     def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self._load_customizations()
-        semester_input = payload.get("semester", current["semester"])
-        if not isinstance(semester_input, dict):
-            raise ValueError("semester 必须是对象")
-        total_weeks = int(semester_input.get("totalWeeks", 16))
-        if not 1 <= total_weeks <= 30:
-            raise ValueError("totalWeeks 必须在 1 到 30 之间")
-        semester = {
-            "name": str(semester_input.get("name") or "").strip(),
-            "startDate": self._valid_iso_date(
-                semester_input.get("startDate"), "semester.startDate", optional=True
-            ),
-            "totalWeeks": total_weeks,
-        }
-
-        overrides_input = payload.get("overrides", current["overrides"])
-        if not isinstance(overrides_input, dict):
-            raise ValueError("overrides 必须是对象")
-        overrides: dict[str, Any] = {}
-        allowed = {
-            "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
-            "weeks", "classroom", "courseCode", "hidden",
-        }
-        for source_key, raw in overrides_input.items():
-            if not str(source_key).startswith("source-") or not isinstance(raw, dict):
-                raise ValueError("overrides 包含无效的课程标识")
-            overrides[str(source_key)] = {key: value for key, value in raw.items() if key in allowed}
-
-        custom_input = payload.get("customCourses", current["customCourses"])
-        if not isinstance(custom_input, list):
-            raise ValueError("customCourses 必须是数组")
-        custom_courses = [
-            self._normalize_editable_course(item, custom=True)
-            for item in custom_input if isinstance(item, dict)
-        ]
-
-        date_input = payload.get("dateOverrides", current["dateOverrides"])
-        if not isinstance(date_input, list):
-            raise ValueError("dateOverrides 必须是数组")
-        date_overrides: list[dict[str, Any]] = []
-        for raw in date_input:
-            if not isinstance(raw, dict):
-                continue
-            entry_id = str(raw.get("id") or "").strip()
-            action = str(raw.get("action") or "add")
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", entry_id):
-                raise ValueError("dateOverrides.id 缺失或格式无效")
-            if action not in {"add", "replace", "cancel"}:
-                raise ValueError("dateOverrides.action 无效")
-            entry: dict[str, Any] = {
-                "id": entry_id,
-                "date": self._valid_iso_date(raw.get("date"), "dateOverrides.date"),
-                "action": action,
-            }
-            if raw.get("targetSourceKey"):
-                entry["targetSourceKey"] = str(raw["targetSourceKey"])
-            if action in {"add", "replace"}:
-                entry["course"] = self._normalize_editable_course(
-                    {**(raw.get("course") or {}), "customId": entry_id}, custom=True
-                )
-            date_overrides.append(entry)
-
-        saved = {
-            "version": 1,
-            "semester": semester,
-            "overrides": overrides,
-            "customCourses": custom_courses,
-            "dateOverrides": date_overrides,
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
-        }
-        self._write_json_atomic(self.customization_file, saved)
-        return {"status": "completed", "customizations": saved}
+        return schedule_customizations.save_customizations(self, payload)
 
     def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
-        operation = str(payload.get("operation") or "").strip()
-        current = self._load_customizations()
-        if operation == "semester":
-            changes = payload.get("semester")
-            if not isinstance(changes, dict) or not changes or set(changes) - {"name", "startDate", "totalWeeks"}:
-                raise ValueError("学期设置需提供 name、startDate 或 totalWeeks")
-            result = self.save_customizations({**current, "semester": {**current["semester"], **changes}})
-            return {**result, "message": "学期设置已更新。", "change": {"operation": operation, "semester": changes}}
-        if operation in {"add_once", "cancel_once"}:
-            target_date = self._valid_iso_date(payload.get("date"), "date")
-            identity = f"agent-{uuid.uuid4()}"
-            if operation == "add_once":
-                raw = payload.get("course")
-                if not isinstance(raw, dict):
-                    raise ValueError("单日增课缺少 course")
-                course = self._normalize_editable_course({**raw, "customId":identity,"weekday":date.fromisoformat(target_date).isoweekday(),"weeks":[]}, custom=True)
-                override = {"id":identity,"date":target_date,"action":"add","course":course}
-            else:
-                key = str(payload.get("sourceKey") or "")
-                visible = self._filter_by_date(self._apply_customizations(self._load_cache() or {"courses": []}), target_date)
-                if not key or not any(course.get("sourceKey") == key for course in visible.get("courses", [])):
-                    raise ValueError("要停课的课程不存在，请先读取本地课表")
-                override = {"id":identity,"date":target_date,"action":"cancel","targetSourceKey":key}
-            result = self.save_customizations({**current,"dateOverrides":[*current["dateOverrides"],override]})
-            return {**result,"message":f"已更新 {target_date} 的单次课程。","change":{"operation":operation,"date":target_date}}
-        if operation == "add":
-            raw_course = payload.get("course")
-            if not isinstance(raw_course, dict):
-                raise ValueError("新增课表课程缺少 course 参数")
-            custom_id = f"agent-{uuid.uuid4()}"
-            normalized = self._normalize_editable_course(
-                {**raw_course, "customId": custom_id}, custom=True
-            )
-            current["customCourses"] = [*current["customCourses"], normalized]
-            result = self.save_customizations(current)
-            return {
-                **result,
-                "message": f"已新增课表课程：{normalized['courseName']}",
-                "change": {"operation": "add", "sourceKey": f"custom-{custom_id}", "course": normalized},
-            }
-
-        if operation == "update":
-            source_key = str(payload.get("sourceKey") or "").strip()
-            changes = payload.get("changes")
-            if not source_key or not isinstance(changes, dict) or not changes:
-                raise ValueError("修改课表课程需要 sourceKey 和 changes")
-            allowed = {
-                "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
-                "weeks", "classroom", "courseCode",
-            }
-            unknown = set(changes) - allowed
-            if unknown:
-                raise ValueError(f"课表修改包含不支持的字段: {', '.join(sorted(unknown))}")
-            if source_key.startswith("custom-"):
-                custom_id = source_key.removeprefix("custom-")
-                found = False
-                updated_courses: list[dict[str, Any]] = []
-                for course in current["customCourses"]:
-                    if str(course.get("customId") or "") != custom_id:
-                        updated_courses.append(course)
-                        continue
-                    updated_courses.append(
-                        self._normalize_editable_course(
-                            {**course, **changes, "customId": custom_id}, custom=True
-                        )
-                    )
-                    found = True
-                if not found:
-                    raise ValueError("要修改的自定义课程不存在")
-                current["customCourses"] = updated_courses
-            else:
-                if not source_key.startswith("source-"):
-                    raise ValueError("sourceKey 格式无效")
-                cached = self._load_cache()
-                if cached is None:
-                    raise ValueError("当前课表缓存不存在，请先读取课表")
-                visible = self._apply_customizations(cached)
-                target = next(
-                    (
-                        course
-                        for course in visible.get("courses") or []
-                        if course.get("sourceKey") == source_key
-                    ),
-                    None,
-                )
-                if target is None:
-                    raise ValueError("要修改的课表课程不存在，请重新读取课表")
-                normalized = self._normalize_editable_course(
-                    {**target, **changes}, custom=False
-                )
-                changes = {key: normalized[key] for key in changes}
-                current["overrides"] = {
-                    **current["overrides"],
-                    source_key: {**current["overrides"].get(source_key, {}), **changes},
-                }
-            result = self.save_customizations(current)
-            return {
-                **result,
-                "message": "课表课程信息已修改。",
-                "change": {"operation": "update", "sourceKey": source_key, "changes": changes},
-            }
-
-        if operation == "move":
-            source_key = str(payload.get("sourceKey") or "").strip()
-            from_date = self._valid_iso_date(payload.get("fromDate"), "fromDate")
-            to_date = self._valid_iso_date(payload.get("toDate"), "toDate")
-            changes = payload.get("changes") or {}
-            if not source_key or not isinstance(changes, dict):
-                raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
-            cached = self._load_cache()
-            visible = self._filter_by_date(self._apply_customizations(cached or {"courses": []}), from_date)
-            target = next(
-                (
-                    course
-                    for course in visible.get("courses") or []
-                    if course.get("sourceKey") == source_key
-                ),
-                None,
-            )
-            if target is None:
-                raise ValueError("要移动的课表课程不存在，请重新读取课表")
-            moved_id = f"agent-{uuid.uuid4()}"
-            moved = self._normalize_editable_course(
-                {
-                    **target,
-                    **changes,
-                    "weekday": date.fromisoformat(to_date).isoweekday(),
-                    "weeks": [],
-                    "customId": moved_id,
-                },
-                custom=True,
-            )
-            current["dateOverrides"] = [
-                *current["dateOverrides"],
-                {
-                    "id": f"{moved_id}-cancel",
-                    "date": from_date,
-                    "action": "cancel",
-                    "targetSourceKey": source_key,
-                },
-                {
-                    "id": moved_id,
-                    "date": to_date,
-                    "action": "add",
-                    "course": moved,
-                },
-            ]
-            result = self.save_customizations(current)
-            return {
-                **result,
-                "message": f"已将 {target.get('courseName') or '课程'} 从 {from_date} 移至 {to_date}。",
-                "change": {
-                    "operation": "move",
-                    "sourceKey": source_key,
-                    "fromDate": from_date,
-                    "toDate": to_date,
-                    "course": moved,
-                },
-            }
-
-        raise ValueError("课表操作仅支持 semester、add、update、move、add_once 或 cancel_once")
+        return schedule_customizations.apply_agent_change(self, payload)
 
     def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
-        customizations = self._load_customizations()
-        merged: list[dict[str, Any]] = []
-        for raw in result.get("courses") or []:
-            course = dict(raw)
-            source_key = self._source_key(course)
-            override = customizations["overrides"].get(source_key, {})
-            if override.get("hidden"):
-                continue
-            course.update({key: value for key, value in override.items() if key != "hidden"})
-            start = int(course.get("startPeriod") or (course.get("weeklyPeriods") or [1])[0])
-            end = int(course.get("endPeriod") or (course.get("weeklyPeriods") or [start])[-1])
-            course["startPeriod"] = start
-            course["endPeriod"] = end
-            course["weeklyPeriods"] = list(range(start, end + 1))
-            course["sourceKey"] = source_key
-            course["source"] = "remote"
-            merged.append(course)
-        for raw in customizations["customCourses"]:
-            course = dict(raw)
-            course["scheduleId"] = f"custom-{course['customId']}"
-            course["sourceKey"] = course["scheduleId"]
-            course["source"] = "custom"
-            merged.append(course)
-        return {
-            **result,
-            "count": len(merged),
-            "courses": sorted(
-                merged,
-                key=lambda item: (
-                    item.get("weekday") is None,
-                    item.get("weekday") or 0,
-                    item.get("startPeriod") or 0,
-                    item.get("courseName") or "",
-                ),
-            ),
-            "customizations": customizations,
-        }
+        return schedule_customizations._apply_customizations(self, result)
 
-    @staticmethod
-    def week_for_date(start_date: str, target: date) -> int:
-        start = date.fromisoformat(start_date)
-        return ((target - start).days // 7) + 1
+    week_for_date = staticmethod(schedule_rows.week_for_date)
 
-    @staticmethod
-    def date_for_weekday(start_date: str, week: int, weekday: int) -> date:
-        return date.fromisoformat(start_date) + timedelta(days=(week - 1) * 7 + weekday - 1)
+    date_for_weekday = staticmethod(schedule_rows.date_for_weekday)
 
-    @staticmethod
-    def _schedule_id(course: dict[str, Any]) -> str:
-        identity = {
-            key: course.get(key)
-            for key in (
-                "courseName",
-                "teacherName",
-                "weekday",
-                "weeklyPeriods",
-                "weeks",
-                "classroom",
-                "courseCode",
-            )
-        }
-        encoded = json.dumps(
-            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-        return f"seu-{hashlib.sha256(encoded).hexdigest()[:16]}"
+    _schedule_id = staticmethod(schedule_rows._schedule_id)
 
-    @staticmethod
-    def _integer(value: Any) -> int | None:
-        if value is None:
-            return None
-        match = re.search(r"\d+", str(value))
-        return int(match.group()) if match else None
+    _integer = staticmethod(schedule_rows._integer)
 
-    @staticmethod
-    def _weeks(value: Any) -> list[int]:
-        text = str(value or "").strip()
-        if text and set(text) <= {"0", "1"}:
-            return [index + 1 for index, flag in enumerate(text) if flag == "1"]
-        weeks: set[int] = set()
-        for start, end in re.findall(r"(\d+)(?:-(\d+))?", text):
-            first = int(start)
-            last = int(end) if end else first
-            weeks.update(range(first, last + 1))
-        if "(单)" in text or "（单）" in text:
-            weeks = {week for week in weeks if week % 2 == 1}
-        if "(双)" in text or "（双）" in text:
-            weeks = {week for week in weeks if week % 2 == 0}
-        return sorted(weeks)
+    _weeks = staticmethod(schedule_rows._weeks)
 
-    @classmethod
-    def _normalize_rows(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        courses: list[dict[str, Any]] = []
-        seen: set[tuple[Any, ...]] = set()
-        for row in rows:
-            course_name = str(row.get("KCM") or row.get("XSKCM") or "").strip()
-            teacher_name = str(
-                row.get("SKJS") or row.get("JSXM") or row.get("RKJS") or ""
-            ).strip()
-            weekday = cls._integer(row.get("SKXQ") or row.get("XQJ"))
-            start_period = cls._integer(row.get("KSJC") or row.get("JCQZ"))
-            end_period = cls._integer(row.get("JSJC") or row.get("JCZZ"))
-            if not course_name or start_period is None or end_period is None:
-                continue
-            periods = list(range(start_period, end_period + 1))
-            classroom = str(
-                row.get("JASMC") or row.get("SKDD") or row.get("CDMC") or ""
-            ).strip()
-            weeks = cls._weeks(row.get("SKZC") or row.get("ZC") or row.get("ZCMC"))
-            key = (
-                course_name,
-                teacher_name,
-                weekday,
-                start_period,
-                end_period,
-                classroom,
-                tuple(weeks),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            course = {
-                "courseName": course_name,
-                "teacherName": teacher_name,
-                "weekday": weekday,
-                "startPeriod": start_period,
-                "endPeriod": end_period,
-                "weeklyPeriods": periods,
-                "weeks": weeks,
-                "classroom": classroom,
-                "courseCode": str(row.get("KCH") or row.get("XSKCH") or "").strip(),
-            }
-            optional_fields = {
-                "courseNature": row.get("KCXZDM_DISPLAY") or row.get("KCXZMC"),
-                "courseGroup": row.get("KZM") or row.get("KCLBMC"),
-                "credits": row.get("XF"),
-                "hours": row.get("XS"),
-                "department": row.get("KKDWDM_DISPLAY") or row.get("KKDWMC"),
-                "assessment": row.get("KSLXDM_DISPLAY") or row.get("KSLXMC"),
-            }
-            course.update(
-                {
-                    key: value.strip() if isinstance(value, str) else value
-                    for key, value in optional_fields.items()
-                    if value not in (None, "")
-                }
-            )
-            course["scheduleId"] = cls._schedule_id(course)
-            courses.append(course)
-        return sorted(
-            courses,
-            key=lambda item: (
-                item["weekday"] is None,
-                item["weekday"] or 0,
-                item["startPeriod"],
-                item["courseName"],
-            ),
-        )
+    _normalize_rows = classmethod(schedule_rows._normalize_rows)
 
-    @staticmethod
-    def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
-        found: list[dict[str, Any]] = []
+    _rows_from_payload = staticmethod(schedule_rows._rows_from_payload)
 
-        def walk(value: Any) -> None:
-            if isinstance(value, dict):
-                rows = value.get("rows")
-                if isinstance(rows, list):
-                    found.extend(row for row in rows if isinstance(row, dict))
-                for nested in value.values():
-                    walk(nested)
-            elif isinstance(value, list):
-                for nested in value:
-                    walk(nested)
-
-        walk(payload)
-        return found
-
-    @classmethod
-    def _normalize_dom_records(
-        cls, records: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        weekdays = {
-            "星期一": 1,
-            "星期二": 2,
-            "星期三": 3,
-            "星期四": 4,
-            "星期五": 5,
-            "星期六": 6,
-            "星期日": 7,
-            "星期天": 7,
-        }
-        for record in records:
-            details = [part.strip() for part in record.get("details", "").split(",")]
-            period_index = next(
-                (
-                    index
-                    for index, part in enumerate(details)
-                    if re.fullmatch(r"\d+-\d+", part)
-                ),
-                None,
-            )
-            weekday_text = next(
-                (part for part in details if part in weekdays), ""
-            )
-            if period_index is None:
-                continue
-            start_period, end_period = details[period_index].split("-", 1)
-            classroom = details[period_index + 1] if len(details) > period_index + 1 else ""
-            rows.append(
-                {
-                    "KCM": record.get("courseName", ""),
-                    "SKJS": record.get("teacherName", ""),
-                    "SKXQ": weekdays.get(weekday_text),
-                    "KSJC": start_period,
-                    "JSJC": end_period,
-                    "SKZC": details[0] if details else "",
-                    "JASMC": classroom,
-                }
-            )
-        return cls._normalize_rows(rows)
+    _normalize_dom_records = classmethod(schedule_rows._normalize_dom_records)
 
     def _prefetch_remote_semesters(
         self,

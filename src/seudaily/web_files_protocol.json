@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "directory": "web-files",
+  "filesDirectory": "files",
+  "metadataDirectory": "metadata",
+  "fallbackSource": {"id": "unclassified", "name": "未分类"},
+  "fallbackSection": "other",
+  "sourceIdPattern": "^[a-z0-9][a-z0-9.-]*$",
+  "noticeIdPattern": "^[a-zA-Z0-9-]+$",
+  "sectionIdPattern": "^[a-zA-Z0-9_-]+$",
+  "sha256Pattern": "^[a-f0-9]{64}$"
+}
