@@ -1,13 +1,10 @@
 """School WebPlus configuration and HTML parsing, separate from synchronization."""
 
 from __future__ import annotations
-import json
 import re
 import hashlib
-from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
-from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse, parse_qs, unquote
 
@@ -31,94 +28,16 @@ _VOID_TAGS = {
 }
 
 
-def _load_notice_sources(path: Path) -> dict:
-    """Only known sites and public WebPlus list paths; no extraction DSL."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not {"jwc", "cse"}.issubset(data):
-        raise ValueError("通知栏目配置需要 jwc/cse")
-    result = {}
-    for site, source in data.items():
-        if (
-            not isinstance(source, dict)
-            or not isinstance(source.get("name"), str)
-            or not source["name"].strip()
-            or source.get("host") != site + ".seu.edu.cn"
-        ):
-            raise ValueError(f"无效通知机构配置：{site}")
-        if site not in {"jwc", "cse"}:
-            if "categories" in source:
-                raise ValueError("额外来源仅支持机构名称，不支持抓取栏目")
-            continue
-        categories = source.get("categories")
-        if not isinstance(categories, dict) or not categories:
-            raise ValueError("通知栏目配置不能为空")
-        result[site] = {
-            "name": source["name"],
-            "host": source["host"],
-            "categories": {},
-        }
-        for key, entry in categories.items():
-            if (
-                not re.fullmatch(r"[a-z][a-z0-9_]*", key)
-                or not isinstance(entry, list)
-                or len(entry) != 2
-                or not all(isinstance(value, str) for value in entry)
-                or not entry[0].strip()
-                or not re.fullmatch(r"/[A-Za-z0-9_]+/list\.htm", entry[1])
-            ):
-                raise ValueError(f"无效通知栏目配置：{site}/{key}")
-            result[site]["categories"][key] = (entry[0], entry[1])
-        paths = [entry[1] for entry in result[site]["categories"].values()]
-        if len(paths) != len(set(paths)):
-            raise ValueError(f"通知栏目路径重复：{site}")
-    return result
-
-
-def _load_notice_categories(path: Path) -> dict[str, dict[str, tuple[str, str]]]:
-    return {
-        key: source["categories"] for key, source in _load_notice_sources(path).items()
-    }
-
-
-_NOTICE_SOURCES = _load_notice_sources(
-    Path(__file__).with_name("notice_categories.json")
-)
-_NOTICE_CATEGORIES = {
-    key: source["categories"] for key, source in _NOTICE_SOURCES.items()
-}
-JWC_CATEGORIES = _NOTICE_CATEGORIES["jwc"]
-CSE_CATEGORIES = _NOTICE_CATEGORIES["cse"]
-
-
-@dataclass(frozen=True)
-class WebplusSiteConfig:
-    key: str
-    name: str
-    id_prefix: str
-    categories: dict[str, tuple[str, str]]
-    title_classes: frozenset[str]
-    date_classes: frozenset[str]
-    content_classes: frozenset[str]
-
-
-JWC_CONFIG = WebplusSiteConfig(
-    key="jwc",
-    name=_NOTICE_SOURCES["jwc"]["name"],
-    id_prefix="seu-jwc",
-    categories=JWC_CATEGORIES,
-    title_classes=frozenset({"Article_Title"}),
-    date_classes=frozenset({"Article_PublishDate"}),
-    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
-)
-
-CSE_CONFIG = WebplusSiteConfig(
-    key="cse",
-    name=_NOTICE_SOURCES["cse"]["name"],
-    id_prefix="seu-cse",
-    categories=CSE_CATEGORIES,
-    title_classes=frozenset({"arti_title", "Article_Title"}),
-    date_classes=frozenset({"arti_update", "Article_PublishDate"}),
-    content_classes=frozenset({"wp_articlecontent", "Article_Content"}),
+from .notice_sources import (
+    _load_notice_sources,
+    _load_notice_categories,
+    _NOTICE_SOURCES,
+    _NOTICE_CATEGORIES,
+    JWC_CATEGORIES,
+    CSE_CATEGORIES,
+    WebplusSiteConfig,
+    JWC_CONFIG,
+    CSE_CONFIG,
 )
 
 

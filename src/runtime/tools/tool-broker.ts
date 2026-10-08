@@ -1,3 +1,4 @@
+import { noticeSources, noticeSourceIds } from "../../shared/notice-sources.js";
 import { randomUUID } from "node:crypto";
 import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
@@ -33,7 +34,7 @@ const staticCapabilities: Capability[] = [
   { namespace: "local-actions", tool: proposeLocalActionTool, aliases: ["修改课表", "移动课程", "创建关注", "focus", "edit schedule"] },
   { namespace: "course-materials", tool: resolveCourseTool, aliases: ["课程", "课次", "回放", "course", "session"] },
   { namespace: "course-materials", tool: captureCourseMaterialsTool, aliases: ["字幕", "视频", "幻灯片", "ppt", "subtitle", "capture"] },
-  { namespace: "notices", tool: queryCampusNoticesTool, aliases: ["通知", "教务处", "计软智", "jwc", "cse", "notice"] },
+  { namespace: "notices", tool: queryCampusNoticesTool, aliases: ["通知", "计软智", "notice", ...noticeSourceIds.flatMap(id => [id, noticeSources[id].name])] },
   { namespace: "notices", tool: readCampusNoticeTool, aliases: ["通知正文", "通知附件", "article", "notice detail"] },
   { namespace: "training-plan", tool: auditTrainingPlanTool, aliases: ["培养方案", "学分", "毕业", "training plan", "credits"] },
   { namespace: "web", tool: webSearchTool as AnyTool, aliases: ["互联网", "网页搜索", "最新", "web", "search"] },

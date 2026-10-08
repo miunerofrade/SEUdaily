@@ -1,3 +1,4 @@
+import { requireNoticeSource } from "../shared/notice-sources.js";
 import { webLibraryEntries } from "./web-library.js";
 import { redactText } from "../agent/redaction.js";
 import {
@@ -1161,20 +1162,21 @@ export const appRoutes = [
     requiresAuth: false,
     handler: async (c: any) => {
       const refresh = c.req.query("refresh") !== "false";
-      const result = await runPythonTool<ToolResult>("list-jwc", {
-        categories: c.req.query("category")
-          ? z
-              .array(
-                z.enum([
-                  "news",
-                  "academic",
-                  "lectures",
-                  "student_status",
-                  "practice",
-                ]),
-              )
-              .parse([c.req.query("category")])
-          : ["news", "academic", "lectures", "student_status", "practice"],
+      const sourceId = c.req.query("source") || "jwc";
+      let source;
+      try {
+        source = requireNoticeSource(sourceId);
+      } catch {
+        return c.json({ error: "未知通知来源" }, 400);
+      }
+      const category = c.req.query("category");
+      if (category && !source.categories[category])
+        return c.json({ error: "未知通知栏目" }, 400);
+      const result = await runPythonTool<ToolResult>("list-notices", {
+        source: sourceId,
+        categories: category
+          ? [category]
+          : source.displayCategories || Object.keys(source.categories),
         freshness: refresh ? "latest" : "cache_only",
         timeScope: "any",
         limit: 60,

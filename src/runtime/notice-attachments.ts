@@ -2,6 +2,7 @@ import { readFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readSavedWebFile } from "./web-file-store.js";
+import { noticeSourceIds } from "../shared/notice-sources.js";
 import { atomicWrite } from "./atomic-file.js";
 
 type AttachmentJob = {
@@ -43,6 +44,7 @@ export class NoticeAttachments {
     private root: string,
     private python: Python,
     private knowledge: Knowledge,
+    private sourceIds: readonly string[] = noticeSourceIds,
   ) {
     this.journal = join(root, "notice-attachment-jobs.json");
   }
@@ -81,7 +83,7 @@ export class NoticeAttachments {
           if (
             typeof job.url === "string" &&
             typeof job.name === "string" &&
-            ["jwc", "cse"].includes(job.site) &&
+            this.sourceIds.includes(job.site) &&
             typeof job.articleId === "string" &&
             Number.isInteger(job.attachmentNumber) &&
             job.attachmentNumber > 0 &&
@@ -113,7 +115,7 @@ export class NoticeAttachments {
   private async discover() {
     let changed = false;
     const present = new Set<string>();
-    for (const site of ["jwc", "cse"]) {
+    for (const site of this.sourceIds) {
       const directory = join(this.root, site, "articles");
       const files = await readdir(directory).catch((error) => {
         if (error.code !== "ENOENT") throw error;

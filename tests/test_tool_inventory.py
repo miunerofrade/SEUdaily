@@ -21,8 +21,8 @@ def test_agent_keeps_only_core_tools_eager() -> None:
 
 
 def test_course_tool_module_exports_only_public_high_level_tools() -> None:
-    source = (ROOT / "src/runtime/tools/course-tools.ts").read_text(encoding="utf-8")
-    exported = set(re.findall(r"^export const (\w+Tool) = createTool", source, re.MULTILINE))
+    source = (ROOT / "src/runtime/tools/course-tools.ts").read_text(encoding="utf-8") + "\n" + (ROOT / "src/runtime/tools/notices.ts").read_text(encoding="utf-8")
+    exported = set(re.findall(r"^export const (\w+Tool) =", source, re.MULTILINE))
     assert exported == {
         "getScheduleTool",
         "resolveCourseTool",

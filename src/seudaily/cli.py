@@ -52,20 +52,10 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
     )
 
 
-def _jwc_service(payload: dict[str, Any]) -> JwcService:
-    if payload.get("site") == "cse":
-        return CseService(
-            base_url=payload.get("baseUrl", "https://cse.seu.edu.cn"),
-            cache_dir=payload.get("cacheDir", ".seudaily/cse"),
-            timeout_seconds=payload.get("timeoutSeconds", 15),
-            background_sync=payload.get("backgroundSync", True),
-        )
-    return JwcService(
-        base_url=payload.get("baseUrl", "https://jwc.seu.edu.cn"),
-        cache_dir=payload.get("cacheDir", ".seudaily/jwc"),
-        timeout_seconds=payload.get("timeoutSeconds", 15),
-        background_sync=payload.get("backgroundSync", True),
-    )
+def _jwc_service(payload: dict[str, Any]):
+    from .notice_adapters import create_notice_adapter
+
+    return create_notice_adapter(payload)
 
 
 def _focus_service(payload: dict[str, Any]) -> FocusService:
@@ -83,12 +73,8 @@ def _training_plan_service(payload: dict[str, Any]) -> TrainingPlanService:
     return TrainingPlanService(
         cookie_file=payload.get("cookieFile", ".seudaily/ehall-cookies.json"),
         cache_file=payload.get("cacheFile", ".seudaily/training-plan.json"),
-        schedule_cache_file=payload.get(
-            "scheduleCacheFile", ".seudaily/schedule.json"
-        ),
-        override_file=payload.get(
-            "overrideFile", ".seudaily/training-plan-user.json"
-        ),
+        schedule_cache_file=payload.get("scheduleCacheFile", ".seudaily/schedule.json"),
+        override_file=payload.get("overrideFile", ".seudaily/training-plan-user.json"),
     )
 
 
@@ -141,27 +127,92 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
 
     if action == "campus-sms":
         from .campus_auth import sms_challenge_action, CampusAuthError
+
         try:
-            return sms_challenge_action(payload.get("challengeId"), payload.get("operation"), str(payload.get("code", "")))
+            return sms_challenge_action(
+                payload.get("challengeId"),
+                payload.get("operation"),
+                str(payload.get("code", "")),
+            )
         except CampusAuthError as error:
             return {"status": "failed", "message": str(error)}
-    if action in {"vpn-status", "vpn-connect", "vpn-disconnect", "vpn-verify", "vpn-resend"}:
+    if action in {
+        "vpn-status",
+        "vpn-connect",
+        "vpn-disconnect",
+        "vpn-verify",
+        "vpn-resend",
+    }:
         from .vpn import manager
+
         vpn = manager()
-        state = vpn.status() if action == 'vpn-status' else vpn.connect(payload.get('port')) if action == 'vpn-connect' else vpn.disconnect() if action == 'vpn-disconnect' else vpn.resend() if action == 'vpn-resend' else vpn.verify(str(payload.get('code', '')))
-        return {'status': 'completed', 'summary': state['message'], 'data': state}
+        state = (
+            vpn.status()
+            if action == "vpn-status"
+            else vpn.connect(payload.get("port"))
+            if action == "vpn-connect"
+            else vpn.disconnect()
+            if action == "vpn-disconnect"
+            else vpn.resend()
+            if action == "vpn-resend"
+            else vpn.verify(str(payload.get("code", "")))
+        )
+        return {"status": "completed", "summary": state["message"], "data": state}
     if action == "reveal-ramdisk":
         from .ramdisk import reveal_ramdisk
+
         return reveal_ramdisk()
     if action in {"ramdisk-status", "mount-ramdisk", "unmount-ramdisk"}:
         from .ramdisk import manage_ramdisk
-        operation = {"ramdisk-status": "status", "mount-ramdisk": "mount", "unmount-ramdisk": "unmount"}[action]
+
+        operation = {
+            "ramdisk-status": "status",
+            "mount-ramdisk": "mount",
+            "unmount-ramdisk": "unmount",
+        }[action]
         return manage_ramdisk(operation, str(payload.get("size", "1G")))
     if action == "health":
-        return {"version": __version__, "tools": [
-            "authorize", "authorize-schedule", "get-schedule", "get-current-date", "save-schedule-customizations", "apply-agent-schedule-change", "list-courses", "search-courses", "list-course-sessions", "find-course-session", "capture-course-session", "capture-course-sessions", "transcribe-local", "transcribe-cloud",
-            "extract-slides", "summarize-course", "read-web-page", "list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article", "get-training-plan", "analyze-training-plan", "list-focus", "upsert-focus", "delete-focus", "claim-focus-agent-run", "record-focus-agent-run", "run-focus-cycle", "run-course-focus-queue", "acknowledge-course-focus-alert",
-        ]}
+        return {
+            "version": __version__,
+            "tools": [
+                "authorize",
+                "authorize-schedule",
+                "get-schedule",
+                "get-current-date",
+                "save-schedule-customizations",
+                "apply-agent-schedule-change",
+                "list-courses",
+                "search-courses",
+                "list-course-sessions",
+                "find-course-session",
+                "capture-course-session",
+                "capture-course-sessions",
+                "transcribe-local",
+                "transcribe-cloud",
+                "extract-slides",
+                "summarize-course",
+                "read-web-page",
+                "list-notices",
+                "search-notices",
+                "get-notice",
+                "list-jwc",
+                "search-jwc",
+                "get-jwc-article",
+                "list-cse",
+                "search-cse",
+                "get-cse-article",
+                "get-training-plan",
+                "analyze-training-plan",
+                "list-focus",
+                "upsert-focus",
+                "delete-focus",
+                "claim-focus-agent-run",
+                "record-focus-agent-run",
+                "run-focus-cycle",
+                "run-course-focus-queue",
+                "acknowledge-course-focus-alert",
+            ],
+        }
     if action == "authorize":
         return _course_service(payload).authorize()
     if action == "authorize-schedule":
@@ -174,9 +225,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
             refresh=payload.get("refresh", False),
             local_only=payload.get("localOnly", False),
             semester=payload.get("semester"),
-            include_available_semesters=payload.get(
-                "includeAvailableSemesters", False
-            ),
+            include_available_semesters=payload.get("includeAvailableSemesters", False),
             prefetch_available_semesters=payload.get(
                 "prefetchAvailableSemesters", True
             ),
@@ -184,7 +233,9 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         )
     if action == "get-academic-calendar":
         return _schedule_service(payload).get_calendar(
-            refresh=payload.get("refresh", False), local_only=payload.get("localOnly", False))
+            refresh=payload.get("refresh", False),
+            local_only=payload.get("localOnly", False),
+        )
     if action == "get-current-date":
         now = datetime.now(timezone(timedelta(hours=8)))
         weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -243,10 +294,17 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
             refresh=bool(payload.get("refresh", False)),
             plan_id=str(payload.get("planId") or ""),
         )
-    if action in {"list-jwc", "list-cse", "search-jwc", "search-cse"}:
+    if action in {
+        "list-notices",
+        "search-notices",
+        "list-jwc",
+        "list-cse",
+        "search-jwc",
+        "search-cse",
+    }:
         if action in {"list-cse", "search-cse"}:
             payload["site"] = "cse"
-        if action in {"list-jwc", "list-cse"}:
+        if action in {"list-notices", "list-jwc", "list-cse"}:
             return _jwc_service(payload).list_articles(
                 categories=payload.get("categories"),
                 paths=payload.get("paths"),
@@ -264,7 +322,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
             recent_days=payload.get("recentDays", 7),
             limit=payload.get("limit", 5),
         )
-    if action in {"get-jwc-article", "get-cse-article"}:
+    if action in {"get-notice", "get-jwc-article", "get-cse-article"}:
         if action == "get-cse-article":
             payload["site"] = "cse"
         return _jwc_service(payload).get_article(
@@ -273,7 +331,9 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "sync-notice-pdf":
         payload["site"] = payload.get("site", "jwc")
         return _jwc_service(payload).read_attachment(
-            payload["articleId"], attachment_number=payload["attachmentNumber"], refresh=False
+            payload["articleId"],
+            attachment_number=payload["attachmentNumber"],
+            refresh=False,
         )
     if action == "read-web-page":
         return read_web_page(
@@ -322,9 +382,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         )
     if action == "capture-course-sessions":
         raw_targets = payload.get("targets", payload.get("sessions", []))
-        sessions = [
-            _resolve_course_target(payload, target) for target in raw_targets
-        ]
+        sessions = [_resolve_course_target(payload, target) for target in raw_targets]
         return _course_service(payload).capture_course_sessions(
             sessions=sessions,
             max_concurrency=payload.get("maxConcurrency", 2),
@@ -388,6 +446,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         )
     if action == "knowledge-index":
         from .knowledge_index import operate
+
         return operate(payload)
     if action == "parse-document":
         return parse_document(path=payload["path"], filename=payload.get("filename"))
@@ -428,11 +487,16 @@ def main() -> None:
         )
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False))
     except Exception as exc:
-        print(json.dumps({
-            "ok": False,
-            "error": str(exc),
-            "type": type(exc).__name__,
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "type": type(exc).__name__,
+                },
+                ensure_ascii=False,
+            )
+        )
         traceback.print_exc(file=sys.stderr)
         raise SystemExit(1) from exc
 

@@ -47,3 +47,5 @@ Node 负责常驻服务、Agent 编排、权限、界面和知识库编排。Pyt
 - `runtime/conversation-title.ts` 负责会话命名，`runtime/library-files.ts` 负责资料路径及预览规则，`app-routes.ts` 组装 HTTP 路由。
 
 这些边界围绕已有重复逻辑拆分，不增加通用 Adapter/FSM 框架。接口字段校验能阻止错误缓存替换，但学校新增字段或业务规则仍需要更新归一化代码与样例测试。
+
+学校通知来源的 adapter 与接入方法见 [通知来源](notice-sources.md)。通知工具已从 `course-tools.ts` 提取到 `tools/notices.ts`；旧导出入口保留，来源枚举和栏目约束由共同注册表生成。

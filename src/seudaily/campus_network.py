@@ -43,7 +43,7 @@ def _campus_url(value: str) -> bool:
 
 
 def _campus_context(action: str, payload: dict[str, Any], message: str) -> bool:
-    if action in {"list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article"}:
+    if action in {"list-notices", "search-notices", "get-notice", "sync-notice-pdf", "list-jwc", "search-jwc", "get-jwc-article", "list-cse", "search-cse", "get-cse-article"}:
         return False  # Public notices do not require the campus network.
     urls = _URL.findall(message)
     if urls:

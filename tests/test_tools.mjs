@@ -94,9 +94,12 @@ test("capability discovery exposes transformed input schemas and rejects incompl
     await compileSource("src/agent/tool.ts", directory);
     for (const module of [
       "runtime-paths", "images", "process-tree", "action-request-store", "auth-resume-store", "local-action-schema", "permission-state", "vpn-state",
-      "tools/course-tools", "tools/python-bridge", "tools/tool-result", "tools/tool-broker", "tools/knowledge-tools",
+      "tools/course-tools", "tools/notices", "tools/python-bridge", "tools/tool-result", "tools/tool-broker", "tools/knowledge-tools",
       "tools/browser-tools", "tools/browser-config", "tools/web-reader", "tools/web-fetch", "tools/web-search", "tools/public-url",
     ]) await compileSource(`src/runtime/${module}.ts`, directory);
+    await compileSource("src/shared/notice-sources.ts", directory);
+    await mkdir(join(directory, 'src/seudaily'), {recursive:true});
+    await writeFile(join(directory, 'src/seudaily/notice_categories.json'), await readFile(join(root, 'src/seudaily/notice_categories.json')));
     await mkdir(join(directory, 'src/runtime/knowledge'), {recursive:true});
     await writeFile(join(directory, 'src/runtime/knowledge/index.js'), 'export const knowledge = {search: async()=>({summary:"知识库为空",matches:[]})};');
     await writeFile(join(directory, 'src/runtime/tools/browser-catalog.json'), await readFile(join(root, 'src/runtime/tools/browser-catalog.json')));

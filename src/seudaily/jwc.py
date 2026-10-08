@@ -146,8 +146,8 @@ def _iso_now() -> str:
     return _now().isoformat()
 
 
-class JwcService:
-    """Layered local-first search for the public SEU academic-affairs site."""
+class WebplusNoticeAdapter:
+    """WebPlus list/search/detail adapter with shared local-first persistence."""
 
     def __init__(
         self,
@@ -348,7 +348,7 @@ class JwcService:
         max_bytes: int = 50 * 1024 * 1024,
     ) -> dict[str, Any]:
         """Download and parse an attachment already discovered on an article page."""
-        site_label = "教务处" if self.config.key == "jwc" else "计软智网站"
+        site_label = self.config.attachment_label or self.config.name
         if bool(article_id) == bool(notice_url):
             raise ValueError("必须且只能提供 articleId 或 noticeUrl 其中一个")
         if notice_url:
@@ -965,7 +965,7 @@ class JwcService:
         infos = [
             {"field": "pageIndex", "value": 1},
             {"field": "group", "value": 0},
-            {"field": "searchType", "value": "1" if self.config.key == "cse" else ""},
+            {"field": "searchType", "value": self.config.search_type},
             {"field": "keyword", "value": query},
             {"field": "recommend", "value": 1},
             *({"field": field, "value": ""} for field in (4, 5, 6, 7)),
@@ -1040,6 +1040,10 @@ class JwcService:
             )
             if article.get(key) is not None
         }
+
+
+class JwcService(WebplusNoticeAdapter):
+    """Compatibility entry for existing teaching-affairs callers."""
 
 
 class CseService(JwcService):
