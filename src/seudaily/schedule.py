@@ -556,7 +556,7 @@ class ScheduleService:
         self, schedule_id: str, *, semester: str | None = None
     ) -> dict[str, Any]:
         requested = str(semester or "").strip()
-        cached = self._load_cache()
+        cached = self._load_cache(requested)
         customizations = self._load_customizations()
         if not requested and (cached is not None or customizations["customCourses"]):
             view = self._apply_customizations(cached or {"courses": []})

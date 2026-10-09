@@ -64,7 +64,16 @@ def _load_cache_file(self, cache_file: Path) -> dict[str, Any] | None:
 
 
 def _load_cache(self, semester: str | None = None) -> dict[str, Any] | None:
-    return self._load_cache_file(self._cache_file_for_semester(semester))
+    path = self._cache_file_for_semester(semester)
+    cached = self._load_cache_file(path)
+    if cached is None and path != self.cache_file:
+        current = self._load_cache_file(self.cache_file)
+        # Legacy/current syncs may only have saved the primary cache. Never
+        # substitute another semester, and keep consumers on the same identity.
+        if current is not None and current.get("selectedSemester") == str(semester or "").strip():
+            self._write_json_atomic(path, current)
+            cached = current
+    return cached
 
 
 def _semester_cache_files(self) -> list[Path]:

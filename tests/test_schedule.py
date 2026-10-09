@@ -805,3 +805,23 @@ def test_legacy_course_data_is_not_rewritten_when_loaded(tmp_path):
     service.customization_file.write_text(original)
     assert service._load_customizations()["customCourses"][0]["weeks"] == [31]
     assert service.customization_file.read_text() == original
+
+
+def test_explicit_current_semester_reuses_primary_cache_for_course_targets(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    course = {"courseName": "数据结构", "teacherName": "测试老师", "weeklyPeriods": [3, 4], "weeks": [1, 2], "semester": "2026-2027-2"}
+    course["scheduleId"] = service._schedule_id(course)
+    service._write_json_atomic(service.cache_file, {"version": 2, "selectedSemester": "2026-2027-2", "courses": [course]})
+    semester_file = service._cache_file_for_semester("2026-2027-2")
+    assert not semester_file.exists()
+    # Capture resolution is the first consumer, before any explicit-semester read.
+    target = _resolve_course_target({"scheduleCacheFile": str(service.cache_file)}, {"source": "schedule", "scheduleId": course["scheduleId"], "semester": "2026-2027-2"})
+    assert target["courseName"] == "数据结构"
+    result = service.get_schedule(semester="2026-2027-2", local_only=True)
+    assert result["courses"][0]["scheduleId"] == course["scheduleId"]
+    assert semester_file.exists()
+    # A missing historical semester must not be filled with the current course.
+    assert service.get_schedule(semester="2025-2026-2", local_only=True)["courses"] == []
+    assert not service._cache_file_for_semester("2025-2026-2").exists()
+    with pytest.raises(ValueError, match="本地课表缓存不存在"):
+        service.resolve_course(course["scheduleId"], semester="2025-2026-2")
