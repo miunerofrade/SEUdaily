@@ -18,6 +18,16 @@ def _cache_file_for_semester(self, semester: str | None = None) -> Path:
     return self.cache_file.with_name(f"{stem}.{code}{suffix}")
 
 
+def _write_schedule_cache(self, cache_file: Path, result: dict[str, Any]) -> None:
+    """Every fetched semester has a named snapshot; primary remains current entry."""
+    self._write_json_atomic(cache_file, result)
+    semester = str(result.get("selectedSemester") or "").strip()
+    if SEMESTER_CODE_PATTERN.fullmatch(semester):
+        snapshot = self._cache_file_for_semester(semester)
+        if snapshot != cache_file:
+            self._write_json_atomic(snapshot, result)
+
+
 def _load_cache_file(self, cache_file: Path) -> dict[str, Any] | None:
     if not cache_file.exists():
         return None
@@ -66,12 +76,13 @@ def _load_cache_file(self, cache_file: Path) -> dict[str, Any] | None:
 def _load_cache(self, semester: str | None = None) -> dict[str, Any] | None:
     path = self._cache_file_for_semester(semester)
     cached = self._load_cache_file(path)
-    if cached is None and path != self.cache_file:
+    if path != self.cache_file:
         current = self._load_cache_file(self.cache_file)
-        # Legacy/current syncs may only have saved the primary cache. Never
-        # substitute another semester, and keep consumers on the same identity.
+        # Current-semester syncs write the primary cache. It remains authoritative
+        # after refresh, even when a prior read created a semester-specific copy.
         if current is not None and current.get("selectedSemester") == str(semester or "").strip():
-            self._write_json_atomic(path, current)
+            if cached != current:
+                self._write_json_atomic(path, current)
             cached = current
     return cached
 

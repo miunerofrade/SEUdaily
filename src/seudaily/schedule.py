@@ -232,6 +232,9 @@ class ScheduleService:
     def _cache_file_for_semester(self, semester: str | None = None) -> Path:
         return schedule_cache._cache_file_for_semester(self, semester)
 
+    def _write_schedule_cache(self, cache_file: Path, result: dict[str, Any]) -> None:
+        schedule_cache._write_schedule_cache(self, cache_file, result)
+
     def _load_cache_file(self, cache_file: Path) -> dict[str, Any] | None:
         return schedule_cache._load_cache_file(self, cache_file)
 

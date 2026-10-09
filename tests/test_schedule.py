@@ -825,3 +825,31 @@ def test_explicit_current_semester_reuses_primary_cache_for_course_targets(tmp_p
     assert not service._cache_file_for_semester("2025-2026-2").exists()
     with pytest.raises(ValueError, match="本地课表缓存不存在"):
         service.resolve_course(course["scheduleId"], semester="2025-2026-2")
+
+
+def test_current_semester_refresh_supersedes_materialized_semester_copy(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    def save(name):
+        course = {"courseName": name, "teacherName": "老师", "weeklyPeriods": [1, 2], "semester": "2026-2027-2"}
+        course["scheduleId"] = service._schedule_id(course)
+        service._write_json_atomic(service.cache_file, {"version": 2, "selectedSemester": "2026-2027-2", "courses": [course]})
+        return course
+    previous = save("旧排课")
+    service.get_schedule(semester="2026-2027-2", local_only=True)
+    updated = save("新排课")
+    assert service.resolve_course(updated["scheduleId"], semester="2026-2027-2")["courseName"] == "新排课"
+    assert service.get_schedule(semester="2026-2027-2", local_only=True)["courses"] == [updated]
+    with pytest.raises(ValueError, match="scheduleId 不存在"):
+        service.resolve_course(previous["scheduleId"], semester="2026-2027-2")
+
+
+def test_remote_cache_writer_keeps_current_entry_and_each_semester_snapshot(tmp_path):
+    service = ScheduleService(cache_file=tmp_path / "schedule.json")
+    current = {"version": 2, "selectedSemester": "2026-2027-2", "courses": []}
+    service._write_schedule_cache(service.cache_file, current)
+    assert json.loads(service._cache_file_for_semester("2026-2027-2").read_text()) == current
+    historical = {"version": 2, "selectedSemester": "2025-2026-2", "courses": []}
+    historical_file = service._cache_file_for_semester("2025-2026-2")
+    service._write_schedule_cache(historical_file, historical)
+    assert json.loads(historical_file.read_text()) == historical
+    assert json.loads(service.cache_file.read_text()) == current

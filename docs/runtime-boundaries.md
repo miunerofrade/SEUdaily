@@ -20,3 +20,5 @@
 - 通知：`webplus_search.py` 处理站内搜索协议，`notice_sync.py` 管理详情同步队列和后台 worker。服务保留原入口；时钟、认证会话和请求入口通过明确参数委托，便于离线测试。
 
 验证使用全量 Python/Node 测试、两端类型检查和构建。跨语言对照测试在 `test_local_operations.py` / `.mjs`，第三来源完整流程在 `test_notice_adapters.py` 和 `test_notice_sources.mjs`，终端交互在 `test_terminal_input.mjs`。
+
+课表缓存约定：远端同步的每个学期均保存 `schedule.<学期编号>.json`；`schedule.json` 保留为当前课表入口，同步当前学期时两份一起更新。旧数据仅有主缓存时，显式学期读取只在 `selectedSemester` 完全一致时补齐对应学期文件；主缓存当前学期的数据优先，避免旧副本遮蔽刷新结果。远端各路径统一通过 `schedule_cache._write_schedule_cache` 写入。

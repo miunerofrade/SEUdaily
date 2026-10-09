@@ -212,7 +212,7 @@ def _prefetch_remote_semesters(
                 if value == current_semester
                 else self._cache_file_for_semester(value)
             )
-            self._write_json_atomic(cache_file, result)
+            self._write_schedule_cache(cache_file, result)
             prefetched.append(
                 {
                     "value": value,
@@ -329,7 +329,7 @@ def _fetch_api_schedule(
     if batch["prefetchFailures"]:
         result["message"] = "部分学期同步失败，已保留原有缓存；请查看失败学期后重试。"
     if selected in batch["prefetchCounts"]:
-        self._write_json_atomic(cache_file, result)
+        self._write_schedule_cache(cache_file, result)
     self._save_cookies(page)
     return result
 
@@ -498,5 +498,5 @@ def _fetch_remote(
         if selected_semester == semester_info["currentSemester"]
         else self._cache_file_for_semester(selected_semester)
     )
-    self._write_json_atomic(cache_file, result)
+    self._write_schedule_cache(cache_file, result)
     return {**result, "cacheFile": str(cache_file.resolve())}
