@@ -14,7 +14,7 @@ import { PromptVersions } from "./prompt-versions";
 import { messageContent, editedDocumentContent, writeConversationCache } from "./conversation-cache";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
-import { ArrowUp, BookOpen, CircleAlert, CircleStop, FileAudio, FileText, Hand, Link2, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentInput } from "./api";
@@ -212,7 +212,6 @@ export default function App() {
   ].sort((a, b) => b.conversation.updatedAt - a.conversation.updatedAt), [conversations, focusConversations]);
   const allTools = useMemo(() => active.messages.flatMap((message) => message.tools ?? []).reverse(), [active.messages]);
   const allArtifacts = useMemo(() => allTools.flatMap((tool) => tool.result?.artifacts ?? []), [allTools]);
-  const allCitations = useMemo(() => allTools.flatMap((tool) => tool.result?.citations ?? []), [allTools]);
 
   useLayoutEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -1059,14 +1058,6 @@ export default function App() {
               </div>
             ))}</div> : <p className="inspector-description">字幕、课件和笔记会集中显示。</p>}
           </section>
-          {!!allCitations.length && <section className="inspector-section">
-            <div className="section-title"><span>引用来源</span><small>{allCitations.length}</small></div>
-            <div className="citation-list">{allCitations.map((citation, index) => citation.url ? (
-              <a key={`${citation.id}-${index}`} href={citation.url} target="_blank" rel="noreferrer"><span>{citation.id}</span><div><strong>{citation.title}</strong><small>{citation.type}</small></div><Link2 size={14} /></a>
-            ) : (
-              <div className="citation-item" key={`${citation.id}-${index}`} title={citation.localPath}><span>{citation.id}</span><div><strong>{citation.title}</strong><small>{citation.type}</small></div></div>
-            ))}</div>
-          </section>}
         </div>
         <div className="inspector-footer"><span>课程凭据不会发送到对话内容中</span><VpnLicense /></div>
       </aside>
