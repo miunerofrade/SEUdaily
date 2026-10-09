@@ -17,7 +17,7 @@ import { conversationPath, withParents, latestDescendant } from '../../../src/sh
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
 import { ArrowUp, BookOpen, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, generateConversationTitle, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
+import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentInput } from "./api";
 import { RamDiskPanel } from "./ramdisk-panel";
 import { SidebarIcon } from "./sidebar-icons";
@@ -46,11 +46,6 @@ function loadConversations(): Conversation[] {
   } catch {
     return [createConversation()];
   }
-}
-
-function titleFromPrompt(prompt: string) {
-  const cleaned = prompt.replace(/\s+/g, " ").trim();
-  return cleaned.length > 18 ? `${cleaned.slice(0, 18)}…` : cleaned;
 }
 
 function attachmentSource(image: ImageAttachment) {
@@ -714,7 +709,6 @@ export default function App() {
     }
     const effectivePrompt = !options.preserveComposer && selectedSkill ? `请使用 ${selectedSkill} Skill 处理下面的用户要求：\n${text}` : text;
     const conversationId = active.id;
-    const firstTurn = active.messages.length === 0;
     const assistantId = uid();
     const now = Date.now();
     const attachments = options.preserveComposer ? [] : pendingImages;
@@ -731,22 +725,11 @@ export default function App() {
     }
     setConversations((current) => current.map((conversation) => conversation.id === conversationId ? {
       ...conversation,
-      title: conversation.messages.length ? conversation.title : titleFromPrompt(documents[0]?.name || text || "图片对话"),
       updatedAt: now,
       messages: [...withParents(conversation.messages), userMessage, assistantMessage], activeLeaf: assistantId,
     } : conversation));
-    const assistantText = await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent, [], undefined, undefined, !options.preserveComposer && selectedSkill ? [selectedSkill] : [], {parentMessageId: userMessage.parentId, userMessageId: userMessage.id});
-    if (firstTurn && assistantText.trim()) {
-      const titleInput = documents[0]?.name || text || attachments[0]?.name || "新对话";
-      void generateConversationTitle({ threadId: conversationId, resourceId: active.resourceId, titleInput })
-        .then((result) => {
-          if (!result.title?.trim()) return;
-          setConversations((current) => current.map((conversation) => conversation.id === conversationId
-            ? { ...conversation, title: result.title!.trim() }
-            : conversation));
-        })
-        .catch(() => undefined);
-    }
+    await executeStream(conversationId, assistantId, attachments.length ? [{ role: "user", content: messageContent(userMessage) }] : modelContent, [], undefined, undefined, !options.preserveComposer && selectedSkill ? [selectedSkill] : [], {parentMessageId: userMessage.parentId, userMessageId: userMessage.id});
+    void syncServerHistory();
   }
 
   async function handleAgentActionRequest(request: AgentActionRequest) {
@@ -979,7 +962,7 @@ export default function App() {
           {recentConversations.map(({ kind, conversation }) => (
             <div key={`${kind}-${conversation.id}`} className={`conversation-row ${kind === "focus" ? "focus-conversation" : ""} ${(kind === "chat" && view === "chat" && conversation.id === active.id) || (kind === "focus" && view === "focus" && conversation.focusId === selectedFocusId) ? "active" : ""}`}>
               <button className="conversation-item" onClick={() => kind === "focus" ? openFocusConversation(conversation.focusId || conversation.id) : (() => { setActiveId(conversation.id); setView("chat"); setNavOpen(false); })()}>
-                <span><strong>{conversation.title.replace(/^微信 · /,'')}</strong><small>{conversation.source || (conversation.resourceId==='seudaily-wechat-local' ? '微信' : '网页')}</small></span>
+                <span><strong>{conversation.title}</strong><small>{conversation.source || (conversation.resourceId==='seudaily-wechat-local' ? '微信' : '网页')}</small></span>
               </button>
               {kind === "chat" && <button
                 type="button"

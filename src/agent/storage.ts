@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { RunState, StoredMessage, Thread } from './types.js';
 import { conversationPath, branchKey, withParents } from '../shared/conversation-tree.js';
+import { initialConversationMetadata, conversationSummary } from '../shared/conversation-policy.js';
 export type Summary = {
     throughSequence: number;
     value: Record<string, any>;
@@ -86,6 +87,7 @@ export class AgentStore {
         // A crash during execution never authorizes replay of that execution.
         await this.client.execute("UPDATE runs SET status='interrupted' WHERE status='running'");
         await this.client.execute("UPDATE message_queue SET state='failed',error='服务中断，取回编辑后可重新发送' WHERE state='running'");
+
     }
     async getThreadById({ threadId, resourceId }: {
         threadId: string;
@@ -106,7 +108,7 @@ export class AgentStore {
         if (existing && existing.resourceId !== context.resourceId)
             throw new Error('会话不属于当前资源');
         const now = new Date().toISOString();
-        await this.client.execute({ sql: 'INSERT OR IGNORE INTO threads VALUES (?,?,?,?,?,?)', args: [context.threadId, context.resourceId, '', JSON.stringify({channel:context.resourceId === 'seudaily-focus-local' || context.resourceId.startsWith('focus-') ? 'program' : context.interface ?? 'web'}), now, now] });
+        await this.client.execute({ sql: 'INSERT OR IGNORE INTO threads VALUES (?,?,?,?,?,?)', args: [context.threadId, context.resourceId, '', JSON.stringify(initialConversationMetadata(context.resourceId,context.interface)), now, now] });
     }
     async patchThread({ id, title, metadata, preserveUpdatedAt = false }: {
         id: string;
@@ -123,6 +125,13 @@ export class AgentStore {
         await this.ready;
         const rows = await this.client.execute({ sql: 'SELECT * FROM threads WHERE resourceId=? ORDER BY updatedAt DESC LIMIT ? OFFSET ?', args: [resourceId, perPage, page * perPage] });
         return rows.rows.map(row => ({ ...row, metadata: JSON.parse(String(row.metadata)) })) as unknown as Thread[];
+    }
+    async listConversations(perPage = 100, page = 0) {
+        await this.ready;
+        // Filter before pagination so program threads cannot hide user conversations.
+        const rows = await this.client.execute({sql:"SELECT * FROM threads WHERE resourceId!='seudaily-focus-local' AND substr(resourceId,1,6)!='focus-' AND COALESCE(json_extract(metadata,'$.channel'),'')!='program' ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?",args:[perPage,page * perPage]});
+        return rows.rows.map(row => ({...row,metadata:JSON.parse(String(row.metadata))}) as unknown as Thread)
+            .map(conversationSummary);
     }
     async allMessages(threadId: string, resourceId: string): Promise<StoredMessage[]> {
         await this.ready;

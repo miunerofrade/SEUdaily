@@ -16,16 +16,19 @@ test('history list loads every page without fetching every conversation body', a
   const requests = [];
   globalThis.fetch = async input => {
     const url = new URL(input, 'http://localhost'); requests.push(url);
-    assert.equal(url.pathname, '/api/memory/threads');
-    const records = url.searchParams.get('resourceId') === 'seudaily-wechat-local' ? [{...thread('wechat-session'),resourceId:'seudaily-wechat-local',title:'微信 · 复习'}] : url.searchParams.get('resourceId') !== 'seudaily-web-local' ? []
-      : url.searchParams.get('page') === '0' ? Array.from({ length: 100 }, (_, i) => thread(`t${i}`)) : [thread('t100')];
+    assert.equal(url.pathname, '/app/conversations');
+    assert.equal(url.searchParams.get('resourceId'),null,'clients do not enumerate resource IDs');
+    const records = url.searchParams.get('page') === '0' ? Array.from({ length: 100 }, (_, i) => thread(`t${i}`))
+      : [thread('t100'),{...thread('wechat-session'),resourceId:'seudaily-wechat-local',title:'复习',source:'微信'},
+        {...thread('future-session'),resourceId:'future-mobile',title:'未来客户端',source:'mobile'}];
     return Response.json({ threads: records });
   };
   try {
     const conversations = await loadServerConversations();
-    assert.equal(conversations.length, 102);
-    assert.equal(requests.length, 4);
+    assert.equal(conversations.length, 103);
+    assert.equal(requests.length, 2);
     assert.equal(conversations.find(item=>item.id==='wechat-session').resourceId,'seudaily-wechat-local');
+    assert.equal(conversations.find(item=>item.id==='future-session').source,'mobile');
     assert.ok(conversations.every(item => item.messagesLoaded === false && item.messages.length === 0));
   } finally { globalThis.fetch = original; }
 });

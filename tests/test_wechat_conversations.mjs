@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AgentStore } from '../src/agent/storage.ts';
 import { AgentRuntime } from '../src/agent/runtime.ts';
+import { ensureConversationTitle } from '../src/runtime/conversation-title.ts';
 import { WeChatConversations, WECHAT_RESOURCE } from '../src/wechat/conversations.ts';
 import { WeChatRuntime } from '../src/wechat/runtime.ts';
 import { WeChatError } from '../src/wechat/protocol.ts';
@@ -26,7 +27,7 @@ async function fixture(t, options={}) {
     const text='答：'+messages.filter(message=>message.role==='user').at(-1).content;
     yield {type:'text',text};yield {type:'complete',message:{role:'assistant',content:text},finishReason:'stop'};
   },async summarize(){throw new Error('unexpected summary call');}};
-  const agent=new AgentRuntime({store,provider,tools:async()=>options.tools??{},instructions:async()=>'fixture',resolveDocuments:options.resolveDocuments});
+  const agent=new AgentRuntime({store,provider,tools:async()=>options.tools??{},instructions:async()=>'fixture',resolveDocuments:options.resolveDocuments,onCompleted:run=>ensureConversationTitle({threadId:run.context.threadId,resourceId:run.context.resourceId},{store,request:async text=>text})});
   let permission = 'normal';
   const permissionChanges = [];
   const conversations=new WeChatConversations(store,agent,{get:()=>permission,set:async mode=>{permission=mode;permissionChanges.push(mode);}});
@@ -105,7 +106,8 @@ test('new sessions and help stay responsive during a slow answer, which retains 
   assert.match(await f.reply(f.send('/new 周末')[0]),/#2/);
   assert.match(await f.reply(f.send('/help')[0]),/微信聊天/);
   assert.equal(await f.reply(f.send('安排周末')[0]),'完成：安排周末');
-  release();assert.match(await f.reply(old),/来自「慢慢整理课程」\n\n完成：慢慢整理课程/);
+  // Naming is asynchronous; the reply must not wait for the naming request.
+  release();assert.match(await f.reply(old),/来自「(?:新对话|慢慢整理课程)」\n\n完成：慢慢整理课程/);
   assert.equal((await f.status()).currentSession.number,2);
   assert.equal(f.replies.find(reply=>reply.context_token==='route-'+old).to_user_id,account.userId);
 });
@@ -413,10 +415,9 @@ for(const order of ['text-first','files-first'])test('retroactive attachment '+o
 test('new WeChat sessions rename on the first message and explicit names survive restart',async t=>{
   const f=await fixture(t);
   await f.reply(f.send('/new')[0]);await f.reply(f.send('整理我的复习安排')[0]);
-  assert.equal((await f.status()).currentSession.title,'微信 · 整理我的复习安排');
+  assert.equal((await f.status()).currentSession.title,'整理我的复习安排');
   const thread=(await f.status()).currentSession.threadId;
-  await f.store.client.execute({sql:"UPDATE threads SET title='微信 · 新对话' WHERE id=?",args:[thread]});
-  await f.restart();assert.equal((await f.status()).currentSession.title,'微信 · 整理我的复习安排');
+  await f.restart();assert.equal((await f.status()).currentSession.title,'整理我的复习安排');
   await f.reply(f.send('/new 新对话')[0]);await f.reply(f.send('不要覆盖我的名字')[0]);await f.restart();
-  assert.equal((await f.status()).currentSession.title,'微信 · 新对话');
+  assert.equal((await f.status()).currentSession.title,'新对话');
 });

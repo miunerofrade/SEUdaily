@@ -4,10 +4,10 @@ import type { Conversation } from './types';
 export function mergeServerConversation(remote: Conversation, local?: Conversation): Conversation {
   if (!local) return remote;
   if (local.messages.some(message => message.streaming) || local.updatedAt > remote.updatedAt) {
-    return { ...local, title: remote.title };
+    return { ...local, title: remote.title, source: remote.source };
   }
   if (local.messagesLoaded !== false && local.updatedAt === remote.updatedAt) {
-    return { ...local, title: remote.title, activeLeaf: remote.activeLeaf ?? local.activeLeaf };
+    return { ...local, title: remote.title, source: remote.source, activeLeaf: remote.activeLeaf ?? local.activeLeaf };
   }
   return remote;
 }

@@ -72,9 +72,6 @@ export class Session extends EventEmitter {
   catalog: any[] = [];
   threads: any[] = [];
   resumePickerRequested = 0;
-  private titleTasks = new Map<string, Promise<void>>();
-  private titleQueue = Promise.resolve();
-  private namedThreads = new Set<string>();
   messages: TerminalMessage[] = [];
   copyOnSelect = false;
   reasoningExpanded = false;
@@ -557,9 +554,7 @@ export class Session extends EventEmitter {
     this.page = "chat";
     this.resumePickerRequested++;
     this.changed();
-    for (const thread of this.threads)
-      if (!thread.title?.trim())
-        this.nameThread(thread.id, thread.resourceId, "新对话");
+
   }
   requestDeleteThread(id: string) {
     const thread = this.threads.find((item) => item.id === id);
@@ -569,40 +564,6 @@ export class Session extends EventEmitter {
       thread,
       `删除会话「${clean(thread.title || "未命名")}」及其全部消息？`,
     );
-  }
-  private nameThread(threadId: string, resourceId: string, titleInput: string) {
-    if (this.titleTasks.has(threadId) || this.namedThreads.has(threadId))
-      return;
-    const task = this.titleQueue
-      .then(async () => {
-        const result = await this.client.json(
-          "/app/conversations/title",
-          "POST",
-          {
-            threadId,
-            resourceId,
-            titleInput,
-          },
-          AbortSignal.timeout(35_000),
-        );
-        if (result.title?.trim()) {
-          this.namedThreads.add(threadId);
-          this.threads = this.threads.map((thread) =>
-            thread.id === threadId
-              ? { ...thread, title: clean(result.title) }
-              : thread,
-          );
-          this.changed();
-        }
-      })
-      .catch(() => {
-        /* A title failure must not interrupt chat; opening the list retries. */
-      })
-      .finally(() => {
-        this.titleTasks.delete(threadId);
-      });
-    this.titleTasks.set(threadId, task);
-    this.titleQueue = task;
   }
   async resume(target: string) {
     const latest = target === "latest";
@@ -679,8 +640,6 @@ export class Session extends EventEmitter {
     approval = false,
     focusOptions = { respectInterval: false },
   ): Promise<number> {
-    const titleThreadId = this.threadId,
-      titleResourceId = this.resource;
     if (this.pending && !approval)
       throw new Error("当前会话有待审批工具，请使用 /approve 或 /reject");
     const turnImages = this.images,
@@ -829,8 +788,6 @@ export class Session extends EventEmitter {
         }
         this.changed();
       }
-      if (!code && message.text.trim() && typeof text === "string")
-        this.nameThread(titleThreadId, titleResourceId, text);
       return code;
     } catch (error) {
       if (controller.signal.aborted) {

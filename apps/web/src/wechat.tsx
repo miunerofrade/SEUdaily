@@ -46,7 +46,7 @@ export function WeChatPanel() {
         </form>}
         {status?.state === 'connected' && <div className="wechat-connected">
           <p>在微信发送消息开始聊天。</p>
-          <p className="inspector-description">当前会话：{status.currentSession?.title?.replace(/^微信 · /,'') ?? '首次发消息时创建'}</p>
+          <p className="inspector-description">当前会话：{status.currentSession?.title ?? '首次发消息时创建'}</p>
           <p className="inspector-description">发送 /help 查看命令，/new 开始新会话。完整记录可在左侧会话列表查看。</p>
         </div>}
         {(error || pollError || status?.error) && <p className="disk-error" role="alert">{error || pollError || status?.error}</p>}

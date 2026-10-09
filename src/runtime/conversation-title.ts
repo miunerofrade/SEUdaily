@@ -1,11 +1,11 @@
 import type { AgentStore } from "../agent/storage.js";
-import { agentStore } from "./storage.js";
+import { isProgramConversation } from '../shared/conversation-policy.js';
 export const titleGenerationTasks = new Map<
   string,
   Promise<{ title: string; generated: boolean; reason?: string }>
 >();
 
-export function compactTitleInput(value: unknown) {
+function compactTitleInput(value: unknown) {
   return typeof value === "string"
     ? value.replace(/\s+/g, " ").trim().slice(0, 600)
     : "";
@@ -73,23 +73,31 @@ async function requestConversationTitle(titleInput: string) {
   return title;
 }
 
-type TitleInput = { threadId: string; resourceId: string; titleInput: string };
+type TitleInput = { threadId: string; resourceId: string };
 type TitleDependencies = { store?: AgentStore; request?: (text: string) => Promise<string> };
 
 function messageText(content: any): string {
-  if (typeof content === "string") return compactTitleInput(content);
+  if (typeof content === "string") return compactTitleInput(content.split('<!-- seudaily:documents -->')[0]);
   const parts = Array.isArray(content) ? content : content?.parts ?? [];
-  return compactTitleInput(parts.filter((part: any) => part.type === "text").map((part: any) => part.text ?? "").join("\n"));
+  return compactTitleInput(parts.filter((part: any) => part.type === "text").map((part: any) => part.text ?? "").join("\n").split('<!-- seudaily:documents -->')[0]);
+}
+
+function attachmentName(content: any): string {
+  const parts = Array.isArray(content) ? content : content?.parts ?? [];
+  const file = parts.find((part:any) => part.type === 'file' && part.filename);
+  if (file) return compactTitleInput(file.filename);
+  const text = typeof content === 'string' ? content : parts.filter((part:any)=>part.type === 'text').map((part:any)=>part.text ?? '').join('\n');
+  return compactTitleInput(text.match(/【附件：([^】]+)】/)?.[1]);
 }
 
 export function hasConversationTopic(text: string): boolean {
   const value = text.trim().replace(/[\s，。！？!?、,.：:；;～~]+/g, "").toLowerCase();
   return Boolean(value) && !/^(你好|您好|嗨|哈喽|hello|hi|hey|在吗|你是谁|介绍一下自己|谢谢|继续|好的|ok)$/.test(value)
-    && !/^\/|^<\/?(?:upload|attachment)>/i.test(text.trim());
+    && !/^\/|^<\/?(?:upload|attachment)>|^\[SEUDAILY_AUTH_RESUME\b/i.test(text.trim());
 }
 
-/** All entrances share background naming, including deduplication of client requests. */
-export function generateFirstTurnTitle(input: TitleInput, dependencies: TitleDependencies = {}) {
+/** All entrances share background naming, including deduplication of concurrent completions. */
+export function ensureConversationTitle(input: TitleInput, dependencies: TitleDependencies = {}) {
   const key = `${input.resourceId}:${input.threadId}`;
   const running = titleGenerationTasks.get(key);
   if (running) return running;
@@ -99,22 +107,23 @@ export function generateFirstTurnTitle(input: TitleInput, dependencies: TitleDep
 }
 
 async function generateTitle(input: TitleInput, dependencies: TitleDependencies) {
-  const memoryStore = dependencies.store ?? agentStore;
+  const memoryStore = dependencies.store ?? (await import('./storage.js')).agentStore;
   const getThread = () => memoryStore.getThreadById({threadId:input.threadId,resourceId:input.resourceId});
   const thread = await getThread();
   if (!thread) return {title:"",generated:false,reason:"thread-not-found"};
+  if (isProgramConversation(thread.resourceId,thread.metadata?.channel))
+    return {title:thread.title ?? '',generated:false,reason:'program-title'};
   if (thread.metadata?.titleManual) return {title:thread.title ?? "",generated:false,reason:"manual-title"};
   if (typeof thread.metadata?.titleGeneratedAt === "string")
     return {title:thread.title ?? "",generated:false,reason:"already-generated"};
   const history = await memoryStore.allMessages(input.threadId,input.resourceId);
   const users = history.filter(message => message.role === "user");
   if (!users.length) return {title:thread.title ?? "",generated:false,reason:"no-user-message"};
-  // Preserve pre-existing named histories, while recovering WeChat's old temporary titles.
-  if (users.length !== 1 && thread.title?.trim() && !thread.metadata?.titleProvisional
-      && input.resourceId !== "seudaily-wechat-local")
-    return {title:thread.title,generated:false,reason:"not-first-turn"};
+  // Old unmarked titles are preserved; every new client gets the same provisional state.
+  if (thread.title?.trim() && !thread.metadata?.titleProvisional)
+    return {title:thread.title,generated:false,reason:"existing-title"};
   const topic = users.map(message => messageText(message.content)).find(hasConversationTopic);
-  const titleInput = topic || (hasConversationTopic(input.titleInput) ? input.titleInput : "");
+  const titleInput = topic || users.map(message=>attachmentName(message.content)).find(Boolean) || '';
   if (!titleInput) {
     await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,metadata:{...thread.metadata,titleProvisional:true}});
     return {title:thread.title ?? "",generated:false,reason:"waiting-for-topic"};
@@ -132,6 +141,7 @@ async function generateTitle(input: TitleInput, dependencies: TitleDependencies)
   if (!latest) return {title:"",generated:false,reason:"thread-not-found"};
   if (latest.metadata?.titleManual || latest.metadata?.titleGeneratedAt)
     return {title:latest.title ?? "",generated:false,reason:"title-changed"};
-  await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,title,metadata:{...latest.metadata,titleProvisional:false,titleGenerationError:undefined,titleGeneratedAt:new Date().toISOString()}});
+  const generatedAt = new Date().toISOString();
+  await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,title,metadata:{...latest.metadata,titleProvisional:false,titleGenerationError:undefined,titleGeneratedAt:generatedAt,titleUpdatedAt:generatedAt}});
   return {title,generated:true};
 }

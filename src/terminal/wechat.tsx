@@ -54,7 +54,7 @@ export function WeChatApp() {
         {width - 6 < qr.size + 8 || stdout.rows < requiredRows ? <Text color="yellow">请扩大终端窗口，或打开 seudaily web 扫码。</Text> : <Text color="black" backgroundColor="white">{terminalWeChatQR(qr)}</Text>}
       </Box>}
       {status?.state === 'need_verifycode' && <Box marginTop={1}><Text>验证码  {code || '等待输入'} <Text dimColor>↵ 提交</Text></Text></Box>}
-      {connected && <Box marginTop={1}><Text dimColor>当前会话  </Text><Text>{clean(status.currentSession?.title ?? '首次发消息时创建').replace(/^微信 · /,'')}</Text></Box>}
+      {connected && <Box marginTop={1}><Text dimColor>当前会话  </Text><Text>{clean(status.currentSession?.title ?? '首次发消息时创建')}</Text></Box>}
       {(error || status?.error) && <Box marginTop={1}><Text color="red">{clean(error || status?.error)}</Text></Box>}
     </Box>
     <Box marginTop={1}><Text dimColor>{connected ? 'R 刷新状态' : 'Ctrl+R 刷新二维码'} · Esc 关闭界面</Text></Box>

@@ -17,43 +17,12 @@ import {
 } from "./local-action-schema.js";
 import { executeAuthResume } from "./auth-resume-store.js";
 import {
-  compactTitleInput,
-  generateFirstTurnTitle,
-} from "./conversation-title.js";
-import {
   FOCUS_RESOURCE_ID,
   resultResponse,
   fullResultData,
 } from "./app-route-helpers.js";
 
 export const conversationsRoutes = [
-  registerApiRoute("/app/conversations/title", {
-    method: "POST",
-    requiresAuth: false,
-    handler: async (c: any) => {
-      const body = (await c.req.json()) as Record<string, unknown>;
-      const threadId = compactTitleInput(body.threadId);
-      const resourceId = compactTitleInput(body.resourceId);
-      const titleInput = compactTitleInput(body.titleInput);
-      if (!threadId || !resourceId || !titleInput) {
-        return c.json({ error: "缺少生成标题所需的信息" }, 400);
-      }
-      const task = generateFirstTurnTitle({threadId,resourceId,titleInput});
-      try {
-        return c.json(await task);
-      } catch (error) {
-        return c.json(
-          {
-            title: "",
-            generated: false,
-            reason: "generation-failed",
-            error: error instanceof Error ? error.message : "标题生成失败",
-          },
-          502,
-        );
-      }
-    },
-  }),
   registerApiRoute("/app/action-requests/:id/activate", {
     method: "POST",
     requiresAuth: false,

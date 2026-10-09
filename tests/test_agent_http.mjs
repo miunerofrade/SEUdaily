@@ -72,6 +72,14 @@ test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async
  assert.equal(await readFile(join(root,'AGENT.md'),'utf8'),'FIXTURE_AGENT_RULE');
  assert.equal((await (await request('/app/settings')).json()).agentInstructions,'FIXTURE_AGENT_RULE');
  assert.match(await agentInstructions({threadId:'x',resourceId:'x',runToken:'x'}),/FIXTURE_AGENT_RULE/);
+ await agentStore.ensureThread({threadId:'new-mobile-fixture',resourceId:'new-mobile-resource',interface:'mobile'});
+ await agentStore.ensureThread({threadId:'focus-hidden-fixture',resourceId:'focus-hidden'});
+ const conversations=await (await request('/app/conversations?perPage=100&page=0')).json();
+ const mobile=conversations.threads.find(item=>item.id==='new-mobile-fixture');
+ assert.equal(mobile.title,'新对话');assert.equal(mobile.source,'mobile');
+ assert.equal(mobile.metadata.titleProvisional,true);
+ assert.ok(!conversations.threads.some(item=>item.id==='focus-hidden-fixture'));
+ assert.equal((await request('/app/conversations/title',{threadId:'new-mobile-fixture',resourceId:'new-mobile-resource'})).status,404);
  let executed=0,step=0;
  agentRuntime.config.tools=async()=>({probe:{id:'probe',description:'fixture',inputSchema:z.object({password:z.string()}),requireApproval:true,execute:async()=>{executed++;return {status:'completed'};}}});
  agentRuntime.config.provider={async *stream(){step++;yield {type:'complete',message:step%2?{role:'assistant',content:null,tool_calls:[{id:randomUUID(),type:'function',function:{name:'probe',arguments:'{"password":"fixture-private"}'}}]}:{role:'assistant',content:'done'}};}};

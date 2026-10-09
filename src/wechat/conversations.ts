@@ -1,3 +1,4 @@
+import { DEFAULT_CONVERSATION_TITLE, initialConversationMetadata } from '../shared/conversation-policy.js';
 import type { ReceivedWeChatFile } from "./runtime.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AgentStore, threadDeletionStatements } from "../agent/storage.js";
@@ -154,28 +155,7 @@ export class WeChatConversations {
       "CREATE TABLE IF NOT EXISTS wechat_current (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, PRIMARY KEY(account,peer))",
       "CREATE TABLE IF NOT EXISTS wechat_delete_confirmations (account TEXT NOT NULL, peer TEXT NOT NULL, threadId TEXT NOT NULL, number INTEGER NOT NULL, expiresAt INTEGER NOT NULL, PRIMARY KEY(account,peer))",
     ]);
-    const unnamed = (
-      await this.store.client.execute({
-        sql: "SELECT id,metadata FROM threads WHERE resourceId=? AND title='微信 · 新对话'",
-        args: [WECHAT_RESOURCE],
-      })
-    ).rows;
-    for (const thread of unnamed) {
-      if (JSON.parse(String(thread.metadata)).titleManual) continue;
-      const first = await this.store.firstUserMessage(
-        String(thread.id),
-        WECHAT_RESOURCE,
-      );
-      const text = first ? visible(first).trim() : "";
-      if (text && !/^\/|<\/?(?:upload|attachment)>/i.test(text))
-        await this.store.client.execute({
-          sql: "UPDATE threads SET title=? WHERE id=?",
-          args: [
-            "微信 · " + clip(text.replace(/\s+/g, " "), 24),
-            String(thread.id),
-          ],
-        });
-    }
+
   }
   async current(account: BotAccount) {
     const result = await this.store.client.execute({
@@ -187,7 +167,7 @@ export class WeChatConversations {
       ? {
           number: Number(row.number),
           threadId: String(row.id),
-          title: String(row.title || "微信 · 新对话"),
+          title: String(row.title || DEFAULT_CONVERSATION_TITLE),
         }
       : undefined;
   }
@@ -307,19 +287,8 @@ export class WeChatConversations {
           ).rows[0].n,
         );
         threadId = "wechat-" + randomUUID();
-        const title =
-          "微信 · " +
-          (name === "new" && argument
-            ? clip(argument.replace(/\s+/g, " "), 40)
-            : !command
-              ? clip(
-                  (
-                    text ||
-                    (JSON.parse(row.files || "[]")[0]?.file_name ?? "上传文件")
-                  ).replace(/\s+/g, " "),
-                  24,
-                )
-              : "新对话");
+        const manual = name === "new" && Boolean(argument);
+        const title = manual ? clip(argument.replace(/\s+/g, " "), 40) : DEFAULT_CONVERSATION_TITLE;
         const now = new Date().toISOString();
         await tx.execute({
           sql: "INSERT INTO threads VALUES(?,?,?,?,?,?)",
@@ -327,10 +296,7 @@ export class WeChatConversations {
             threadId,
             WECHAT_RESOURCE,
             title,
-            JSON.stringify({
-              channel: "wechat",
-              titleManual: name === "new" && Boolean(argument),
-            }),
+            JSON.stringify(initialConversationMetadata(WECHAT_RESOURCE, "wechat", manual)),
             now,
             now,
           ],
@@ -344,25 +310,7 @@ export class WeChatConversations {
           args: [account.botId, account.userId, threadId],
         });
         if (name === "new")
-          reply = `已新建 #${number}「${title.replace(/^微信 · /, "")}」\n直接发消息开始聊天。旧会话已保留，/sessions 可查看。`;
-      }
-      if (!command && text && !hasFiles) {
-        const named = (
-          await tx.execute({
-            sql: "SELECT title,metadata FROM threads WHERE id=?",
-            args: [threadId],
-          })
-        ).rows[0];
-        if (
-          named &&
-          /^微信 · 新对话$/.test(String(named.title)) &&
-          !JSON.parse(String(named.metadata)).titleManual
-        ) {
-          await tx.execute({
-            sql: "UPDATE threads SET title=? WHERE id=?",
-            args: ["微信 · " + clip(text.replace(/\s+/g, " "), 24), threadId],
-          });
-        }
+          reply = `已新建 #${number}「${title}」\n直接发消息开始聊天。旧会话已保留，/sessions 可查看。`;
       }
       const batch = (
         await tx.execute({
@@ -541,7 +489,7 @@ export class WeChatConversations {
                 .slice(0, 10)
                 .map(
                   (session) =>
-                    `${session.threadId === threadId ? "★" : "·"} #${session.number} ${clip(String(session.title || "新对话").replace(/^微信 · /, ""), 40)}`,
+                    `${session.threadId === threadId ? "★" : "·"} #${session.number} ${clip(String(session.title || "新对话"), 40)}`,
                 )
                 .join("\n") +
               `\n\n/use 编号 切换` +
@@ -599,7 +547,7 @@ export class WeChatConversations {
           reply = "已取消删除，会话已保留。";
         } else {
           const id = String(target.threadId),
-            label = `#${target.number}「${clip(String(target.title || "新对话").replace(/^微信 · /, ""), 40)}」`;
+            label = `#${target.number}「${clip(String(target.title || "新对话"), 40)}」`;
           const running =
             this.agent.isActive(id) ||
             (
@@ -706,7 +654,7 @@ export class WeChatConversations {
         args: [row.threadId],
       })
     ).rows[0]?.number;
-    const heading = `#${number}「${String(thread.title || "新对话").replace(/^微信 · /, "")}」`;
+    const heading = `#${number}「${String(thread.title || "新对话")}」`;
     if (row.reply.startsWith("@use:")) {
       const last = (await this.history(row.threadId)).messages
         .filter((message) => visible(message))
@@ -940,6 +888,6 @@ export class WeChatConversations {
       threadId,
       resourceId: WECHAT_RESOURCE,
     });
-    return String(thread?.title || "旧会话").replace(/^微信 · /, "");
+    return String(thread?.title || "旧会话");
   }
 }

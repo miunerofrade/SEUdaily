@@ -4,7 +4,6 @@ import type { AgentProcessEntry, ChatMessage, Conversation, DocumentAttachment, 
 
 const AGENT_ENDPOINT = "/api/agents/seudaily-agent/stream";
 export const RESOURCE_ID = "seudaily-web-local";
-const HISTORY_RESOURCES = [RESOURCE_ID, "cvstream-web-local", "seudaily-wechat-local"];
 const DOCUMENT_SECTION_MARKER = "\n\n<!-- seudaily:documents -->";
 const LEGACY_DOCUMENT_SECTION_MARKERS = ["\n\n<!-- cvstream:documents -->"];
 
@@ -184,13 +183,14 @@ export function executeAgentActionRequest(id: string) {
 type StoredThread = {
   id: string;
   title?: string;
+  source?: string;
   resourceId: string;
   createdAt: string;
   updatedAt: string;
   metadata?: { activeLeaf?: string; channel?:string };
 };
 
-function threadSource(thread: StoredThread) {return thread.resourceId==='seudaily-wechat-local' ? '微信' : thread.metadata?.channel==='cli' ? '终端' : thread.metadata?.channel==='program' || thread.resourceId==='seudaily-focus-local' || thread.resourceId.startsWith('focus') ? '程序' : thread.metadata?.channel==='web' ? '网页' : '本地';}
+function threadSource(thread: StoredThread) { return thread.source ?? "本地"; }
 
 type StoredMessage = {
   id: string;
@@ -401,20 +401,16 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
 }
 
 export async function loadServerConversations(): Promise<Conversation[]> {
-  const threadGroups = await Promise.all(HISTORY_RESOURCES.map(async (resourceId) => {
-    const threads: StoredThread[] = [];
-    for (let page = 0; ; page++) {
-      const query = new URLSearchParams({ resourceId, perPage: "100", page: String(page) });
-      const response = await fetch(`/api/memory/threads?${query}`);
-      if (!response.ok) throw new Error(`加载会话列表失败（${response.status}）`);
-      const data = await response.json() as { threads: StoredThread[] };
-      if (!Array.isArray(data.threads)) throw new Error("无效会话列表响应");
-      threads.push(...data.threads);
-      if (data.threads.length < 100) break;
-    }
-    return threads;
-  }));
-  return threadGroups.flat().map(thread => ({
+  const threads: StoredThread[] = [];
+  for (let page = 0; ; page++) {
+    const response = await fetch(`/app/conversations?perPage=100&page=${page}`);
+    if (!response.ok) throw new Error(`加载会话列表失败（${response.status}）`);
+    const data = await response.json() as {threads:StoredThread[]};
+    if (!Array.isArray(data.threads)) throw new Error("无效会话列表响应");
+    threads.push(...data.threads);
+    if (data.threads.length < 100) break;
+  }
+  return threads.map(thread => ({
     id: thread.id, source:threadSource(thread), resourceId: thread.resourceId, title: thread.title?.trim() || "新对话",
     createdAt: Date.parse(thread.createdAt), updatedAt: Date.parse(thread.updatedAt),
     activeLeaf: thread.metadata?.activeLeaf, messages: [], messagesLoaded: false,
@@ -435,21 +431,6 @@ export async function deleteServerConversation(threadId: string, resourceId?: st
     const detail = await response.text();
     throw new Error(detail || "删除会话失败");
   }
-}
-
-export async function generateConversationTitle(input: {
-  threadId: string;
-  resourceId?: string;
-  titleInput: string;
-}) {
-  const response = await fetch("/app/conversations/title", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, resourceId: input.resourceId ?? RESOURCE_ID }),
-  });
-  const result = await response.json() as { title?: string; generated?: boolean; reason?: string; error?: string };
-  if (!response.ok) throw new Error(result.error || "标题生成失败");
-  return result;
 }
 
 export type ScheduleCourse = {

@@ -19,7 +19,7 @@ import type { ModelMessage, TurnContext } from '../agent/types.js';
 import { inferToolNamespaces } from '../agent/namespaces.js';
 import { skillCatalog } from '../runtime/skills.js';
 const identifier = z.string().min(1).max(200);
-const contextSchema = z.object({ threadId: identifier, resourceId: identifier, runToken: identifier, namespaces: z.array(z.string()).max(8).default([]), skills: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/)).max(8).default([]), interface: z.enum(['web', 'cli']).default('web'), documentRefs: z.array(z.string()).max(MAX_ATTACHMENTS).default([]), authResumeId: z.string().optional(), parentMessageId: identifier.nullable().optional(), userMessageId: identifier.optional(), assistantMessageId: identifier.optional(), regenerateFrom: identifier.optional() });
+const contextSchema = z.object({ threadId: identifier, resourceId: identifier, runToken: identifier, namespaces: z.array(z.string()).max(8).default([]), skills: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/)).max(8).default([]), interface: z.string().regex(/^[a-z][a-z0-9-]{0,79}$/).default('web'), documentRefs: z.array(z.string()).max(MAX_ATTACHMENTS).default([]), authResumeId: z.string().optional(), parentMessageId: identifier.nullable().optional(), userMessageId: identifier.optional(), assistantMessageId: identifier.optional(), regenerateFrom: identifier.optional() });
 export const app = new Hono();
 app.use('*', guardLocalRequests);
 app.use('*', cors({ origin: localOrigins }));
@@ -32,6 +32,9 @@ installKnowledgeRoutes(app);
 app.get('/api/agents', async (c) => { await agentStore.ready; return c.json({ 'seudaily-agent': { id: 'seudaily-agent', name: 'SEUdaily' } }); });
 app.get('/app/health', async (c) => { await agentStore.ready; await agentStore.client.execute('SELECT 1'); return c.json({ status: 'ready' }); });
 app.get('/app/agent-info', c => c.json({ model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash', effort: DEFAULT_REASONING_EFFORT }));
+app.get('/app/conversations', async c => c.json({threads:await agentStore.listConversations(
+    Math.min(100,Math.max(1,Number(c.req.query('perPage')) || 100)),
+    Math.max(0,Number(c.req.query('page')) || 0))}));
 app.get('/app/skills', async c => c.json({ skills: await skillCatalog.list() }));
 for (const route of appRoutes)
     app.on(route.method, route.path, route.handler);

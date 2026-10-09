@@ -109,14 +109,11 @@ export class Client {
   }
   async threads(): Promise<any[]> {
     const result: any[] = [];
-    for (const resource of [RESOURCE, "cvstream-web-local", "seudaily-wechat-local"])
-      for (let page = 0; ; page++) {
-        const data = await this.json(
-          `/api/memory/threads?resourceId=${resource}&page=${page}&perPage=100`,
-        );
-        result.push(...data.threads);
-        if (data.threads.length < 100) break;
-      }
+    for (let page = 0; ; page++) {
+      const data = await this.json(`/app/conversations?page=${page}&perPage=100`);
+      result.push(...data.threads);
+      if (data.threads.length < 100) break;
+    }
     return result.sort((a, b) =>
       String(b.updatedAt).localeCompare(String(a.updatedAt)),
     );
