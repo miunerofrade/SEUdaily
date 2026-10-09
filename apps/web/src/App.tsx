@@ -12,6 +12,7 @@ import { packageDocumentContent } from '../../../src/shared/document-content';
 import { useImeComposition } from "./ime";
 import { PromptVersions } from "./prompt-versions";
 import { messageContent, editedDocumentContent, writeConversationCache } from "./conversation-cache";
+import { mergeServerConversation } from "./conversation-sync";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
 import { ArrowUp, BookOpen, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
@@ -255,12 +256,7 @@ export default function App() {
           // active. The server snapshot is intentionally behind at that point and
           // replacing the local messages would also discard the local assistant ID,
           // causing all subsequent stream events to be ignored.
-          if (local.messages.some((message) => message.streaming) || local.updatedAt > conversation.updatedAt) return local;
-          // Metadata refreshes must retain complete loaded trees and attachment IDs.
-          if (local.messagesLoaded !== false && local.updatedAt === conversation.updatedAt) {
-            return { ...local, title: conversation.title, activeLeaf: conversation.activeLeaf ?? local.activeLeaf };
-          }
-          return conversation;
+          return mergeServerConversation(conversation, local);
         });
         const merged = [...hydrated, ...localTransient].sort((a, b) => b.updatedAt - a.updatedAt);
         return merged.length ? merged : [createConversation()];
@@ -277,7 +273,7 @@ export default function App() {
     void loadConversationMessages(activeRaw).then(loaded => {
       if (cancelled) return;
       setConversations(current => current.map(item => item.id === activeRaw.id
-        ? loaded ?? { ...item, messagesLoaded: true } : item));
+        ? loaded ? { ...loaded, title: item.title } : { ...item, messagesLoaded: true } : item));
     }).catch(error => { if (!cancelled) setConversationError(error instanceof Error ? error.message : "会话历史加载失败"); });
     return () => { cancelled = true; };
   }, [activeRaw.id, activeRaw.messagesLoaded, activeRaw.updatedAt, historyReload]);
@@ -313,7 +309,10 @@ export default function App() {
     const handleVisibility = () => { if (document.visibilityState === "visible") void syncServerHistory(); };
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
+    // Background naming (including WeChat) may finish after the run stream ends.
+    const timer = window.setInterval(handleVisibility, 10000);
     return () => {
+      window.clearInterval(timer);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
