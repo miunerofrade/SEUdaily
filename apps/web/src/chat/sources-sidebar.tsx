@@ -1,11 +1,9 @@
 import {BookOpen,Link2,X} from "lucide-react";
 import {useEffect,useRef} from "react";
 import {libraryPreviewUrl} from "../api";
-import type {Citation,ChatMessage} from "../types";
+import type {Citation} from "../types";
+export {messageSources} from "./sources";
 
-export function messageSources(message: ChatMessage): Citation[] {
-  return Array.from(new Map((message.tools ?? []).flatMap(tool => tool.result?.citations ?? []).map(citation => [citation.url ?? citation.localPath ?? citation.title, citation])).values());
-}
 
 export function SourcesSidebar({ sources, onClose }: { sources: Citation[]; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
