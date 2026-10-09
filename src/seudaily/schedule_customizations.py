@@ -1,4 +1,5 @@
 """Local timetable edits and overlays."""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +8,7 @@ import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+
 
 def _source_key(course: dict[str, Any]) -> str:
     """Identity for user overlays that excludes mutable room/week metadata."""
@@ -51,9 +53,15 @@ def _load_customizations(self) -> dict[str, Any]:
         **defaults,
         **saved,
         "semester": {**defaults["semester"], **(saved.get("semester") or {})},
-        "overrides": saved.get("overrides") if isinstance(saved.get("overrides"), dict) else {},
-        "customCourses": saved.get("customCourses") if isinstance(saved.get("customCourses"), list) else [],
-        "dateOverrides": saved.get("dateOverrides") if isinstance(saved.get("dateOverrides"), list) else [],
+        "overrides": saved.get("overrides")
+        if isinstance(saved.get("overrides"), dict)
+        else {},
+        "customCourses": saved.get("customCourses")
+        if isinstance(saved.get("customCourses"), list)
+        else [],
+        "dateOverrides": saved.get("dateOverrides")
+        if isinstance(saved.get("dateOverrides"), list)
+        else [],
     }
 
 
@@ -62,13 +70,25 @@ def _valid_iso_date(value: Any, field: str, *, optional: bool = False) -> str:
     if optional and not text:
         return ""
     try:
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            raise ValueError()
         date.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(f"{field} 必须是 YYYY-MM-DD 日期") from exc
     return text
 
 
-def _normalize_editable_course(course: dict[str, Any], *, custom: bool) -> dict[str, Any]:
+def _normalize_editable_course(
+    course: dict[str, Any], *, custom: bool
+) -> dict[str, Any]:
+    from .local_operations import CONTRACT, validate_parameters
+
+    fields = CONTRACT["schemas"]["schedule"]["properties"]["course"]["properties"]
+    normalized_input = validate_parameters(
+        "schedule",
+        {"course": {key: value for key, value in course.items() if key in fields}},
+    )["course"]
+    course = {**course, **normalized_input}
     name = str(course.get("courseName") or "").strip()
     if not name:
         raise ValueError("courseName 不能为空")
@@ -104,6 +124,16 @@ def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
     semester_input = payload.get("semester", current["semester"])
     if not isinstance(semester_input, dict):
         raise ValueError("semester 必须是对象")
+    from .local_operations import validate_parameters
+
+    if "semester" in payload:
+        changes = {
+            key: value
+            for key, value in semester_input.items()
+            if key != "startDate" or value != ""
+        }
+        if changes:
+            validate_parameters("schedule", {"semester": changes})
     total_weeks = int(semester_input.get("totalWeeks", 16))
     if not 1 <= total_weeks <= 30:
         raise ValueError("totalWeeks 必须在 1 到 30 之间")
@@ -120,20 +150,40 @@ def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("overrides 必须是对象")
     overrides: dict[str, Any] = {}
     allowed = {
-        "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
-        "weeks", "classroom", "courseCode", "hidden",
+        "courseName",
+        "teacherName",
+        "weekday",
+        "startPeriod",
+        "endPeriod",
+        "weeks",
+        "classroom",
+        "courseCode",
+        "hidden",
     }
     for source_key, raw in overrides_input.items():
         if not str(source_key).startswith("source-") or not isinstance(raw, dict):
             raise ValueError("overrides 包含无效的课程标识")
-        overrides[str(source_key)] = {key: value for key, value in raw.items() if key in allowed}
+        changes = {
+            key: value
+            for key, value in raw.items()
+            if key in allowed and key != "hidden"
+        }
+        if "overrides" in payload and changes:
+            changes = validate_parameters("schedule", {"changes": changes})["changes"]
+        if "hidden" in raw and not isinstance(raw["hidden"], bool):
+            raise ValueError("hidden 必须是布尔值")
+        overrides[str(source_key)] = {
+            **changes,
+            **({"hidden": raw["hidden"]} if "hidden" in raw else {}),
+        }
 
     custom_input = payload.get("customCourses", current["customCourses"])
     if not isinstance(custom_input, list):
         raise ValueError("customCourses 必须是数组")
     custom_courses = [
         self._normalize_editable_course(item, custom=True)
-        for item in custom_input if isinstance(item, dict)
+        for item in custom_input
+        if isinstance(item, dict)
     ]
 
     date_input = payload.get("dateOverrides", current["dateOverrides"])
@@ -176,17 +226,30 @@ def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
 
 def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
     from .local_operations import schedule_payload
+
     payload = schedule_payload(payload)
     operation = payload["operation"]
-    return _CHANGE_HANDLERS[operation](self, payload, self._load_customizations(), operation)
+    return _CHANGE_HANDLERS[operation](
+        self, payload, self._load_customizations(), operation
+    )
 
 
 def _change_semester(self, payload, current, operation):
     changes = payload.get("semester")
-    if not isinstance(changes, dict) or not changes or set(changes) - {"name", "startDate", "totalWeeks"}:
+    if (
+        not isinstance(changes, dict)
+        or not changes
+        or set(changes) - {"name", "startDate", "totalWeeks"}
+    ):
         raise ValueError("学期设置需提供 name、startDate 或 totalWeeks")
-    result = self.save_customizations({**current, "semester": {**current["semester"], **changes}})
-    return {**result, "message": "学期设置已更新。", "change": {"operation": operation, "semester": changes}}
+    result = self.save_customizations(
+        {**current, "semester": {**current["semester"], **changes}}
+    )
+    return {
+        **result,
+        "message": "学期设置已更新。",
+        "change": {"operation": operation, "semester": changes},
+    }
 
 
 def _change_once(self, payload, current, operation):
@@ -196,16 +259,45 @@ def _change_once(self, payload, current, operation):
         raw = payload.get("course")
         if not isinstance(raw, dict):
             raise ValueError("单日增课缺少 course")
-        course = self._normalize_editable_course({**raw, "customId":identity,"weekday":date.fromisoformat(target_date).isoweekday(),"weeks":[]}, custom=True)
-        override = {"id":identity,"date":target_date,"action":"add","course":course}
+        course = self._normalize_editable_course(
+            {
+                **raw,
+                "customId": identity,
+                "weekday": date.fromisoformat(target_date).isoweekday(),
+                "weeks": [],
+            },
+            custom=True,
+        )
+        override = {
+            "id": identity,
+            "date": target_date,
+            "action": "add",
+            "course": course,
+        }
     else:
         key = str(payload.get("sourceKey") or "")
-        visible = self._filter_by_date(self._apply_customizations(self._load_cache() or {"courses": []}), target_date)
-        if not key or not any(course.get("sourceKey") == key for course in visible.get("courses", [])):
+        visible = self._filter_by_date(
+            self._apply_customizations(self._load_cache() or {"courses": []}),
+            target_date,
+        )
+        if not key or not any(
+            course.get("sourceKey") == key for course in visible.get("courses", [])
+        ):
             raise ValueError("要停课的课程不存在，请先读取本地课表")
-        override = {"id":identity,"date":target_date,"action":"cancel","targetSourceKey":key}
-    result = self.save_customizations({**current,"dateOverrides":[*current["dateOverrides"],override]})
-    return {**result,"message":f"已更新 {target_date} 的单次课程。","change":{"operation":operation,"date":target_date}}
+        override = {
+            "id": identity,
+            "date": target_date,
+            "action": "cancel",
+            "targetSourceKey": key,
+        }
+    result = self.save_customizations(
+        {**current, "dateOverrides": [*current["dateOverrides"], override]}
+    )
+    return {
+        **result,
+        "message": f"已更新 {target_date} 的单次课程。",
+        "change": {"operation": operation, "date": target_date},
+    }
 
 
 def _change_add(self, payload, current, operation):
@@ -221,7 +313,11 @@ def _change_add(self, payload, current, operation):
     return {
         **result,
         "message": f"已新增课表课程：{normalized['courseName']}",
-        "change": {"operation": "add", "sourceKey": f"custom-{custom_id}", "course": normalized},
+        "change": {
+            "operation": "add",
+            "sourceKey": f"custom-{custom_id}",
+            "course": normalized,
+        },
     }
 
 
@@ -231,8 +327,14 @@ def _change_update(self, payload, current, operation):
     if not source_key or not isinstance(changes, dict) or not changes:
         raise ValueError("修改课表课程需要 sourceKey 和 changes")
     allowed = {
-        "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
-        "weeks", "classroom", "courseCode",
+        "courseName",
+        "teacherName",
+        "weekday",
+        "startPeriod",
+        "endPeriod",
+        "weeks",
+        "classroom",
+        "courseCode",
     }
     unknown = set(changes) - allowed
     if unknown:
@@ -295,7 +397,9 @@ def _change_move(self, payload, current, operation):
     if not source_key or not isinstance(changes, dict):
         raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
     cached = self._load_cache()
-    visible = self._filter_by_date(self._apply_customizations(cached or {"courses": []}), from_date)
+    visible = self._filter_by_date(
+        self._apply_customizations(cached or {"courses": []}), from_date
+    )
     target = next(
         (
             course
@@ -355,8 +459,11 @@ _REGISTERED_HANDLERS = {
     "update": _change_update,
     "move": _change_move,
 }
-_CHANGE_HANDLERS = {entry["operation"]: _REGISTERED_HANDLERS[entry["handler"]]
-                    for entry in OPERATIONS.values() if "operation" in entry}
+_CHANGE_HANDLERS = {
+    entry["operation"]: _REGISTERED_HANDLERS[entry["handler"]]
+    for entry in OPERATIONS.values()
+    if "operation" in entry
+}
 
 
 def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
@@ -368,9 +475,15 @@ def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
         override = customizations["overrides"].get(source_key, {})
         if override.get("hidden"):
             continue
-        course.update({key: value for key, value in override.items() if key != "hidden"})
-        start = int(course.get("startPeriod") or (course.get("weeklyPeriods") or [1])[0])
-        end = int(course.get("endPeriod") or (course.get("weeklyPeriods") or [start])[-1])
+        course.update(
+            {key: value for key, value in override.items() if key != "hidden"}
+        )
+        start = int(
+            course.get("startPeriod") or (course.get("weeklyPeriods") or [1])[0]
+        )
+        end = int(
+            course.get("endPeriod") or (course.get("weeklyPeriods") or [start])[-1]
+        )
         course["startPeriod"] = start
         course["endPeriod"] = end
         course["weeklyPeriods"] = list(range(start, end + 1))
@@ -397,4 +510,3 @@ def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:
         ),
         "customizations": customizations,
     }
-

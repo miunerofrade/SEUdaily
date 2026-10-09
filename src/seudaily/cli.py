@@ -250,7 +250,9 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action == "save-schedule-customizations":
         return _schedule_service(payload).save_customizations(payload)
     if action == "apply-agent-schedule-change":
-        return _schedule_service(payload).apply_agent_change(payload)
+        service = _schedule_service(payload)
+        transport_fields = {"targetUrl", "cookieFile", "cacheFile", "customizationFile", "username", "password"}
+        return service.apply_agent_change({key: value for key, value in payload.items() if key not in transport_fields})
     if action == "list-focus":
         return _focus_service(payload).list()
     if action == "upsert-focus":

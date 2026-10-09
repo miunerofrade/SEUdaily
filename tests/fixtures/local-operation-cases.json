@@ -454,5 +454,18 @@
       "schedule": {}
     },
     "accepted": false
+  },
+  {
+    "name": "blank sourceKey",
+    "input": {
+      "kind": "update_schedule",
+      "schedule": {
+        "sourceKey": " ",
+        "changes": {
+          "classroom": "教一"
+        }
+      }
+    },
+    "accepted": false
   }
 ]

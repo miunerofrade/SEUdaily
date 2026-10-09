@@ -789,3 +789,19 @@ def test_semester_default_is_sixteen_weeks_and_start_date_patch_does_not_invent_
     assert saved == {'name':'','startDate':'2026-09-20','totalWeeks':16}
     service.apply_agent_change({'operation':'semester','semester':{'totalWeeks':18}})
     assert service.apply_agent_change({'operation':'semester','semester':{'startDate':'2026-09-21'}})['customizations']['semester']['totalWeeks'] == 18
+
+
+@pytest.mark.parametrize("weeks", [[31], ["2"], [True], [0]])
+def test_direct_course_save_rejects_invalid_week_values(tmp_path, weeks):
+    service = ScheduleService(customization_file=tmp_path / "user.json")
+    with pytest.raises(ValueError):
+        service.save_customizations({"customCourses": [{"customId": "test", "courseName": "课程", "weekday": 1, "startPeriod": 1, "endPeriod": 2, "weeks": weeks}]})
+    assert not service.customization_file.exists()
+
+
+def test_legacy_course_data_is_not_rewritten_when_loaded(tmp_path):
+    service = ScheduleService(customization_file=tmp_path / "user.json")
+    original = '{"version":1,"customCourses":[{"weeks":[31]}]}'
+    service.customization_file.write_text(original)
+    assert service._load_customizations()["customCourses"][0]["weeks"] == [31]
+    assert service.customization_file.read_text() == original

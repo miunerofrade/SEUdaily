@@ -1,4 +1,5 @@
 from __future__ import annotations
+from . import webplus_search, notice_sync
 
 import base64
 import hashlib
@@ -467,161 +468,29 @@ class WebplusNoticeAdapter:
         return normalized
 
     def sync_pending(self, *, max_workers: int = 4) -> dict[str, Any]:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            worker_lock = self.worker_lock_file.open("x", encoding="utf-8")
-        except FileExistsError:
-            if time.time() - self.worker_lock_file.stat().st_mtime < 600:
-                return {"status": "already_running", "completed": 0}
-            self.worker_lock_file.unlink(missing_ok=True)
-            worker_lock = self.worker_lock_file.open("x", encoding="utf-8")
-        try:
-            worker_lock.write(str(os.getpid()))
-            worker_lock.close()
-            with self._queue_lock():
-                jobs = self._read_queue()
-            if not jobs:
-                return {"status": "empty", "completed": 0}
-            completed: set[str] = set()
-            failures: list[dict[str, str]] = []
-            with ThreadPoolExecutor(
-                max_workers=min(max_workers, len(jobs))
-            ) as executor:
-                futures = {
-                    executor.submit(self._refresh_article, dict(job)): job
-                    for job in jobs
-                }
-                for future in as_completed(futures):
-                    job = futures[future]
-                    try:
-                        future.result()
-                        completed.add(job["id"])
-                    except Exception as exc:
-                        failures.append(
-                            {
-                                "id": job["id"],
-                                "url": job.get("url", ""),
-                                "error": str(exc),
-                                "failedAt": _iso_now(),
-                            }
-                        )
-            attempted = {job["id"] for job in jobs}
-            with self._queue_lock():
-                current = self._read_queue()
-                self._write_queue(
-                    [job for job in current if job.get("id") not in attempted]
-                )
-            self._update_failures(completed, failures)
-            return {
-                "status": "completed" if not failures else "partial",
-                "completed": len(completed),
-                "failed": len(failures),
-                "errors": [f"{item['id']}: {item['error']}" for item in failures],
-            }
-        finally:
-            self.worker_lock_file.unlink(missing_ok=True)
+        return notice_sync.sync_pending(self, max_workers=max_workers, now_iso=_iso_now)
 
     def _enqueue_details(self, articles: list[dict[str, Any]]) -> list[str]:
-        queued_ids = [article["id"] for article in articles]
-        with self._queue_lock():
-            existing = {job["id"]: job for job in self._read_queue()}
-            for article in articles:
-                existing[article["id"]] = {
-                    key: article.get(key)
-                    for key in (
-                        "id",
-                        "url",
-                        "title",
-                        "publishedAt",
-                        "category",
-                        "categoryLabel",
-                    )
-                }
-                existing[article["id"]]["url"] = self._normalize_url(article["url"])
-            self._write_queue(list(existing.values()))
-        return queued_ids
+        return notice_sync._enqueue_details(self, articles)
 
     def _start_worker(self) -> None:
-        command = [
-            sys.executable,
-            "-m",
-            "seudaily.cli",
-            "jwc-worker",
-            json.dumps(
-                {
-                    "site": self.config.key,
-                    "baseUrl": self.base_url,
-                    "cacheDir": str(self.cache_dir),
-                    "timeoutSeconds": self.timeout_seconds,
-                }
-            ),
-        ]
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = (
-                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            )
-        subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            creationflags=creationflags,
-        )
+        return notice_sync._start_worker(self)
 
-    @contextmanager
     def _queue_lock(self):
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + 3
-        while True:
-            try:
-                handle = self.queue_lock_file.open("x", encoding="utf-8")
-                break
-            except FileExistsError:
-                if time.time() - self.queue_lock_file.stat().st_mtime > 30:
-                    self.queue_lock_file.unlink(missing_ok=True)
-                    continue
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("教务处详情队列正在被占用")
-                time.sleep(0.05)
-        try:
-            handle.write(str(os.getpid()))
-            handle.close()
-            yield
-        finally:
-            self.queue_lock_file.unlink(missing_ok=True)
+        return notice_sync._queue_lock(self)
 
     def _read_queue(self) -> list[dict[str, Any]]:
-        if not self.queue_file.exists():
-            return []
-        jobs = json.loads(self.queue_file.read_text(encoding="utf-8"))
-        for job in jobs:
-            if job.get("url"):
-                job["url"] = self._normalize_url(job["url"])
-        return jobs
+        return notice_sync._read_queue(self)
 
     def _write_queue(self, jobs: list[dict[str, Any]]) -> None:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        write_json_atomic(self.queue_file, jobs)
+        return notice_sync._write_queue(self, jobs)
 
     def _update_failures(
         self,
         completed: set[str],
         failures: list[dict[str, str]],
     ) -> None:
-        existing: dict[str, dict[str, str]] = {}
-        if self.failures_file.exists():
-            existing = {
-                item["id"]: item
-                for item in json.loads(self.failures_file.read_text(encoding="utf-8"))
-            }
-        for article_id in completed:
-            existing.pop(article_id, None)
-        for failure in failures:
-            existing[failure["id"]] = failure
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        write_json_atomic(self.failures_file, list(existing.values()))
+        return notice_sync._update_failures(self, completed, failures)
 
     def _load_index(self) -> dict[str, Any]:
         if not self.index_file.exists():
@@ -916,109 +785,10 @@ class WebplusNoticeAdapter:
         return url
 
     def _search_remote(self, query: str, category: str | None) -> list[dict[str, Any]]:
-        list_url = (
-            urljoin(self.base_url, self.config.categories[category][1])
-            if category is not None
-            else f"{self.base_url}/"
-        )
-        opener = public_opener(HTTPCookieProcessor())
-        headers = {"User-Agent": "Mozilla/5.0 (SEUdaily)", "Referer": list_url}
-        with opener.open(
-            Request(list_url, headers=headers), timeout=self.timeout_seconds
-        ) as response:
-            encoding = response.headers.get_content_charset() or "utf-8"
-            listing_html = response.read().decode(encoding, errors="replace")
-        search_form_match = re.search(
-            r"<form\b[^>]+action=['\"]([^'\"]*?/search/new\.rst\?[^'\"]*)['\"]",
-            listing_html,
-            re.I,
-        )
-        if search_form_match:
-            search_page = urljoin(list_url, unescape(search_form_match.group(1)))
-            form_request = Request(
-                search_page,
-                data=urlencode({"keyword": query, "submit": ""}).encode(),
-                headers={
-                    **headers,
-                    "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-                },
-                method="POST",
-            )
-            with opener.open(form_request, timeout=self.timeout_seconds) as response:
-                encoding = response.headers.get_content_charset() or "utf-8"
-                search_html = response.read().decode(encoding, errors="replace")
-        else:
-            search_path_match = re.search(r'id="securl" value="([^"]+)"', listing_html)
-            if not search_path_match:
-                raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
-            search_page = urljoin(list_url, search_path_match.group(1))
-            with opener.open(
-                Request(search_page, headers=headers), timeout=self.timeout_seconds
-            ) as response:
-                encoding = response.headers.get_content_charset() or "utf-8"
-                search_html = response.read().decode(encoding, errors="replace")
-        endpoint_match = re.search(
-            r"url:'([^']*searchCon/create\.rst\?[^']+)'", search_html
-        )
-        if not endpoint_match:
-            raise RuntimeError(f"无法解析站内搜索接口: {search_page}")
-        endpoint = urljoin(search_page, endpoint_match.group(1))
-        infos = [
-            {"field": "pageIndex", "value": 1},
-            {"field": "group", "value": 0},
-            {"field": "searchType", "value": self.config.search_type},
-            {"field": "keyword", "value": query},
-            {"field": "recommend", "value": 1},
-            *({"field": field, "value": ""} for field in (4, 5, 6, 7)),
-        ]
-        encoded = base64.b64encode(
-            json.dumps(infos, ensure_ascii=False, separators=(",", ":")).encode()
-        ).decode()
-        request = Request(
-            f"{endpoint}&tt={time.time()}",
-            data=urlencode({"searchInfo": encoded}).encode(),
-            headers={
-                **headers,
-                "X-Requested-With": "XMLHttpRequest",
-                "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-            },
-            method="POST",
-        )
-        with opener.open(request, timeout=self.timeout_seconds) as response:
-            encoding = response.headers.get_content_charset() or "utf-8"
-            payload = json.loads(response.read().decode(encoding, errors="replace"))
-        return self._parse_search_results(payload.get("data", ""))
+        return webplus_search._search_remote(self, query, category, opener_factory=public_opener)
 
     def _parse_search_results(self, html: str) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        blocks = re.findall(
-            r'<div class="result_item clearfix">(.*?)(?=<div class="result_item clearfix">|$)',
-            html,
-            re.S,
-        )
-        for block in blocks:
-            article_id = re.search(r'name="id" value="(\d+)"', block)
-            link = re.search(
-                r'<h3 class="item_title">\s*<a href=[\'\"]([^\'\"]+)', block
-            )
-            title = re.search(r'<h3 class="item_title">.*?>(.*?)</a>', block, re.S)
-            date = re.search(r"发布时间\s*[:：]\s*(\d{4}-\d{2}-\d{2})", block)
-            category = re.search(r"目录\s*[:：]\s*([^<]+)", block)
-            if not article_id or not link or not title:
-                continue
-            result_url = self._normalize_url(urljoin(self.base_url, link.group(1)))
-            results.append(
-                {
-                    "id": f"{self.config.id_prefix}-{article_id.group(1)}",
-                    "url": result_url,
-                    "title": _clean(re.sub(r"<[^>]+>", "", title.group(1))),
-                    "publishedAt": date.group(1) if date else "",
-                    "categoryLabel": _clean(category.group(1)) if category else "",
-                    "firstSeenAt": _iso_now(),
-                    "lastSeenAt": _iso_now(),
-                }
-            )
-        return results
+        return webplus_search._parse_search_results(self, html, now_iso=_iso_now)
 
     @staticmethod
     def _public_article(article: dict[str, Any]) -> dict[str, Any]:

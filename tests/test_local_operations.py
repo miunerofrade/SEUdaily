@@ -19,3 +19,13 @@ def test_shared_contract_cases(case):
 
 def test_default_summary_uses_contract():
     assert default_summary('apply-agent-schedule-change', 'move') == '单次课程已移动。'
+
+
+def test_cli_keeps_transport_configuration_out_of_editable_contract(tmp_path):
+    from seudaily.cli import dispatch
+    target = tmp_path / 'schedule-user.json'
+    result = dispatch({'action': 'apply-agent-schedule-change', 'payload': {
+        'operation': 'semester', 'semester': {'startDate': '2026-09-21'},
+        'customizationFile': str(target), 'cacheFile': str(tmp_path / 'schedule.json')}})
+    assert result['status'] == 'completed'
+    assert json.loads(target.read_text())['semester']['startDate'] == '2026-09-21'

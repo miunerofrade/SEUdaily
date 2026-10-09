@@ -15,7 +15,7 @@ const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target:
 const { diskSize } = await import(`data:text/javascript;base64,${Buffer.from(diskCompiled).toString('base64')}`);
 
 // Exercise the actual route helpers without initializing agents or API clients.
-const source = await fs.readFile(new URL('../src/runtime/app-routes.ts', import.meta.url), 'utf8');
+const source = (await Promise.all(['app-route-helpers', 'app-routes-conversations', 'app-routes-schedule', 'app-routes-library', 'app-routes-settings', 'app-routes'].map(name => fs.readFile(new URL(`../src/runtime/${name}.ts`, import.meta.url), 'utf8')))).join('\n');
 const ast = ts.createSourceFile('app-routes.ts', source, ts.ScriptTarget.Latest, true);
 const functions = new Set(['isWithinDirectory', 'safeLibraryTarget', 'libraryIdentity', 'walkFiles', 'readEnvFile', 'encodeEnvValue', 'persistEnvFile', 'updateEnvFile']);
 const librarySource = await fs.readFile(new URL('../src/runtime/library-files.ts', import.meta.url), 'utf8');
@@ -23,7 +23,7 @@ const libraryAst = ts.createSourceFile('library-files.ts', librarySource, ts.Scr
 const libraryDeclarations = libraryAst.statements.filter(statement=>!ts.isImportDeclaration(statement)).map(statement=>statement.getText(libraryAst)).join('\n');
 const declarations = ast.statements.filter((statement) =>
   ts.isFunctionDeclaration(statement) && functions.has(statement.name?.text) ||
-  ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ['libraryRoots', 'envWriteQueue', 'appRoutes'].includes(declaration.name.getText(ast)))
+  ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ['libraryRoots', 'envWriteQueue', 'FOCUS_RESOURCE_ID', 'conversationsRoutes', 'scheduleRoutes', 'libraryRoutes', 'settingsRoutes', 'appRoutes'].includes(declaration.name.getText(ast)))
 ).map((statement) => statement.getText(ast)).join('\n');
 const envSource = await fs.readFile(new URL('../src/runtime/environment-settings.ts', import.meta.url), 'utf8');
 const envAst = ts.createSourceFile('environment-settings.ts', envSource, ts.ScriptTarget.Latest, true);
