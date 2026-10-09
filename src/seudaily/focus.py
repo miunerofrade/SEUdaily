@@ -148,6 +148,15 @@ class FocusService:
         item["threadId"] = item["threadId"] or item["id"]
         if not item["title"]:
             raise ValueError("Focus 名称不能为空")
+        from .local_operations import CONTRACT, validate_parameters
+        # Legacy course tasks can describe a discovery goal before identifying a course.
+        fields = CONTRACT["schemas"]["focus"]["properties"]
+        merged = {**(existing or {}), **raw, "kind": kind, "title": item["title"]}
+        if kind == "notice" and raw.get("source", (existing or {}).get("source", "jwc")) != (existing or {}).get("source", "jwc") and "categories" not in raw:
+            merged.pop("categories", None)
+        if merged.get("description"):
+            validated = validate_parameters("focus", {key: value for key, value in merged.items() if key in fields}, require_course=False)
+            raw = {**raw, **validated}
         if kind == "notice":
             previous_description = str((existing or {}).get("description") or "").strip()
             description = str(raw.get("description") or previous_description).strip()

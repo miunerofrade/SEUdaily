@@ -166,6 +166,10 @@ def _summary(action: str, result: dict[str, Any], status: str, artifacts: list[d
     message = result.get("message")
     if isinstance(message, str) and message.strip():
         return message.strip()
+    from .local_operations import default_summary
+    local_summary = default_summary(action, (result.get("change") or {}).get("operation"))
+    if local_summary and status == "completed":
+        return local_summary
     if action.startswith("search-"):
         count = result.get("count")
         if not isinstance(count, int):

@@ -175,117 +175,92 @@ def save_customizations(self, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
-    operation = str(payload.get("operation") or "").strip()
-    current = self._load_customizations()
-    if operation == "semester":
-        changes = payload.get("semester")
-        if not isinstance(changes, dict) or not changes or set(changes) - {"name", "startDate", "totalWeeks"}:
-            raise ValueError("学期设置需提供 name、startDate 或 totalWeeks")
-        result = self.save_customizations({**current, "semester": {**current["semester"], **changes}})
-        return {**result, "message": "学期设置已更新。", "change": {"operation": operation, "semester": changes}}
-    if operation in {"add_once", "cancel_once"}:
-        target_date = self._valid_iso_date(payload.get("date"), "date")
-        identity = f"agent-{uuid.uuid4()}"
-        if operation == "add_once":
-            raw = payload.get("course")
-            if not isinstance(raw, dict):
-                raise ValueError("单日增课缺少 course")
-            course = self._normalize_editable_course({**raw, "customId":identity,"weekday":date.fromisoformat(target_date).isoweekday(),"weeks":[]}, custom=True)
-            override = {"id":identity,"date":target_date,"action":"add","course":course}
-        else:
-            key = str(payload.get("sourceKey") or "")
-            visible = self._filter_by_date(self._apply_customizations(self._load_cache() or {"courses": []}), target_date)
-            if not key or not any(course.get("sourceKey") == key for course in visible.get("courses", [])):
-                raise ValueError("要停课的课程不存在，请先读取本地课表")
-            override = {"id":identity,"date":target_date,"action":"cancel","targetSourceKey":key}
-        result = self.save_customizations({**current,"dateOverrides":[*current["dateOverrides"],override]})
-        return {**result,"message":f"已更新 {target_date} 的单次课程。","change":{"operation":operation,"date":target_date}}
-    if operation == "add":
-        raw_course = payload.get("course")
-        if not isinstance(raw_course, dict):
-            raise ValueError("新增课表课程缺少 course 参数")
-        custom_id = f"agent-{uuid.uuid4()}"
-        normalized = self._normalize_editable_course(
-            {**raw_course, "customId": custom_id}, custom=True
-        )
-        current["customCourses"] = [*current["customCourses"], normalized]
-        result = self.save_customizations(current)
-        return {
-            **result,
-            "message": f"已新增课表课程：{normalized['courseName']}",
-            "change": {"operation": "add", "sourceKey": f"custom-{custom_id}", "course": normalized},
-        }
+    from .local_operations import schedule_payload
+    payload = schedule_payload(payload)
+    operation = payload["operation"]
+    return _CHANGE_HANDLERS[operation](self, payload, self._load_customizations(), operation)
 
-    if operation == "update":
-        source_key = str(payload.get("sourceKey") or "").strip()
-        changes = payload.get("changes")
-        if not source_key or not isinstance(changes, dict) or not changes:
-            raise ValueError("修改课表课程需要 sourceKey 和 changes")
-        allowed = {
-            "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
-            "weeks", "classroom", "courseCode",
-        }
-        unknown = set(changes) - allowed
-        if unknown:
-            raise ValueError(f"课表修改包含不支持的字段: {', '.join(sorted(unknown))}")
-        if source_key.startswith("custom-"):
-            custom_id = source_key.removeprefix("custom-")
-            found = False
-            updated_courses: list[dict[str, Any]] = []
-            for course in current["customCourses"]:
-                if str(course.get("customId") or "") != custom_id:
-                    updated_courses.append(course)
-                    continue
-                updated_courses.append(
-                    self._normalize_editable_course(
-                        {**course, **changes, "customId": custom_id}, custom=True
-                    )
+
+def _change_semester(self, payload, current, operation):
+    changes = payload.get("semester")
+    if not isinstance(changes, dict) or not changes or set(changes) - {"name", "startDate", "totalWeeks"}:
+        raise ValueError("学期设置需提供 name、startDate 或 totalWeeks")
+    result = self.save_customizations({**current, "semester": {**current["semester"], **changes}})
+    return {**result, "message": "学期设置已更新。", "change": {"operation": operation, "semester": changes}}
+
+
+def _change_once(self, payload, current, operation):
+    target_date = self._valid_iso_date(payload.get("date"), "date")
+    identity = f"agent-{uuid.uuid4()}"
+    if operation == "add_once":
+        raw = payload.get("course")
+        if not isinstance(raw, dict):
+            raise ValueError("单日增课缺少 course")
+        course = self._normalize_editable_course({**raw, "customId":identity,"weekday":date.fromisoformat(target_date).isoweekday(),"weeks":[]}, custom=True)
+        override = {"id":identity,"date":target_date,"action":"add","course":course}
+    else:
+        key = str(payload.get("sourceKey") or "")
+        visible = self._filter_by_date(self._apply_customizations(self._load_cache() or {"courses": []}), target_date)
+        if not key or not any(course.get("sourceKey") == key for course in visible.get("courses", [])):
+            raise ValueError("要停课的课程不存在，请先读取本地课表")
+        override = {"id":identity,"date":target_date,"action":"cancel","targetSourceKey":key}
+    result = self.save_customizations({**current,"dateOverrides":[*current["dateOverrides"],override]})
+    return {**result,"message":f"已更新 {target_date} 的单次课程。","change":{"operation":operation,"date":target_date}}
+
+
+def _change_add(self, payload, current, operation):
+    raw_course = payload.get("course")
+    if not isinstance(raw_course, dict):
+        raise ValueError("新增课表课程缺少 course 参数")
+    custom_id = f"agent-{uuid.uuid4()}"
+    normalized = self._normalize_editable_course(
+        {**raw_course, "customId": custom_id}, custom=True
+    )
+    current["customCourses"] = [*current["customCourses"], normalized]
+    result = self.save_customizations(current)
+    return {
+        **result,
+        "message": f"已新增课表课程：{normalized['courseName']}",
+        "change": {"operation": "add", "sourceKey": f"custom-{custom_id}", "course": normalized},
+    }
+
+
+def _change_update(self, payload, current, operation):
+    source_key = str(payload.get("sourceKey") or "").strip()
+    changes = payload.get("changes")
+    if not source_key or not isinstance(changes, dict) or not changes:
+        raise ValueError("修改课表课程需要 sourceKey 和 changes")
+    allowed = {
+        "courseName", "teacherName", "weekday", "startPeriod", "endPeriod",
+        "weeks", "classroom", "courseCode",
+    }
+    unknown = set(changes) - allowed
+    if unknown:
+        raise ValueError(f"课表修改包含不支持的字段: {', '.join(sorted(unknown))}")
+    if source_key.startswith("custom-"):
+        custom_id = source_key.removeprefix("custom-")
+        found = False
+        updated_courses: list[dict[str, Any]] = []
+        for course in current["customCourses"]:
+            if str(course.get("customId") or "") != custom_id:
+                updated_courses.append(course)
+                continue
+            updated_courses.append(
+                self._normalize_editable_course(
+                    {**course, **changes, "customId": custom_id}, custom=True
                 )
-                found = True
-            if not found:
-                raise ValueError("要修改的自定义课程不存在")
-            current["customCourses"] = updated_courses
-        else:
-            if not source_key.startswith("source-"):
-                raise ValueError("sourceKey 格式无效")
-            cached = self._load_cache()
-            if cached is None:
-                raise ValueError("当前课表缓存不存在，请先读取课表")
-            visible = self._apply_customizations(cached)
-            target = next(
-                (
-                    course
-                    for course in visible.get("courses") or []
-                    if course.get("sourceKey") == source_key
-                ),
-                None,
             )
-            if target is None:
-                raise ValueError("要修改的课表课程不存在，请重新读取课表")
-            normalized = self._normalize_editable_course(
-                {**target, **changes}, custom=False
-            )
-            changes = {key: normalized[key] for key in changes}
-            current["overrides"] = {
-                **current["overrides"],
-                source_key: {**current["overrides"].get(source_key, {}), **changes},
-            }
-        result = self.save_customizations(current)
-        return {
-            **result,
-            "message": "课表课程信息已修改。",
-            "change": {"operation": "update", "sourceKey": source_key, "changes": changes},
-        }
-
-    if operation == "move":
-        source_key = str(payload.get("sourceKey") or "").strip()
-        from_date = self._valid_iso_date(payload.get("fromDate"), "fromDate")
-        to_date = self._valid_iso_date(payload.get("toDate"), "toDate")
-        changes = payload.get("changes") or {}
-        if not source_key or not isinstance(changes, dict):
-            raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
+            found = True
+        if not found:
+            raise ValueError("要修改的自定义课程不存在")
+        current["customCourses"] = updated_courses
+    else:
+        if not source_key.startswith("source-"):
+            raise ValueError("sourceKey 格式无效")
         cached = self._load_cache()
-        visible = self._filter_by_date(self._apply_customizations(cached or {"courses": []}), from_date)
+        if cached is None:
+            raise ValueError("当前课表缓存不存在，请先读取课表")
+        visible = self._apply_customizations(cached)
         target = next(
             (
                 course
@@ -295,47 +270,93 @@ def apply_agent_change(self, payload: dict[str, Any]) -> dict[str, Any]:
             None,
         )
         if target is None:
-            raise ValueError("要移动的课表课程不存在，请重新读取课表")
-        moved_id = f"agent-{uuid.uuid4()}"
-        moved = self._normalize_editable_course(
-            {
-                **target,
-                **changes,
-                "weekday": date.fromisoformat(to_date).isoweekday(),
-                "weeks": [],
-                "customId": moved_id,
-            },
-            custom=True,
+            raise ValueError("要修改的课表课程不存在，请重新读取课表")
+        normalized = self._normalize_editable_course(
+            {**target, **changes}, custom=False
         )
-        current["dateOverrides"] = [
-            *current["dateOverrides"],
-            {
-                "id": f"{moved_id}-cancel",
-                "date": from_date,
-                "action": "cancel",
-                "targetSourceKey": source_key,
-            },
-            {
-                "id": moved_id,
-                "date": to_date,
-                "action": "add",
-                "course": moved,
-            },
-        ]
-        result = self.save_customizations(current)
-        return {
-            **result,
-            "message": f"已将 {target.get('courseName') or '课程'} 从 {from_date} 移至 {to_date}。",
-            "change": {
-                "operation": "move",
-                "sourceKey": source_key,
-                "fromDate": from_date,
-                "toDate": to_date,
-                "course": moved,
-            },
+        changes = {key: normalized[key] for key in changes}
+        current["overrides"] = {
+            **current["overrides"],
+            source_key: {**current["overrides"].get(source_key, {}), **changes},
         }
+    result = self.save_customizations(current)
+    return {
+        **result,
+        "message": "课表课程信息已修改。",
+        "change": {"operation": "update", "sourceKey": source_key, "changes": changes},
+    }
 
-    raise ValueError("课表操作仅支持 semester、add、update、move、add_once 或 cancel_once")
+
+def _change_move(self, payload, current, operation):
+    source_key = str(payload.get("sourceKey") or "").strip()
+    from_date = self._valid_iso_date(payload.get("fromDate"), "fromDate")
+    to_date = self._valid_iso_date(payload.get("toDate"), "toDate")
+    changes = payload.get("changes") or {}
+    if not source_key or not isinstance(changes, dict):
+        raise ValueError("移动单次课程需要 sourceKey、fromDate 和 toDate")
+    cached = self._load_cache()
+    visible = self._filter_by_date(self._apply_customizations(cached or {"courses": []}), from_date)
+    target = next(
+        (
+            course
+            for course in visible.get("courses") or []
+            if course.get("sourceKey") == source_key
+        ),
+        None,
+    )
+    if target is None:
+        raise ValueError("要移动的课表课程不存在，请重新读取课表")
+    moved_id = f"agent-{uuid.uuid4()}"
+    moved = self._normalize_editable_course(
+        {
+            **target,
+            **changes,
+            "weekday": date.fromisoformat(to_date).isoweekday(),
+            "weeks": [],
+            "customId": moved_id,
+        },
+        custom=True,
+    )
+    current["dateOverrides"] = [
+        *current["dateOverrides"],
+        {
+            "id": f"{moved_id}-cancel",
+            "date": from_date,
+            "action": "cancel",
+            "targetSourceKey": source_key,
+        },
+        {
+            "id": moved_id,
+            "date": to_date,
+            "action": "add",
+            "course": moved,
+        },
+    ]
+    result = self.save_customizations(current)
+    return {
+        **result,
+        "message": f"已将 {target.get('courseName') or '课程'} 从 {from_date} 移至 {to_date}。",
+        "change": {
+            "operation": "move",
+            "sourceKey": source_key,
+            "fromDate": from_date,
+            "toDate": to_date,
+            "course": moved,
+        },
+    }
+
+
+from .local_operations import OPERATIONS
+
+_REGISTERED_HANDLERS = {
+    "semester": _change_semester,
+    "once": _change_once,
+    "add": _change_add,
+    "update": _change_update,
+    "move": _change_move,
+}
+_CHANGE_HANDLERS = {entry["operation"]: _REGISTERED_HANDLERS[entry["handler"]]
+                    for entry in OPERATIONS.values() if "operation" in entry}
 
 
 def _apply_customizations(self, result: dict[str, Any]) -> dict[str, Any]:

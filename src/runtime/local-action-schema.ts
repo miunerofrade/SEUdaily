@@ -1,64 +1,46 @@
 import { z } from "zod";
-import { noticeSourceEnum, requireNoticeSource } from "../shared/notice-sources.js";
+import { requireNoticeSource } from "../shared/notice-sources.js";
 
-export const focusActionSchema = z.object({
-  kind: z.enum(["notice", "course"]),
-  title: z.string().trim().min(1).max(120),
-  description: z.string().trim().min(1).max(2_000),
-  source: z.enum(noticeSourceEnum).optional(),
-  categories: z.array(z.string().min(1)).min(1).optional(),
-  courseName: z.string().trim().max(200).optional(),
-  teacherNames: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
-  sourceKeys: z.array(z.string().trim().min(1)).max(20).optional(),
-  semester: z.string().trim().max(100).optional(),
-  summary: z.boolean().default(true),
-  summaryInstructions: z.string().trim().max(2_000).optional(),
-}).strict().superRefine((value, context) => {
+import contract from "../seudaily/local_operations.json" with {type: "json"};
+
+export const localOperations = contract.operations;
+export type FocusAction = {kind: "notice" | "course"; title: string; description: string; source?: string; categories?: string[]; courseName?: string; teacherNames?: string[]; sourceKeys?: string[]; semester?: string; summary: boolean; summaryInstructions?: string};
+type CourseFields = {courseName: string; teacherName: string; weekday?: number; startPeriod: number; endPeriod: number; weeks: number[]; classroom: string; courseCode: string};
+export type ScheduleAction = {semester?: {name?: string; startDate?: string; totalWeeks?: number}; date?: string; course?: CourseFields; sourceKey?: string; changes?: Partial<CourseFields>; fromDate?: string; toDate?: string};
+
+function normalizeFields(value: any): any {
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value)) return value.map(normalizeFields);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, key === "weeks" && Array.isArray(entry) ? [...new Set(entry)].sort((a, b) => Number(a) - Number(b)) : normalizeFields(entry)]));
+  return value;
+}
+function validDate(value: string): boolean {
+  const date = new Date(value + "T00:00:00Z");
+  return Number(value.slice(0, 4)) >= 1 && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+export const focusActionSchema = (z.fromJSONSchema(contract.schemas.focus as Parameters<typeof z.fromJSONSchema>[0]) as z.ZodType<FocusAction>).transform(value => normalizeFields(value) as FocusAction).superRefine((value: FocusAction, context) => {
+  if (!value.title || !value.description) context.addIssue({code: "custom", message: "关注名称和描述不能为空"});
   if (value.kind === "notice") {
     const source = requireNoticeSource(value.source ?? "jwc");
     if (value.categories?.some(category => !source.categories[category])) context.addIssue({code: "custom", path: ["categories"], message: "不支持的通知栏目"});
   }
-  if (value.kind === "course" && !value.courseName) {
-    context.addIssue({ code: "custom", path: ["courseName"], message: "课程关注必须提供课程名称" });
+  if (value.kind === "course" && !value.courseName) context.addIssue({code: "custom", path: ["courseName"], message: "课程关注必须提供课程名称"});
+});
+export const scheduleActionSchema = (z.fromJSONSchema(contract.schemas.schedule as Parameters<typeof z.fromJSONSchema>[0]) as z.ZodType<ScheduleAction>).transform(value => normalizeFields(value) as ScheduleAction).superRefine((value: ScheduleAction, context) => {
+  for (const [key, entry] of Object.entries({...value, startDate: value.semester?.startDate})) {
+    if (["date", "fromDate", "toDate", "startDate"].includes(key) && typeof entry === "string" && !validDate(entry)) context.addIssue({code: "custom", path: [key], message: "日期不存在"});
+  }
+  for (const key of ["semester", "changes"] as const) {
+    if (value[key] && !Object.keys(value[key]!).length) context.addIssue({code: "custom", path: [key], message: "至少提供一项修改"});
+  }
+  for (const [key, course] of [["course", value.course], ["changes", value.changes]] as const) {
+    if (course?.courseName !== undefined && !course.courseName) context.addIssue({code: "custom", path: [key, "courseName"], message: "课程名称不能为空"});
+    if (course?.startPeriod !== undefined && course.endPeriod !== undefined && course.endPeriod < course.startPeriod) context.addIssue({code: "custom", path: [key, "endPeriod"], message: "endPeriod 不能早于 startPeriod"});
   }
 });
 
-const scheduleCourseSchema = z.object({
-  courseName: z.string().trim().min(1).max(200),
-  teacherName: z.string().trim().max(100).default(""),
-  weekday: z.number().int().min(1).max(7).optional(),
-  startPeriod: z.number().int().min(1).max(13),
-  endPeriod: z.number().int().min(1).max(13),
-  weeks: z.array(z.number().int().min(1).max(30)).max(30).default([]).transform((weeks) => [...new Set(weeks)].sort((a, b) => a - b)),
-  classroom: z.string().trim().max(200).default(""),
-  courseCode: z.string().trim().max(100).default(""),
-}).strict().refine((value) => value.endPeriod >= value.startPeriod, {
-  path: ["endPeriod"], message: "endPeriod 不能早于 startPeriod",
-});
-
-const scheduleChangesSchema = z.object({
-  courseName: z.string().trim().min(1).max(200).optional(),
-  teacherName: z.string().trim().max(100).optional(),
-  weekday: z.number().int().min(1).max(7).optional(),
-  startPeriod: z.number().int().min(1).max(13).optional(),
-  endPeriod: z.number().int().min(1).max(13).optional(),
-  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30).transform((weeks) => [...new Set(weeks)].sort((a, b) => a - b)).optional(),
-  classroom: z.string().trim().max(200).optional(),
-  courseCode: z.string().trim().max(100).optional(),
-}).strict();
-
-export const scheduleActionSchema = z.object({
-  semester: z.object({name:z.string().trim().max(100).optional(),startDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),totalWeeks:z.number().int().min(1).max(30).optional()}).strict().refine(value=>Object.keys(value).length>0, "至少提供一项学期设置").optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  course: scheduleCourseSchema.optional(),
-  sourceKey: z.string().trim().min(1).optional(),
-  changes: scheduleChangesSchema.optional(),
-  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-}).strict();
-
 export const localActionProposalSchema = z.object({
-  kind: z.enum(["create_focus", "add_schedule", "update_schedule", "move_schedule", "set_semester", "add_schedule_once", "cancel_schedule_once"]),
+  kind: z.enum(Object.keys(localOperations) as [keyof typeof localOperations, ...(keyof typeof localOperations)[]]),
   mode: z.enum(["preview", "apply"]).default("preview"),
   focus: focusActionSchema.optional(),
   schedule: scheduleActionSchema.optional(),
@@ -73,22 +55,9 @@ export const localActionProposalSchema = z.object({
     return;
   }
   if (value.focus) context.addIssue({ code: "custom", path: ["focus"], message: `${value.kind} 不允许 focus` });
-  if (value.kind === "add_schedule" && !value.schedule.course) {
-    context.addIssue({ code: "custom", path: ["schedule", "course"], message: "add_schedule 必须提供完整 course" });
+  for (const field of localOperations[value.kind].required) {
+    if (value.schedule[field as keyof ScheduleAction] === undefined) context.addIssue({code: "custom", path: ["schedule", field], message: `缺少 ${field}`});
   }
-  if (value.kind === "update_schedule") {
-    if (!value.schedule.sourceKey) context.addIssue({ code: "custom", path: ["schedule", "sourceKey"], message: "update_schedule 必须提供 sourceKey" });
-    if (!value.schedule.changes || !Object.keys(value.schedule.changes).length) context.addIssue({ code: "custom", path: ["schedule", "changes"], message: "update_schedule 必须至少修改一个字段" });
-  }
-  if (value.kind === "move_schedule") {
-    if (!value.schedule.sourceKey) context.addIssue({ code: "custom", path: ["schedule", "sourceKey"], message: "move_schedule 必须提供 sourceKey" });
-    if (!value.schedule.fromDate) context.addIssue({ code: "custom", path: ["schedule", "fromDate"], message: "move_schedule 必须提供 fromDate" });
-    if (!value.schedule.toDate) context.addIssue({ code: "custom", path: ["schedule", "toDate"], message: "move_schedule 必须提供 toDate" });
-  }
-  if (value.kind === "set_semester" && !value.schedule.semester) context.addIssue({code:"custom",path:["schedule","semester"],message:"缺少学期设置"});
-  if (["add_schedule_once","cancel_schedule_once"].includes(value.kind) && !value.schedule.date) context.addIssue({code:"custom",path:["schedule","date"],message:"缺少单次课程日期"});
-  if (value.kind === "add_schedule_once" && !value.schedule.course) context.addIssue({code:"custom",path:["schedule","course"],message:"缺少课程信息"});
-  if (value.kind === "cancel_schedule_once" && !value.schedule.sourceKey) context.addIssue({code:"custom",path:["schedule","sourceKey"],message:"缺少 sourceKey"});
   if (value.kind === "add_schedule" && (!value.schedule.course?.weekday || !value.schedule.course.weeks.length)) context.addIssue({code:"custom",path:["schedule","course"],message:"周期课程需提供 weekday 和 weeks"});
   const changes = value.schedule.changes;
   if (changes?.startPeriod !== undefined && changes.endPeriod !== undefined && changes.endPeriod < changes.startPeriod) {
@@ -100,7 +69,6 @@ export type LocalActionProposal = z.infer<typeof localActionProposalSchema>;
 
 export function localActionExecutionPayload(proposal: LocalActionProposal) {
   if (proposal.kind === "create_focus") return proposal.focus!;
-  const operations = {add_schedule:"add",update_schedule:"update",move_schedule:"move",set_semester:"semester",add_schedule_once:"add_once",cancel_schedule_once:"cancel_once"};
-  const operation = operations[proposal.kind];
+  const operation = localOperations[proposal.kind].operation;
   return { ...proposal.schedule!, operation };
 }

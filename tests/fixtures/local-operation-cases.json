@@ -1,0 +1,458 @@
+[
+  {
+    "name": "sorted weeks and defaults",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            3,
+            1,
+            3,
+            2
+          ]
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "week30",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            30
+          ]
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "week31",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            31
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "week0",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            0
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "week string",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            "2"
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "boolean week",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            true
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "wrong weekday",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 8,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            3,
+            1,
+            3,
+            2
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "missing start",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": null,
+          "endPeriod": 2,
+          "weeks": [
+            3,
+            1,
+            3,
+            2
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "reversed periods",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 4,
+          "endPeriod": 2,
+          "weeks": [
+            3,
+            1,
+            3,
+            2
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "empty name",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": [
+            3,
+            1,
+            3,
+            2
+          ]
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "empty weeks",
+    "input": {
+      "kind": "add_schedule",
+      "schedule": {
+        "course": {
+          "courseName": " 测试课程 ",
+          "weekday": 1,
+          "startPeriod": 1,
+          "endPeriod": 2,
+          "weeks": []
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 2026-02-28",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "2026-02-28"
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "date 2024-02-29",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "2024-02-29"
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "date 2026-02-29",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "2026-02-29"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 2026-02-31",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "2026-02-31"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 2026-13-01",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "2026-13-01"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 0000-01-01",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "0000-01-01"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 20261001",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": 20261001
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "date 20261001",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "startDate": "20261001"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "semester defaults",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {
+          "totalWeeks": 16
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "semester empty",
+    "input": {
+      "kind": "set_semester",
+      "schedule": {
+        "semester": {}
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "missing schedule",
+    "input": {
+      "kind": "set_semester"
+    },
+    "accepted": false
+  },
+  {
+    "name": "missing sourceKey",
+    "input": {
+      "kind": "update_schedule",
+      "schedule": {
+        "changes": {
+          "classroom": " A "
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "empty changes",
+    "input": {
+      "kind": "update_schedule",
+      "schedule": {
+        "sourceKey": "custom-a",
+        "changes": {}
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "once defaults",
+    "input": {
+      "kind": "add_schedule_once",
+      "schedule": {
+        "date": "2026-10-07",
+        "course": {
+          "courseName": "单次课",
+          "startPeriod": 3,
+          "endPeriod": 3
+        }
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "focus default",
+    "input": {
+      "kind": "create_focus",
+      "focus": {
+        "kind": "notice",
+        "title": " 通知 ",
+        "description": " 关注通知 "
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "focus source",
+    "input": {
+      "kind": "create_focus",
+      "focus": {
+        "kind": "notice",
+        "title": "通知",
+        "description": "关注",
+        "source": "cse",
+        "categories": [
+          "teaching"
+        ]
+      }
+    },
+    "accepted": true
+  },
+  {
+    "name": "focus invalid category",
+    "input": {
+      "kind": "create_focus",
+      "focus": {
+        "kind": "notice",
+        "title": "通知",
+        "description": "关注",
+        "source": "cse",
+        "categories": [
+          "academic"
+        ]
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "course missing name",
+    "input": {
+      "kind": "create_focus",
+      "focus": {
+        "kind": "course",
+        "title": "课程",
+        "description": "关注课程"
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "bad mode",
+    "input": {
+      "kind": "set_semester",
+      "mode": null,
+      "schedule": {
+        "semester": {
+          "totalWeeks": 16
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "name": "mixed payload",
+    "input": {
+      "kind": "create_focus",
+      "focus": {
+        "kind": "notice",
+        "title": "通知",
+        "description": "关注"
+      },
+      "schedule": {}
+    },
+    "accepted": false
+  }
+]

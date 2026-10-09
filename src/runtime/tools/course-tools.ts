@@ -2,9 +2,9 @@ import { defineTool as createTool } from "../../agent/tool.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-import { consumeActionRequest, issueActionRequest } from "../action-request-store.js";
+import { issueActionRequest } from "../action-request-store.js";
 import { issueAuthResume, type AuthTarget } from "../auth-resume-store.js";
-import { localActionExecutionPayload, localActionProposalSchema } from "../local-action-schema.js";
+import { localActionExecutionPayload, localActionProposalSchema, localOperations } from "../local-action-schema.js";
 import { runPythonTool } from "./python-bridge.js";
 import { isUnapprovedAccessEnabled } from "../permission-state.js";
 import { pythonToolOutput, type ToolResult } from "./tool-result.js";
@@ -143,124 +143,9 @@ async function runAuthAwareTool(
   return { ...result, data: { ...data, authRequest } };
 }
 
-const focusRequestSchema = z.object({
-  kind: z.enum(["notice", "course"]),
-  title: z.string().min(1).max(120),
-  description: z.string().min(1).max(2_000),
-  categories: z.array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"])).min(1).max(7).optional(),
-  courseName: z.string().max(200).optional(),
-  teacherNames: z.array(z.string().min(1).max(100)).max(10).optional(),
-  sourceKeys: z.array(z.string().min(1)).max(20).optional(),
-  semester: z.string().max(100).optional(),
-  summary: z.boolean().default(true),
-  summaryInstructions: z.string().max(2_000).optional(),
-});
-
-const editableScheduleCourseFields = {
-  courseName: z.string().min(1).max(200),
-  teacherName: z.string().max(100).default(""),
-  weekday: z.number().int().min(1).max(7),
-  startPeriod: z.number().int().min(1).max(13),
-  endPeriod: z.number().int().min(1).max(13),
-  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30),
-  classroom: z.string().max(200).default(""),
-  courseCode: z.string().max(100).default(""),
-};
-
-const editableScheduleCourseSchema = z.object(editableScheduleCourseFields);
-
-const scheduleCourseChangesSchema = z.object({
-  courseName: z.string().min(1).max(200).optional(),
-  teacherName: z.string().max(100).optional(),
-  weekday: z.number().int().min(1).max(7).optional(),
-  startPeriod: z.number().int().min(1).max(13).optional(),
-  endPeriod: z.number().int().min(1).max(13).optional(),
-  weeks: z.array(z.number().int().min(1).max(30)).min(1).max(30).optional(),
-  classroom: z.string().max(200).optional(),
-  courseCode: z.string().max(100).optional(),
-});
-
-const scheduleChangeSchema = z.object({
-  operation: z.enum(["add", "update", "move"]),
-  course: editableScheduleCourseSchema.optional().describe("新增课程时必填"),
-  sourceKey: z.string().min(1).optional().describe("修改或移动已有课程时必填，来自课表查询结果"),
-  changes: scheduleCourseChangesSchema.optional().describe("修改课程字段或移动后的节次、教室等变化"),
-  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("移动单次课程时的原日期"),
-  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("移动单次课程时的新日期"),
-});
-
 function deferredRequestModelOutput() {
   return { type: "text" as const, value: "OK" };
 }
-
-const requestCreateFocusTool = createTool({
-  ...pythonToolOutput,
-  toModelOutput: deferredRequestModelOutput,
-  id: "request-create-focus",
-  description: "记录一个待执行的创建关注请求；此工具不修改数据。普通创建关注请求使用此工具。",
-  inputSchema: focusRequestSchema,
-  execute: async (input) => {
-    const text = `替我创建“${input.title}”的关注`;
-    const actionRequest = await issueActionRequest("create-focus", text, input);
-    return completedResult("请求已记录。", { actionRequest });
-  },
-});
-
-const createFocusFromRequestTool = createTool({
-  ...pythonToolOutput,
-  id: "create-focus-from-request",
-  description: "执行由 requestId 标识的已授权创建关注请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
-  inputSchema: z.object({ requestId: z.string().startsWith("action-") }),
-  execute: async ({ requestId }, options) => {
-    const payload = await consumeActionRequest(requestId, "create-focus");
-    const id = `focus-${randomUUID()}`;
-    return runPythonTool("upsert-focus", {
-      item: { ...payload, id, threadId: id, resourceId: "seudaily-focus-local", enabled: true },
-    }, options?.abortSignal);
-  },
-});
-
-const requestModifyScheduleTool = createTool({
-  ...pythonToolOutput,
-  toModelOutput: deferredRequestModelOutput,
-  id: "request-modify-schedule",
-  description: "记录一个待执行的本地课表新增、修改或单次移动请求；此工具不修改数据。普通课表变更请求使用此工具。",
-  inputSchema: scheduleChangeSchema,
-  execute: async (input) => {
-    if (input.operation === "add") {
-      if (!input.course) throw new Error("新增课表课程时必须提供 course");
-      if (input.course.endPeriod < input.course.startPeriod) throw new Error("endPeriod 不能早于 startPeriod");
-    } else if (input.operation === "update") {
-      if (!input.sourceKey || !input.changes || !Object.keys(input.changes).length) {
-        throw new Error("修改课表课程时必须提供 sourceKey 和至少一个 changes 字段");
-      }
-      if (input.changes.startPeriod !== undefined && input.changes.endPeriod !== undefined && input.changes.endPeriod < input.changes.startPeriod) {
-        throw new Error("endPeriod 不能早于 startPeriod");
-      }
-    } else {
-      if (!input.sourceKey || !input.fromDate || !input.toDate) {
-        throw new Error("移动单次课程时必须提供 sourceKey、fromDate 和 toDate");
-      }
-      if (input.changes?.startPeriod !== undefined && input.changes.endPeriod !== undefined && input.changes.endPeriod < input.changes.startPeriod) {
-        throw new Error("endPeriod 不能早于 startPeriod");
-      }
-    }
-    const detail = input.operation === "add" ? `新增“${input.course!.courseName}”` : input.operation === "move" ? "移动指定课次" : "修改指定课程";
-    const actionRequest = await issueActionRequest("modify-schedule", `替我修改课表：${detail}`, input);
-    return completedResult("请求已记录。", { actionRequest });
-  },
-});
-
-const modifyScheduleFromRequestTool = createTool({
-  ...pythonToolOutput,
-  id: "modify-schedule-from-request",
-  description: "执行由 requestId 标识的已授权本地课表变更请求。仅处理 SEUDAILY_ACTION_REQUEST 消息。",
-  inputSchema: z.object({ requestId: z.string().startsWith("action-") }),
-  execute: async ({ requestId }, options) => {
-    const payload = await consumeActionRequest(requestId, "modify-schedule");
-    return runPythonTool("apply-agent-schedule-change", payload, options?.abortSignal);
-  },
-});
 
 const authorizePortalTool = createTool({
   ...pythonToolOutput,
@@ -396,9 +281,9 @@ export const proposeLocalActionTool = createTool({
     if (input.mode === "apply") {
       if (options?.requestContext?.get("seudailyFocus") === true) throw new Error("Focus 任务不能自行修改课表或创建其他关注");
       const payload = localActionExecutionPayload(input);
-      if (input.kind !== "create_focus") return runPythonTool("apply-agent-schedule-change", payload, options?.abortSignal);
+      if (input.kind !== "create_focus") return runPythonTool(localOperations[input.kind].action, payload, options?.abortSignal);
       const id = `focus-${randomUUID()}`;
-      const result = await runPythonTool<ToolResult>("upsert-focus", {item:{...payload,id,threadId:id,resourceId:'seudaily-focus-local',enabled:true}}, options?.abortSignal);
+      const result = await runPythonTool<ToolResult>(localOperations[input.kind].action, {item:{...payload,id,threadId:id,resourceId:'seudaily-focus-local',enabled:true}}, options?.abortSignal);
       if (result.status === 'completed') (await import('../focus-runtime.js')).startFocusRuntime();
       return result;
     }

@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "operations": {
+    "create_focus": {
+      "action": "upsert-focus",
+      "payload": "focus",
+      "summary": "关注已创建。",
+      "required": []
+    },
+    "add_schedule": {
+      "operation": "add",
+      "required": [
+        "course"
+      ],
+      "summary": "课程已新增。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "add"
+    },
+    "update_schedule": {
+      "operation": "update",
+      "required": [
+        "sourceKey",
+        "changes"
+      ],
+      "summary": "课程信息已修改。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "update"
+    },
+    "move_schedule": {
+      "operation": "move",
+      "required": [
+        "sourceKey",
+        "fromDate",
+        "toDate"
+      ],
+      "summary": "单次课程已移动。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "move"
+    },
+    "set_semester": {
+      "operation": "semester",
+      "required": [
+        "semester"
+      ],
+      "summary": "学期设置已更新。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "semester"
+    },
+    "add_schedule_once": {
+      "operation": "add_once",
+      "required": [
+        "date",
+        "course"
+      ],
+      "summary": "单次课程已新增。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "once"
+    },
+    "cancel_schedule_once": {
+      "operation": "cancel_once",
+      "required": [
+        "date",
+        "sourceKey"
+      ],
+      "summary": "单次课程已取消。",
+      "action": "apply-agent-schedule-change",
+      "payload": "schedule",
+      "handler": "once"
+    }
+  },
+  "schemas": {
+    "focus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "notice",
+            "course"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "categories": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "courseName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "teacherNames": {
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "sourceKeys": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "semester": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "summary": {
+          "default": true,
+          "type": "boolean"
+        },
+        "summaryInstructions": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "schedule": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "semester": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "startDate": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "totalWeeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "course": {
+          "type": "object",
+          "properties": {
+            "courseName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "teacherName": {
+              "default": "",
+              "type": "string",
+              "maxLength": 100
+            },
+            "weekday": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7
+            },
+            "startPeriod": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 13
+            },
+            "endPeriod": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 13
+            },
+            "weeks": {
+              "default": [],
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30
+              }
+            },
+            "classroom": {
+              "default": "",
+              "type": "string",
+              "maxLength": 200
+            },
+            "courseCode": {
+              "default": "",
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "courseName",
+            "startPeriod",
+            "endPeriod"
+          ],
+          "additionalProperties": false
+        },
+        "sourceKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changes": {
+          "type": "object",
+          "properties": {
+            "courseName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "teacherName": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "weekday": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7
+            },
+            "startPeriod": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 13
+            },
+            "endPeriod": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 13
+            },
+            "weeks": {
+              "minItems": 1,
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30
+              }
+            },
+            "classroom": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "courseCode": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "fromDate": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "toDate": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

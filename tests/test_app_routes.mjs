@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
 import {redactText} from '../src/agent/redaction.ts';
 import { z } from 'zod';
+import {localActionProposalSchema,localActionExecutionPayload,localOperations} from '../src/runtime/local-action-schema.ts';
 import { atomicWrite } from '../src/runtime/atomic-file.ts';
 const diskSource = await fs.readFile(new URL('../src/shared/disk-size.ts', import.meta.url), 'utf8');
 const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
@@ -33,7 +34,7 @@ async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   const calls = [];
-  const context = vm.createContext({ ...fs, ...path, randomUUID, z, diskSize, redactText, atomicWrite, resolveDocumentContexts:()=>[],
+  const context = vm.createContext({ localActionProposalSchema,localActionExecutionPayload,localOperations, ...fs, ...path, randomUUID, z, diskSize, redactText, atomicWrite, resolveDocumentContexts:()=>[],
     require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{list:async()=>[],sources:async()=>[],enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
     runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
     resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
@@ -150,4 +151,18 @@ test('successful document uploads retain originals while temporary parser inputs
   const failed = await route.handler({req:{parseBody:async () => ({file:new File([bytes],'失败.pdf')})},json:(body,status=200) => ({body,status})});
   assert.equal(failed.status,422);
   assert.equal((await fs.readdir(path.dirname(result.body.path))).length,1);
+});
+
+test('approved schedule payload retains its operation through execution',async t=>{
+ const f=await fixture(t),completed=[];
+ f.context.claimActionRequest=async()=>({state:'claimed',request:{id:'action-fixture',attemptId:'attempt',payload:{kind:'set_semester',payload:{operation:'semester',semester:{startDate:'2026-09-21'}}}}});
+ f.context.completeActionRequest=async(...args)=>completed.push(args);
+ f.context.failActionRequest=async()=>assert.fail('valid approved operation must execute');
+ const route=f.routes.find(route=>route.route==='/app/action-requests/:id/execute');
+ const response=await route.handler({req:{param:()=> 'action-fixture'},json:(body,status)=>({body,status})});
+ assert.equal(response.status,200);
+ assert.equal(f.calls[0].action,'apply-agent-schedule-change');
+ assert.equal(f.calls[0].payload.operation,'semester');
+ assert.equal(f.calls[0].payload.semester.startDate,'2026-09-21');
+ assert.equal(completed.length,1);
 });

@@ -68,6 +68,7 @@ import {
 import {
   localActionExecutionPayload,
   localActionProposalSchema,
+  localOperations,
 } from "./local-action-schema.js";
 import { executeAuthResume } from "./auth-resume-store.js";
 
@@ -338,7 +339,7 @@ export const appRoutes = [
           kind: data.kind,
           ...(data.kind === "create_focus"
             ? { focus: data.payload }
-            : { schedule: data.payload }),
+            : { schedule: Object.fromEntries(Object.entries(data.payload as Record<string, unknown>).filter(([key]) => key !== "operation")) }),
         });
         const payload = localActionExecutionPayload(proposal) as Record<
           string,
@@ -347,7 +348,7 @@ export const appRoutes = [
         let result: ToolResult;
         if (proposal.kind === "create_focus") {
           const id = `focus-${randomUUID()}`;
-          result = await runPythonTool<ToolResult>("upsert-focus", {
+          result = await runPythonTool<ToolResult>(localOperations[proposal.kind].action, {
             item: {
               ...payload,
               id,
@@ -359,7 +360,7 @@ export const appRoutes = [
           if (result.status === "completed") startFocusRuntime();
         } else
           result = await runPythonTool<ToolResult>(
-            "apply-agent-schedule-change",
+            localOperations[proposal.kind].action,
             payload,
           );
         if (result.status === "failed" || result.status === "cancelled") {

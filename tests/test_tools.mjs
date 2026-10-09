@@ -98,6 +98,8 @@ test("capability discovery exposes transformed input schemas and rejects incompl
       "tools/browser-tools", "tools/browser-config", "tools/web-reader", "tools/web-fetch", "tools/web-search", "tools/public-url",
     ]) await compileSource(`src/runtime/${module}.ts`, directory);
     await compileSource("src/shared/notice-sources.ts", directory);
+    await mkdir(join(directory, "src/seudaily"), {recursive:true});
+    await writeFile(join(directory, "src/seudaily/local_operations.json"), await readFile(join(root, "src/seudaily/local_operations.json")));
     await mkdir(join(directory, 'src/seudaily'), {recursive:true});
     await writeFile(join(directory, 'src/seudaily/notice_categories.json'), await readFile(join(root, 'src/seudaily/notice_categories.json')));
     await mkdir(join(directory, 'src/runtime/knowledge'), {recursive:true});
