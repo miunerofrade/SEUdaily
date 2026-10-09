@@ -65,7 +65,7 @@ button { color: inherit; }
 .mini-status.online { background: #43b883; box-shadow: 0 0 0 3px rgba(67,184,131,.1); }
 
 .chat-panel { min-width: 0; height: 100vh; display: grid; grid-template-rows: 58px minmax(0, 1fr) auto; background: #fff; }
-.topbar { height: 58px; display: flex; align-items: center; padding: 0 21px; background: rgba(255,255,255,.92); z-index: 5; }
+.topbar { height: 58px; display: flex; align-items: center; padding: 0 21px; background: transparent; z-index: 5; }
 .topbar h1 { max-width: min(600px, 60vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-size: 14px; font-weight: 550; }
 .topbar-product { color: #0d0d0d; font-size: 18px; font-weight: 400; letter-spacing: -.01em; }
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }

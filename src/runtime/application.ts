@@ -1,3 +1,4 @@
+import {generateFirstTurnTitle} from "./conversation-title.js";
 import { resolveDocumentContexts } from './document-context.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { DeepSeekProvider } from '../agent/provider.js';
@@ -15,6 +16,11 @@ let closeWorkspace: (() => void) | undefined;
 export function closeApplicationWorkspace() { closeWorkspace?.(); }
 export const agentRuntime = new AgentRuntime({
     store: agentStore, provider: new DeepSeekProvider(), instructions: agentInstructions, hydrate: hydrateImages, resolveDocuments: resolveDocumentContexts,
+    onCompleted: run => {
+        if (run.context.focus || run.context.resourceId === 'seudaily-focus-local' || run.context.resourceId.startsWith('focus-')) return;
+        const document = resolveDocumentContexts(run.context.documentRefs)[0];
+        return generateFirstTurnTitle({threadId:run.context.threadId,resourceId:run.context.resourceId,titleInput:document?.name ?? ''});
+    },
     memory: { windowTokens: Number(envValue('SEUDAILY_CONTEXT_WINDOW_TOKENS')) || 512000, ratio: Number(envValue('SEUDAILY_OBSERVATION_COMPRESSION_RATIO')) || .8, lastMessages: Number(envValue('SEUDAILY_MEMORY_LAST_MESSAGES')) || 200 },
     tools: async (context) => {
         context.focus = await resolveFocusPermission(context);

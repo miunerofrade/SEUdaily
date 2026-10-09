@@ -17,7 +17,6 @@ import {
 } from "./local-action-schema.js";
 import { executeAuthResume } from "./auth-resume-store.js";
 import {
-  titleGenerationTasks,
   compactTitleInput,
   generateFirstTurnTitle,
 } from "./conversation-title.js";
@@ -39,15 +38,7 @@ export const conversationsRoutes = [
       if (!threadId || !resourceId || !titleInput) {
         return c.json({ error: "缺少生成标题所需的信息" }, 400);
       }
-      const taskKey = `${resourceId}:${threadId}`;
-      const running = titleGenerationTasks.get(taskKey);
-      if (running) return c.json(await running);
-      const task = generateFirstTurnTitle({
-        threadId,
-        resourceId,
-        titleInput,
-      }).finally(() => titleGenerationTasks.delete(taskKey));
-      titleGenerationTasks.set(taskKey, task);
+      const task = generateFirstTurnTitle({threadId,resourceId,titleInput});
       try {
         return c.json(await task);
       } catch (error) {

@@ -25,6 +25,7 @@ export class AgentRuntime {
         resolveDocuments?: (refs: unknown) => Array<{ name: string; markdown: string }>;
         hydrate?: (messages: ModelMessage[]) => Promise<ModelMessage[]>;
         maxSteps?: number;
+        onCompleted?: (run: RunState) => Promise<unknown> | void;
         memory?: {
             windowTokens?: number;
             ratio?: number;
@@ -302,6 +303,8 @@ export class AgentRuntime {
                 if (!run.pendingCalls.length) {
                     run.status = 'completed';
                     await this.persist(run);
+                    // Post-processing must never delay or fail the completed answer.
+                    void Promise.resolve().then(() => this.config.onCompleted?.(run)).catch(() => {});
                     yield event('finish', { usage: run.usage });
                     return;
                 }

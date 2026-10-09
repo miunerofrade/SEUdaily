@@ -148,3 +148,14 @@ test('refusing a pending tool does not validate or execute its expired capabilit
   const run=await f.store.getRun(context.runToken);
   assert.equal(executed,0);assert.match(run.messages.find(item=>item.role==='tool').content,/用户拒绝/);
 });
+
+test('completed post-processing sees persisted answers and cannot delay the reply',async t=>{
+ let release,started;const began=new Promise(resolve=>started=resolve);
+ const f=setup(t,[{role:'assistant',content:'answer'}],{}, {onCompleted:async run=>{
+  assert.equal((await f.store.getRun(run.id)).status,'completed');started();
+  await new Promise(resolve=>release=resolve);
+ }});
+ const context=ctx();const output=await events(f.runtime.runTurn(user('topic'),context));
+ assert.ok(output.some(event=>event.type==='finish'));await began;release();
+ assert.equal((await f.store.getRun(context.runToken)).status,'completed');
+});

@@ -1,3 +1,4 @@
+import type { AgentStore } from "../agent/storage.js";
 import { agentStore } from "./storage.js";
 export const titleGenerationTasks = new Map<
   string,
@@ -72,98 +73,65 @@ async function requestConversationTitle(titleInput: string) {
   return title;
 }
 
-export async function generateFirstTurnTitle(input: {
-  threadId: string;
-  resourceId: string;
-  titleInput: string;
-}) {
-  const memoryStore = agentStore;
-  if (!memoryStore) throw new Error("会话存储不可用");
-  const thread = await memoryStore.getThreadById({
-    threadId: input.threadId,
-    resourceId: input.resourceId,
-  });
-  if (!thread)
-    return { title: "", generated: false, reason: "thread-not-found" };
-  if (typeof thread.metadata?.titleGeneratedAt === "string") {
-    return {
-      title: thread.title?.trim() ?? "",
-      generated: false,
-      reason: "already-generated",
-    };
+type TitleInput = { threadId: string; resourceId: string; titleInput: string };
+type TitleDependencies = { store?: AgentStore; request?: (text: string) => Promise<string> };
+
+function messageText(content: any): string {
+  if (typeof content === "string") return compactTitleInput(content);
+  const parts = Array.isArray(content) ? content : content?.parts ?? [];
+  return compactTitleInput(parts.filter((part: any) => part.type === "text").map((part: any) => part.text ?? "").join("\n"));
+}
+
+export function hasConversationTopic(text: string): boolean {
+  const value = text.trim().replace(/[\s，。！？!?、,.：:；;～~]+/g, "").toLowerCase();
+  return Boolean(value) && !/^(你好|您好|嗨|哈喽|hello|hi|hey|在吗|你是谁|介绍一下自己|谢谢|继续|好的|ok)$/.test(value)
+    && !/^\/|^<\/?(?:upload|attachment)>/i.test(text.trim());
+}
+
+/** All entrances share background naming, including deduplication of client requests. */
+export function generateFirstTurnTitle(input: TitleInput, dependencies: TitleDependencies = {}) {
+  const key = `${input.resourceId}:${input.threadId}`;
+  const running = titleGenerationTasks.get(key);
+  if (running) return running;
+  const task = generateTitle(input, dependencies).finally(() => titleGenerationTasks.delete(key));
+  titleGenerationTasks.set(key, task);
+  return task;
+}
+
+async function generateTitle(input: TitleInput, dependencies: TitleDependencies) {
+  const memoryStore = dependencies.store ?? agentStore;
+  const getThread = () => memoryStore.getThreadById({threadId:input.threadId,resourceId:input.resourceId});
+  const thread = await getThread();
+  if (!thread) return {title:"",generated:false,reason:"thread-not-found"};
+  if (thread.metadata?.titleManual) return {title:thread.title ?? "",generated:false,reason:"manual-title"};
+  if (typeof thread.metadata?.titleGeneratedAt === "string")
+    return {title:thread.title ?? "",generated:false,reason:"already-generated"};
+  const history = await memoryStore.allMessages(input.threadId,input.resourceId);
+  const users = history.filter(message => message.role === "user");
+  if (!users.length) return {title:thread.title ?? "",generated:false,reason:"no-user-message"};
+  // Preserve pre-existing named histories, while recovering WeChat's old temporary titles.
+  if (users.length !== 1 && thread.title?.trim() && !thread.metadata?.titleProvisional
+      && input.resourceId !== "seudaily-wechat-local")
+    return {title:thread.title,generated:false,reason:"not-first-turn"};
+  const topic = users.map(message => messageText(message.content)).find(hasConversationTopic);
+  const titleInput = topic || (hasConversationTopic(input.titleInput) ? input.titleInput : "");
+  if (!titleInput) {
+    await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,metadata:{...thread.metadata,titleProvisional:true}});
+    return {title:thread.title ?? "",generated:false,reason:"waiting-for-topic"};
   }
-  const history = await memoryStore.listMessages({
-    threadId: input.threadId,
-    resourceId: input.resourceId,
-    perPage: 20,
-    includeTotal: false,
-  });
-  const userMessageCount = history.messages.filter(
-    (message) => message.role === "user",
-  ).length;
-  if (userMessageCount !== 1 && thread.title?.trim()) {
-    return {
-      title: thread.title?.trim() ?? "",
-      generated: false,
-      reason: "not-first-turn",
-    };
-  }
-  // CLI histories may predate automatic naming. Recover their original topic,
-  // never overwrite a named multi-turn conversation with a later request.
-  if (!thread.title?.trim()) {
-    const first = await memoryStore.firstUserMessage(
-      input.threadId,
-      input.resourceId,
-    );
-    if (!first)
-      return { title: "", generated: false, reason: "no-user-message" };
-    const content = first.content as any;
-    const firstText =
-      typeof content === "string"
-        ? content
-        : (Array.isArray(content) ? content : (content?.parts ?? []))
-            .filter((part: any) => part.type === "text")
-            .map((part: any) => part.text ?? "")
-            .join("\n");
-    input = {
-      ...input,
-      titleInput: compactTitleInput(firstText) || input.titleInput,
-    };
-  }
-  await memoryStore.patchThread({
-    id: input.threadId,
-    preserveUpdatedAt: true,
-    metadata: {
-      ...thread.metadata,
-      titleGenerationAttempted: true,
-      titleGenerationAttemptedAt: new Date().toISOString(),
-    },
-  });
+  await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,metadata:{...thread.metadata,titleProvisional:true,titleGenerationAttempted:true,titleGenerationAttemptedAt:new Date().toISOString()}});
   let title: string;
   try {
-    title = await requestConversationTitle(input.titleInput);
-  } catch (error) {
-    await memoryStore.patchThread({
-      id: input.threadId,
-      preserveUpdatedAt: true,
-      metadata: {
-        ...thread.metadata,
-        titleGenerationAttempted: true,
-        titleGenerationError:
-          error instanceof Error ? error.message : "标题生成失败",
-      },
-    });
+    title = await (dependencies.request ?? requestConversationTitle)(titleInput);
+  } catch(error) {
+    const latest = await getThread();
+    if (latest) await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,metadata:{...latest.metadata,titleGenerationError:error instanceof Error ? error.message : "标题生成失败"}});
     throw error;
   }
-  await memoryStore.patchThread({
-    id: input.threadId,
-    preserveUpdatedAt: true,
-    title,
-    metadata: {
-      ...thread.metadata,
-      titleGenerationAttempted: true,
-      titleGeneratedAt: new Date().toISOString(),
-    },
-  });
-  return { title, generated: true };
+  const latest = await getThread();
+  if (!latest) return {title:"",generated:false,reason:"thread-not-found"};
+  if (latest.metadata?.titleManual || latest.metadata?.titleGeneratedAt)
+    return {title:latest.title ?? "",generated:false,reason:"title-changed"};
+  await memoryStore.patchThread({id:input.threadId,preserveUpdatedAt:true,title,metadata:{...latest.metadata,titleProvisional:false,titleGenerationError:undefined,titleGeneratedAt:new Date().toISOString()}});
+  return {title,generated:true};
 }

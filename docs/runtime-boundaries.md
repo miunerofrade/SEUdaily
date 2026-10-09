@@ -22,3 +22,5 @@
 验证使用全量 Python/Node 测试、两端类型检查和构建。跨语言对照测试在 `test_local_operations.py` / `.mjs`，第三来源完整流程在 `test_notice_adapters.py` 和 `test_notice_sources.mjs`，终端交互在 `test_terminal_input.mjs`。
 
 课表缓存约定：远端同步的每个学期均保存 `schedule.<学期编号>.json`；`schedule.json` 保留为当前课表入口，同步当前学期时两份一起更新。旧数据仅有主缓存时，显式学期读取只在 `selectedSemester` 完全一致时补齐对应学期文件；主缓存当前学期的数据优先，避免旧副本遮蔽刷新结果。远端各路径统一通过 `schedule_cache._write_schedule_cache` 写入。
+
+会话自动命名由后端完成回调统一触发，微信、网页、终端复用 `conversation-title.ts`。问候语保留临时标题，首次明确主题生成正式标题；手动标题及已生成标题不覆盖。命名在后台执行，重复请求按会话合并，失败可在后续回复后重试。网页顶部只截断显示，完整标题仍保存在会话中。

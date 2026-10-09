@@ -1003,7 +1003,7 @@ export default function App() {
       {view === "chat" ? <main className={`chat-panel ${active.messages.length ? "has-messages" : "empty"}`}>
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setNavOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
-          {active.messages.length ? <h1>{active.title}</h1> : <span className="topbar-product">SEUdaily</span>}
+          {active.messages.length ? <h1 title={active.title}>{Array.from(active.title).slice(0, 10).join("")}{Array.from(active.title).length > 10 ? "…" : ""}</h1> : <span className="topbar-product">SEUdaily</span>}
           <div className="topbar-actions">
             <button ref={panelToggleRef} className={`icon-button task-panel-toggle ${rightOpen ? "is-open" : ""}`} onClick={() => { setSourceMessage(null); setRightOpen((value) => !value); }} aria-expanded={rightOpen} aria-label={rightOpen ? "关闭任务面板" : "打开任务面板"}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="5" cy="6" r="2.5" /><path d="M13 6h8" /><circle cx="5" cy="18" r="2.5" /><path d="M13 18h8" /></svg>
