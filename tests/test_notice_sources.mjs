@@ -72,7 +72,7 @@ test('source identifiers remain discoverable without matching arbitrary words',a
 
 test('focus proposals validate columns against their selected source',async()=>{
  const {focusActionSchema}=await import('../src/runtime/local-action-schema.ts');
- assert.equal(focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'cse',categories:['news']}).source,'cse');
+ assert.equal(focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'cse',categories:['teaching']}).source,'cse');
  assert.throws(()=>focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'cse',categories:['academic']}));
  assert.throws(()=>focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'unknown'}));
 });
