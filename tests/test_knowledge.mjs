@@ -212,3 +212,35 @@ test('failed vector deletion preserves the original for retry instead of reporti
  const [stored]=await service.list();assert.equal(stored.state,'deleting');assert.equal(await readFile(stored.path,'utf8'),'不可丢失的原文');
  fail=false;await service.remove(doc.id);assert.equal((await service.list()).length,0);
 });
+
+
+test('nested bundled regulations retire the old whole handbook without removing user-owned documents', async t => {
+ const f=await fixture(t); f.config.key='';
+ const old=await f.service.enqueueBuiltin('old-handbook','整本.md',Buffer.from('旧整本'));
+ const user=await f.service.enqueueBuiltin('old-shared','共享.md',Buffer.from('用户也上传的原文'));
+ await f.service.enqueue('共享.md',Buffer.from('用户也上传的原文'),undefined,join(f.root,'user.md'));
+ const directory=join(f.root,'references'),folder=join(directory,'手册','学籍');await mkdir(folder,{recursive:true});
+ const bytes=Buffer.from('# 学籍规定\n\n第一条 原文');await writeFile(join(folder,'学籍规定.md'),bytes);
+ await writeFile(join(directory,'manifest.json'),JSON.stringify({documents:[{id:'handbook-regulation',file:'手册/学籍/学籍规定.md',sha256:createHash('sha256').update(bytes).digest('hex')}]}));
+ assert.equal(await registerBundledKnowledge(f.service,directory),1);
+ const docs=await f.service.list();assert.equal(docs.length,2);assert.ok(!docs.some(x=>x.id===old.id));assert.ok(docs.some(x=>x.id===user.id));
+ const groups=await f.service.builtinGroups();assert.deepEqual([...groups.values()],['手册 / 学籍']);
+ const calls=f.calls.length;await registerBundledKnowledge(f.service,directory);assert.equal(f.calls.length,calls);assert.equal((await f.service.list()).length,2);
+});
+
+test('shipped handbook manifest contains complete regulations, preserves tables and excludes the whole duplicate',async()=>{
+ const root=new URL('../docs/references/',import.meta.url);
+ const manifest=JSON.parse(await readFile(new URL('manifest.json',root),'utf8'));
+ const items=manifest.documents.filter(x=>x.id.startsWith('student-handbook-2025-'));
+ assert.equal(items.length,46);assert.ok(!manifest.documents.some(x=>x.id==='student-handbook-2025'));
+ const original=await readFile(new URL('东南大学大学生手册2025-校订版.md',root),'utf8');
+ const split=(await Promise.all(items.map(async item=>{
+  const bytes=await readFile(new URL(item.file,root));assert.equal(createHash('sha256').update(bytes).digest('hex'),item.sha256);return bytes.toString();
+ }))).join('\n');
+ // Every original paragraph and table row survives, aside from headings/cover and the joined title.
+ const expected=original.slice(original.indexOf('## ')).split('\n').filter(line=>line.trim() && !line.startsWith('#'));
+ for (const line of expected) {
+  if(line.startsWith('毕业设计（论文）工作条例2010')) assert.ok(split.includes(line.replace('毕业设计（论文）工作条例','')));
+  else assert.ok(split.includes(line),`Missing original content: ${line.slice(0,60)}`);
+ }
+});

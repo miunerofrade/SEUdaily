@@ -110,6 +110,7 @@ export const libraryRoutes = [
           .map((document) => [document.path, document]),
       );
       const builtinIds = await knowledge.builtinIds();
+      const builtinGroups = await knowledge.builtinGroups();
       const originals = await walkFiles(
         resolve(projectRoot, ".seudaily", "knowledge", "files"),
       );
@@ -124,7 +125,7 @@ export const libraryRoutes = [
                   category: builtinIds.has(document.id)
                     ? "references"
                     : "documents",
-                  course: builtinIds.has(document.id) ? "参考资料" : "上传文件",
+                  course: builtinIds.has(document.id) ? builtinGroups.get(document.id) || "其他参考资料" : "上传文件",
                   teacher: "本地文件",
                 },
               ]
@@ -212,6 +213,11 @@ export const libraryRoutes = [
               );
           }
         }
+      } else if (!query && category === "references") {
+        if (!course) {
+          level = "courses";
+          directories = groups(chosen.map(file => file.course));
+        } else chosen = chosen.filter(file => file.course === course);
       } else if (
         !query &&
         !["documents", "references", "images"].includes(category)

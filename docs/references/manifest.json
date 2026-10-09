@@ -1,14 +1,239 @@
 {
   "documents": [
     {
-      "id": "student-handbook-2025",
-      "file": "东南大学大学生手册2025-校订版.md",
-      "sha256": "da8790e52db123bd40f5d238c67f986b84e99f01b830754c2bb0e6eba698c148"
-    },
-    {
       "id": "sports-guide",
       "file": "东南大学学生体育指导手册-校订版.md",
       "sha256": "6f60025152e657f01b9572d581e297deb94556ef07fe2c573255b7c0008d2bb7"
+    },
+    {
+      "id": "student-handbook-2025-01",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科学生学籍管理规定.md",
+      "sha256": "8166a50b62603c58ffb358f86daa8c8a563f513c4b2a2d18bf246335a17fd35c"
+    },
+    {
+      "id": "student-handbook-2025-02",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科港澳台学生学籍管理补充规定.md",
+      "sha256": "3a5113fba5f915c02c2cb3084bc1964ea64fda0d477445c0e201b0a76cf0e8be"
+    },
+    {
+      "id": "student-handbook-2025-03",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科高水平运动员学籍管理规定.md",
+      "sha256": "28bf48a1f608bac9660e4a94dc12155559b4b28b6d3e497751d45ad81c83ae9c"
+    },
+    {
+      "id": "student-handbook-2025-04",
+      "file": "大学生手册2025/01-学籍与培养/东南大学学士学位授予实施办法.md",
+      "sha256": "130fcc9d1b3c887091b0af4866dbb5482dc5e0fb875ba24c5df2f4c0de012ff0"
+    },
+    {
+      "id": "student-handbook-2025-05",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科学生修读辅修专业、辅修学士学位管理办法.md",
+      "sha256": "d9438cd8526522cbbc3b8836af3a50345a67f3cac45e79398e8462ab6665ef98"
+    },
+    {
+      "id": "student-handbook-2025-06",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科生转专业工作实施办法.md",
+      "sha256": "efd2669ffffbd0115a82b8335235278344a48c53414c2ba49c6bc4ebd6bffd9e"
+    },
+    {
+      "id": "student-handbook-2025-07",
+      "file": "大学生手册2025/01-学籍与培养/东南大学学生转学管理办法.md",
+      "sha256": "550b982f24a29c74d1f5c2cbb5cf0e6bf1c06b391759707f8612c45e187a28e3"
+    },
+    {
+      "id": "student-handbook-2025-08",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科生大类招生专业分流工作实施办法.md",
+      "sha256": "d7682f297dcb41dad08dc7627340a2dd0dcddc6f561526fe5ba4eb9412ab8b32"
+    },
+    {
+      "id": "student-handbook-2025-09",
+      "file": "大学生手册2025/01-学籍与培养/东南大学推荐优秀应届本科毕业生免试攻读研究生工作实施办法.md",
+      "sha256": "c186dcc367deab4ef54dfd44e1793a09fcdb276413363ef38e3e6b2d03af725c"
+    },
+    {
+      "id": "student-handbook-2025-10",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科学生延长学习年限实施办法.md",
+      "sha256": "d8ddeecd30347ce9c28914beaeca3619f854f1a0d2f670f42ce5e9824af8f3d6"
+    },
+    {
+      "id": "student-handbook-2025-11",
+      "file": "大学生手册2025/01-学籍与培养/东南大学全日制本科学习优秀生选拔及培养管理办法.md",
+      "sha256": "6a05f6d63f7c370c0895f7fe4d12872e2a96f3a68e1e15c272eb71ae644a3d05"
+    },
+    {
+      "id": "student-handbook-2025-12",
+      "file": "大学生手册2025/01-学籍与培养/东南大学强基计划学生管理和研究生衔接培养实施办法.md",
+      "sha256": "6eddc8c84f67f4bbe4d4ae88a4d99a4ec6ddd709e53b0ecd2d2cf68434e0388a"
+    },
+    {
+      "id": "student-handbook-2025-13",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学全日制本科学生学分制管理办法.md",
+      "sha256": "4df8b00f8090e135de9c08c7ec9e06b0be860fe8ef1e450affcc4d3528e80e3e"
+    },
+    {
+      "id": "student-handbook-2025-14",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学学生考试管理办法.md",
+      "sha256": "9181ff0d731fb315f0416f8dcaa4d7b724ba7e09ca778bfdb6f1427db9e2262d"
+    },
+    {
+      "id": "student-handbook-2025-15",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学全日制本科学生毕业设计（论文）管理办法.md",
+      "sha256": "213ad0c62e2c3247c5c8fdec25c3e6e7d5ec837dfdf56e98df23626bd88c13d6"
+    },
+    {
+      "id": "student-handbook-2025-16",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学全日制本科学生“卓越工程师教育培养计划”毕业设计（论文）工作条例.md",
+      "sha256": "b86a19494798e83564bf9afe5539c1ab91fa3d3e2d4df381724079d8a251d46d"
+    },
+    {
+      "id": "student-handbook-2025-17",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学全日制本科学生公派交流学习管理办法.md",
+      "sha256": "82da9b6693e6e8cccd68e04d49ad1e288c2f7f16f7085509333d355ee657ead0"
+    },
+    {
+      "id": "student-handbook-2025-18",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学全日制本科学生公派交流学习课程学分认定管理办法.md",
+      "sha256": "fd49e7777b3d78751e881acde6b48f5177dfab675c9ab421fcf4d41c2c745e16"
+    },
+    {
+      "id": "student-handbook-2025-19",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学本科生课外研学成绩认定办法.md",
+      "sha256": "02c68a2937b181393ec75c8a2a24c31f6dc261c3c7f629efce1f663f98a60deb"
+    },
+    {
+      "id": "student-handbook-2025-20",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学本科生社会实践课程学分认定办法.md",
+      "sha256": "cda293b6e38e6b22173e87e0ba5643bf089f6c253db892701a23f38a73d69d31"
+    },
+    {
+      "id": "student-handbook-2025-21",
+      "file": "大学生手册2025/02-课程考核与实践/东南大学本科生学科竞赛管理办法.md",
+      "sha256": "8c8e6815d39565359f22c1b56ee3c588f31e363a9e76065c090b865fcc72da0e"
+    },
+    {
+      "id": "student-handbook-2025-22",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科学生奖励条例.md",
+      "sha256": "75b8adcd41d194f2d614ddaf1fc59c43fcad37b259bb7dd17cc662b4476f4fcf"
+    },
+    {
+      "id": "student-handbook-2025-23",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科学生国家奖学金管理办法.md",
+      "sha256": "1b9166f78084dd6a205e259c971a8cf3021babce202e77b6684f2bebafbcbda0"
+    },
+    {
+      "id": "student-handbook-2025-24",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科学生国家励志奖学金管理办法.md",
+      "sha256": "a0768a5a7944ac6357fd94a7ba777bd1469ad634802ca8741305d0e85b796b19"
+    },
+    {
+      "id": "student-handbook-2025-25",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科学生校长奖学金评选实施办法.md",
+      "sha256": "72452a1777e20aa8ef0f52d1856d118f94f1a7f259ea24146ee547f9402d5a83"
+    },
+    {
+      "id": "student-handbook-2025-26",
+      "file": "大学生手册2025/03-奖励与资助/东南大学本科优秀毕业生评选实施办法.md",
+      "sha256": "4be604113a6966ff5843df42b7474e460fbb5b1b107a0d4b89ff44900ec84928"
+    },
+    {
+      "id": "student-handbook-2025-27",
+      "file": "大学生手册2025/03-奖励与资助/东南大学本科先进班集体评选实施办法.md",
+      "sha256": "50723fed687fe7c42964f91578f36bde4eb20d921f0cf6672e64f46a1487c975"
+    },
+    {
+      "id": "student-handbook-2025-28",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科三好学生、三好学生标兵、优秀学生干部评选实施办法.md",
+      "sha256": "01396d5dfd119d0a66093405554bd907afe8aaf6d8b488da36ca368e17e546fe"
+    },
+    {
+      "id": "student-handbook-2025-29",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科生经济困难学生资助管理办法.md",
+      "sha256": "7ec9e9a3d5500d88b5ff669142126bb9f6415df11e7c08c2d7f6f5e9ac9e9ade"
+    },
+    {
+      "id": "student-handbook-2025-30",
+      "file": "大学生手册2025/03-奖励与资助/东南大学家庭经济困难学生认定工作办法.md",
+      "sha256": "963bb9ff6d66d349c6406c916d00517b69fc33a7a523a6b5b19c725d48b4d1fd"
+    },
+    {
+      "id": "student-handbook-2025-31",
+      "file": "大学生手册2025/03-奖励与资助/东南大学全日制本科、预科学生国家助学金管理办法.md",
+      "sha256": "1ebae592a507f4b04b6431cf8f9554b1908baf25d47583e9871451cc668e86e7"
+    },
+    {
+      "id": "student-handbook-2025-32",
+      "file": "大学生手册2025/03-奖励与资助/东南大学学生勤工助学管理办法.md",
+      "sha256": "4b5a80bbc9e16e3b1f121541fbd8a16bedaca9debcd97c6e8af31eadcf926a61"
+    },
+    {
+      "id": "student-handbook-2025-33",
+      "file": "大学生手册2025/03-奖励与资助/东南大学学生申请国家助学贷款办法.md",
+      "sha256": "87bf6e8a1d0642ed904e1239e8ad6ae43e3bf7f4e0fbfc63db19a882c6b1c958"
+    },
+    {
+      "id": "student-handbook-2025-34",
+      "file": "大学生手册2025/03-奖励与资助/东南大学学生应征入伍奖励支持办法.md",
+      "sha256": "7773dd8954df6c1ec6f630629ef7b8623d272ba8f398e92df647bdded28b2d0a"
+    },
+    {
+      "id": "student-handbook-2025-35",
+      "file": "大学生手册2025/04-处分与申诉/东南大学学生违纪处分条例.md",
+      "sha256": "d4ca83f20fe218bd9967022e6174b84e39f763603d14d1864577f6ba64e6b83f"
+    },
+    {
+      "id": "student-handbook-2025-36",
+      "file": "大学生手册2025/04-处分与申诉/东南大学学生申诉实施办法.md",
+      "sha256": "9d80c950021e928be223c95f01e869fcaf4aaf261defd81e8635246c864f53a9"
+    },
+    {
+      "id": "student-handbook-2025-37",
+      "file": "大学生手册2025/04-处分与申诉/东南大学全日制本科结业生、毕业生回校参加考试发生违规行为处理办法.md",
+      "sha256": "737da3d90e0811c5ce4ea0b8875a2cb416591e2f5288d69941430870b80a9da4"
+    },
+    {
+      "id": "student-handbook-2025-38",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学学生公寓管理办法.md",
+      "sha256": "a638af78500cdd160a628b0e9606dd6a3873006074dafb941bc8ca6b2593dd11"
+    },
+    {
+      "id": "student-handbook-2025-39",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学图书馆管理规则.md",
+      "sha256": "4c4cdafcb1503f3035e057ee20bb942074ca23c49776c239ad07dd874b420c48"
+    },
+    {
+      "id": "student-handbook-2025-40",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学学生出版物管理办法.md",
+      "sha256": "ef08db3bf48cf3d145b6cb36e08e0ac97334500b7b0634f4a92a217d363d30e9"
+    },
+    {
+      "id": "student-handbook-2025-41",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学校园网络系统安全管理制度.md",
+      "sha256": "1165155f9e154513c9b3f7dfb5e9bbf10ffe1917cff99ed9df5c935cfa370903"
+    },
+    {
+      "id": "student-handbook-2025-42",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学学生收费及退费管理办法（暂行）.md",
+      "sha256": "b12a561ef9e355f7df7cdee8421b388306526192cbc01ded18341d7a69cea9f8"
+    },
+    {
+      "id": "student-handbook-2025-43",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学学生实验室安全守则（试行）.md",
+      "sha256": "4fab88776e916bc0d274236db19abc5c868cf0f552307903a4d6a3cca4c8e570"
+    },
+    {
+      "id": "student-handbook-2025-44",
+      "file": "大学生手册2025/05-校园管理与服务/东南大学学生因公出国（境）管理办法.md",
+      "sha256": "63cbb84261f86cda3f2965db23838d60ce888f937da15ac46a9a6270cf7ee761"
+    },
+    {
+      "id": "student-handbook-2025-45",
+      "file": "大学生手册2025/06-国家规章/普通高等学校学生管理规定.md",
+      "sha256": "0cdbaf15b0cf64982bfa18d12ef320313fe29548ee6dff07eb8fd09965014c4d"
+    },
+    {
+      "id": "student-handbook-2025-46",
+      "file": "大学生手册2025/07-管理与服务/常用部门联系方式与应急电话.md",
+      "sha256": "47714fb2f06bdd0d28fedff2353823bd5a43daf3f4d663d7f8a348c537abe492"
     }
   ]
 }

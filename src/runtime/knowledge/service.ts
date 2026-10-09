@@ -73,6 +73,9 @@ export class KnowledgeService {
     await this.db.execute(
       "CREATE TABLE IF NOT EXISTS knowledge_builtin_sources (id TEXT PRIMARY KEY, documentId TEXT NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE)",
     );
+    const builtinColumns = await this.db.execute("PRAGMA table_info(knowledge_builtin_sources)");
+    if (!builtinColumns.rows.some(row => row.name === "groupName"))
+      await this.db.execute("ALTER TABLE knowledge_builtin_sources ADD COLUMN groupName TEXT NOT NULL DEFAULT '其他参考资料'");
     await this.db.execute(
       "CREATE TABLE IF NOT EXISTS knowledge_retries (documentId TEXT PRIMARY KEY REFERENCES knowledge_documents(id) ON DELETE CASCADE, attempts INTEGER NOT NULL, nextAttemptAt INTEGER NOT NULL)",
     );
@@ -200,7 +203,7 @@ export class KnowledgeService {
           });
     });
   }
-  async enqueueBuiltin(id: string, name: string, bytes: Buffer) {
+  async enqueueBuiltin(id: string, name: string, bytes: Buffer, groupName = "其他参考资料") {
     await this.ready;
     const previous = (
       await this.db.execute({
@@ -211,8 +214,8 @@ export class KnowledgeService {
     const result = await this.enqueue(name, bytes);
     await this.serialize(() =>
       this.db.execute({
-        sql: "INSERT INTO knowledge_builtin_sources VALUES(?,?) ON CONFLICT(id) DO UPDATE SET documentId=excluded.documentId",
-        args: [id, result.id],
+        sql: "INSERT INTO knowledge_builtin_sources(id,documentId,groupName) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET documentId=excluded.documentId,groupName=excluded.groupName",
+        args: [id, result.id, groupName],
       }),
     );
     const document = (
@@ -239,6 +242,24 @@ export class KnowledgeService {
         await this.remove(oldId);
     }
     return result;
+  }
+  async builtinGroups(): Promise<Map<string, string>> {
+    await this.ready;
+    const result = await this.db.execute("SELECT documentId,groupName FROM knowledge_builtin_sources");
+    return new Map(result.rows.map(row => [String(row.documentId), String(row.groupName)]));
+  }
+  /** Retire removed manifest entries, preserving documents also owned by user uploads. */
+  async retireBuiltinSources(activeIds: Set<string>) {
+    await this.ready;
+    const result = await this.db.execute("SELECT id,documentId FROM knowledge_builtin_sources");
+    for (const row of result.rows) {
+      if (activeIds.has(String(row.id))) continue;
+      const documentId = String(row.documentId);
+      const owners = await this.db.execute({sql:"SELECT id FROM knowledge_builtin_sources WHERE documentId=?",args:[documentId]});
+      if (owners.rows.length === 1 && !(await this.sources(documentId)).length)
+        await this.remove(documentId);
+      else await this.db.execute({sql:"DELETE FROM knowledge_builtin_sources WHERE id=?",args:[row.id]});
+    }
   }
   async builtinIds(): Promise<Set<string>> {
     await this.ready;
