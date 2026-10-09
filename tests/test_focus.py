@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import seudaily.focus as focus_module
 from seudaily.focus import FocusSemanticModel, FocusService
-from seudaily.jwc import JwcService
+from seudaily.jwc import WebplusNoticeAdapter as JwcService
 from seudaily.schedule import ScheduleService
 from seudaily.service import CourseService
 
@@ -523,3 +523,15 @@ def test_corrupt_focus_state_is_preserved_instead_of_reset(tmp_path):
     with pytest.raises(ValueError, match="原文件已保留"):
         service.list()
     assert state_file.read_text(encoding="utf-8") == original
+
+
+def test_notice_source_and_category_changes_clear_search_history(tmp_path):
+    service = FocusService(state_file=tmp_path / "focus.json")
+    saved = service.upsert({"kind": "notice", "title": "通知", "description": "关注通知"})["item"]
+    assert saved["source"] == "jwc"
+    existing = {**saved, "seenArticleIds": ["old"], "reviewedArticleIds": ["old"], "generatedQueries": ["old"]}
+    same = service._normalize_item({"enabled": False}, existing)
+    assert same["seenArticleIds"] == ["old"]
+    for patch in [{"categories": ["academic"]}, {"source": "cse"}]:
+        changed = service._normalize_item(patch, existing)
+        assert changed["seenArticleIds"] == changed["reviewedArticleIds"] == changed["generatedQueries"] == []

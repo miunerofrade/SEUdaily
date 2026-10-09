@@ -425,6 +425,7 @@ class WebplusNoticeAdapter:
             parse_document=parse_document,
             refresh=refresh,
             source_name=self.config.name,
+            notice=article,
         )
         warnings = (
             []

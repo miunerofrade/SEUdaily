@@ -639,6 +639,7 @@ export type FocusItem = {
   threadId?: string;
   resourceId?: string;
   description?: string;
+  source?: string;
   generatedQueries?: string[];
   keywords?: string[];
   categories?: string[];

@@ -1,3 +1,4 @@
+import { noticeSourceIds, noticeSources, requireNoticeSource } from "../../../../src/shared/notice-sources";
 
 
 import { useImeComposition } from "../ime";
@@ -98,6 +99,8 @@ export function FocusPage({
   const [adding, setAdding] = useState<"notice" | "course" | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [source, setSource] = useState("jwc");
+  const [categories, setCategories] = useState<string[]>(["news", "academic"]);
   const abortRef = useRef<AbortController | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const externalFocusRef = useRef("");
@@ -206,7 +209,7 @@ export function FocusPage({
     if (!kind || !nextTitle || !prompt || creating) { setError("请填写关注名称和持续关注要求。"); return; }
     const id = `focus-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const optimistic: FocusItem = { id, kind, title: nextTitle, description: prompt, enabled: true, createdAt: now, updatedAt: now, threadId: id, resourceId: "seudaily-focus-local" };
+    const optimistic: FocusItem = { id, kind, title: nextTitle, description: prompt, ...(kind === "notice" ? {source, categories} : {}), enabled: true, createdAt: now, updatedAt: now, threadId: id, resourceId: "seudaily-focus-local" };
     const assistantId = crypto.randomUUID();
     setCreating(true);
     setStreaming(true);
@@ -323,6 +326,14 @@ export function FocusPage({
     catch (reason) { setError(reason instanceof Error ? reason.message : "关注删除失败"); }
   }
 
+  async function updateNoticeScope(patch: Partial<FocusItem>) {
+    if (!selected || streaming) return;
+    try {
+      const saved = await saveFocus({...selected, ...patch});
+      if (saved.data?.item) setItems(current => current.map(item => item.id === selected.id ? saved.data!.item! : item));
+    } catch (reason) {setError(reason instanceof Error ? reason.message : "通知范围保存失败");}
+  }
+
   async function checkNow() {
     setRunning(true); setError("");
     try { await runFocus(); await load(false); }
@@ -331,7 +342,7 @@ export function FocusPage({
   }
 
   if (selected) return <div className="focus-chat-panel">
-    <header className="topbar focus-chat-topbar"><button className="icon-button" aria-label="返回关注列表" title="返回关注列表" onClick={() => { externalFocusRef.current = ""; setSelectedId(""); setMessages([]); onSelectedFocusChange?.(""); }}><ArrowLeft size={20} /></button><h1>{selected.title}</h1><span className={`focus-chat-state ${streaming ? "running" : selected.enabled ? "enabled" : "paused"}`}>{streaming ? "执行中" : selected.enabled ? "已启用" : "已暂停"}</span></header>
+    <header className="topbar focus-chat-topbar"><button className="icon-button" aria-label="返回关注列表" title="返回关注列表" onClick={() => { externalFocusRef.current = ""; setSelectedId(""); setMessages([]); onSelectedFocusChange?.(""); }}><ArrowLeft size={20} /></button><h1>{selected.title}</h1>{selected.kind === "notice" && <><select aria-label="通知来源" disabled={streaming} value={selected.source ?? "jwc"} onChange={event => void updateNoticeScope({source: event.target.value, categories: Object.keys(requireNoticeSource(event.target.value).categories)})}>{noticeSourceIds.map(id => <option key={id} value={id}>{noticeSources[id].name}</option>)}</select><select aria-label="通知栏目，可多选" multiple disabled={streaming} value={selected.categories ?? ["news", "academic"]} onChange={event => {const categories = Array.from(event.target.selectedOptions, option => option.value); if (categories.length) void updateNoticeScope({categories});}}>{Object.entries(requireNoticeSource(selected.source ?? "jwc").categories).map(([id, [name]]) => <option key={id} value={id}>{name}</option>)}</select></>}<span className={`focus-chat-state ${streaming ? "running" : selected.enabled ? "enabled" : "paused"}`}>{streaming ? "执行中" : selected.enabled ? "已启用" : "已暂停"}</span></header>
     <section className="chat-scroll focus-chat-scroll">{error && <div className="page-state error">{error}</div>}{conversationLoading ? <div className="page-state"><LoaderCircle className="spin" size={20} /><span>正在读取会话…</span></div> : <div className="message-list">{visibleMessages.length ? visibleMessages.map((message) => <div key={message.id}>{renderMessage ? renderMessage(message, {
       disabled: streaming, onEdit: editPrompt, onAuth: authorize, onAction: applyAction, onApproval: (tool, approved) => void approveTool(message, tool, approved),
       versions: <PromptVersions messages={messages} message={message} leaf={activeLeaf} disabled={streaming} onSwitch={id => void switchVersion(id)} />,
@@ -343,7 +354,7 @@ export function FocusPage({
     <PageHeader title="关注" description="" action={<div className="schedule-actions focus-actions"><button className="page-action" onClick={() => setAdding("notice")}>关注通知</button><button className="page-action" onClick={() => setAdding("course")}>关注课程</button><button className="page-action primary" disabled={running} onClick={() => void checkNow()}>立即检查</button></div>} />
     {error && <div className="page-state error">{error}</div>}
     <PageState loading={loading} error="">{items.length ? <div className="focus-list">{items.map((item) => <article className="focus-card" key={item.id} onClick={() => void openFocus(item)}><div className="focus-card-copy"><strong>{item.title}</strong><small>{item.lastCheckedAt ? `上次执行 ${new Date(item.lastCheckedAt).toLocaleString("zh-CN")}` : "尚未执行"}</small></div><button className={`focus-toggle ${item.enabled ? "on" : ""}`} onClick={(event) => { event.stopPropagation(); void toggle(item); }}>{item.enabled ? "已启用" : "已暂停"}</button><button className="focus-delete" onClick={(event) => { event.stopPropagation(); void remove(item.id); }}>删除</button></article>)}</div> : <div className="page-empty compact focus-empty"><h2>还没有关注</h2></div>}</PageState>
-    {adding && <div className="confirm-overlay"><div className="course-editor focus-editor"><button className="confirm-close focus-close" aria-label="关闭" disabled={creating} onClick={() => setAdding(null)}>关闭</button><h2>{adding === "notice" ? "新建通知关注" : "新建课程关注"}</h2><p className="focus-permission-notice">创建即授权该关注完全访问，可自动查询、抓取和生成资料，无需逐次审批。不包含 extra 工作区文件和终端权限，也不改变普通会话权限。验证码或交互登录仍需你完成。</p><div className="course-editor-grid"><label className="wide"><span>关注名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={adding === "notice" ? "例如：推免信息" : "例如：课程转写跟进"} /></label><label className="wide"><span>交给 Agent 的持续任务</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={adding === "notice" ? "例如：持续关注本校推免政策、报名节点和夏令营，普通成绩公示不用提醒" : "例如：关注张老师的编译原理，即使不在我的课表；发现新课次一天后抓取转写并总结"} /></label></div><div className="confirm-actions"><button disabled={creating} onClick={() => setAdding(null)}>取消</button><button className="primary" disabled={creating || !title.trim() || !description.trim()} onClick={() => void create()}>{creating ? "正在创建…" : "授权并创建"}</button></div></div></div>}
+    {adding && <div className="confirm-overlay"><div className="course-editor focus-editor"><button className="confirm-close focus-close" aria-label="关闭" disabled={creating} onClick={() => setAdding(null)}>关闭</button><h2>{adding === "notice" ? "新建通知关注" : "新建课程关注"}</h2><p className="focus-permission-notice">创建即授权该关注完全访问，可自动查询、抓取和生成资料，无需逐次审批。不包含 extra 工作区文件和终端权限，也不改变普通会话权限。验证码或交互登录仍需你完成。</p><div className="course-editor-grid">{adding === "notice" && <><label><span>通知来源</span><select value={source} onChange={event => {setSource(event.target.value); setCategories(Object.keys(requireNoticeSource(event.target.value).categories));}}>{noticeSourceIds.map(id => <option key={id} value={id}>{noticeSources[id].name}</option>)}</select></label><fieldset><legend>栏目</legend>{Object.entries(requireNoticeSource(source).categories).map(([id, [name]]) => <label key={id}><input type="checkbox" checked={categories.includes(id)} onChange={event => setCategories(current => event.target.checked ? [...current, id] : current.filter(value => value !== id))} />{name}</label>)}</fieldset></>}<label className="wide"><span>关注名称</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={adding === "notice" ? "例如：推免信息" : "例如：课程转写跟进"} /></label><label className="wide"><span>交给 Agent 的持续任务</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={adding === "notice" ? "例如：持续关注本校推免政策、报名节点和夏令营，普通成绩公示不用提醒" : "例如：关注张老师的编译原理，即使不在我的课表；发现新课次一天后抓取转写并总结"} /></label></div><div className="confirm-actions"><button disabled={creating} onClick={() => setAdding(null)}>取消</button><button className="primary" disabled={creating || !title.trim() || !description.trim() || (adding === "notice" && !categories.length)} onClick={() => void create()}>{creating ? "正在创建…" : "授权并创建"}</button></div></div></div>}
   </div>;
 }
 

@@ -56,11 +56,17 @@ def save(url: str,name: str,content: bytes,extension: str,*,markdown: str | None
     digest=hashlib.sha256(content).hexdigest()
     source=source_identity(source_url or url,source_name)
     if notice is None:
-        site={'jwc.seu.edu.cn':'jwc','cse.seu.edu.cn':'cse'}.get(source['id'])
+        from .notice_sources import _NOTICE_SOURCES
         match=re.search(r'a(\d+)/page\.',source_url or url)
-        if site and match:
-            try: notice=json.loads((root().parent/site/'articles'/f"seu-{site}-{match.group(1)}.json").read_text(encoding='utf-8'))
-            except (OSError,ValueError): pass
+        for site, config in _NOTICE_SOURCES.items():
+            if config['host'] != source['id'] or not match:
+                continue
+            article_id=f"{config['idPrefix']}-{match.group(1)}"
+            try:
+                notice=json.loads((root().parent/site/'articles'/f"{article_id}.json").read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                pass
+            break
     notice=notice or {}
     notice_url=source_url or url
     notice_id=notice.get('id','')

@@ -213,3 +213,50 @@ def test_site_search_uses_configured_form_and_search_type(
     )
     assert results[0]["id"] == service.config.id_prefix + "-12"
     assert results[0]["title"] == "奖学金通知"
+
+
+def test_third_source_attachment_and_focus_lifecycle(tmp_path, monkeypatch):
+    from seudaily import focus, notice_sources, notice_adapters, web_attachments
+    from types import SimpleNamespace
+
+    config = {"civil": {"name": "土木工程学院", "host": "civil.seu.edu.cn",
+                         "categories": {"announcements": ["学院通知", "/notice/list.htm"]}}}
+    path = tmp_path / "sources.json"
+    path.write_text(json.dumps(config))
+    sources = _load_notice_sources(path)
+    monkeypatch.setattr(notice_sources, "_NOTICE_SOURCES", sources)
+    monkeypatch.setattr(notice_adapters, "_NOTICE_SOURCES", sources)
+    monkeypatch.setattr(saved_web_files, "root", lambda: tmp_path / "web-files")
+    article = {"id": "seu-civil-9", "title": "学院通知", "category": "announcements",
+               "url": "https://civil.seu.edu.cn/2026/1007/c1a9/page.htm"}
+    url = "https://civil.seu.edu.cn/files/a.pdf"
+    downloads = []
+    monkeypatch.setattr(web_attachments, "download", lambda *a, **k: downloads.append(url) or b"%PDF-fixture")
+    stored = web_attachments.read_attachment(None, url, "规则.pdf", ".pdf", referer=article["url"],
+            timeout=1, max_bytes=1000, validate_url=lambda u: u,
+            parse_document=lambda *a, **k: {"markdown": "通知正文"}, source_name="土木工程学院", notice=article)
+    assert "civil.seu.edu.cn/announcements/seu-civil-9/" in stored["path"]
+    again = web_attachments.read_attachment(None, url, "规则.pdf", ".pdf", referer=article["url"],
+            timeout=1, max_bytes=1000, validate_url=lambda u: u,
+            parse_document=lambda *a, **k: pytest.fail("cached PDF should not be parsed"), notice=article)
+    assert downloads == [url] and again["sha256"] == stored["sha256"]
+    requests = []
+    monkeypatch.setattr(focus, "create_notice_adapter", lambda payload: requests.append(payload) or SimpleNamespace(search=lambda *a, **k: {"results": [article]}))
+    monkeypatch.setattr(focus, "FocusSemanticModel", lambda: SimpleNamespace(generate_queries=lambda _: ["学院"], judge=lambda *a: {article["id"]: "符合要求"}))
+    service = focus.FocusService(state_file=tmp_path / "focus.json")
+    item = service.upsert({"kind": "notice", "title": "学院消息", "description": "关注学院通知", "source": "civil"})["item"]
+    assert item["categories"] == ["announcements"]
+    events = service._check_notice(item)
+    assert requests[0]["source"] == "civil" and events[0]["article"]["id"] == article["id"]
+
+
+def test_old_attachment_call_resolves_registry_cache(tmp_path, monkeypatch):
+    from seudaily import notice_sources
+    source = {"civil": {"host": "civil.seu.edu.cn", "idPrefix": "school-civil"}}
+    monkeypatch.setattr(notice_sources, "_NOTICE_SOURCES", source)
+    monkeypatch.setattr(saved_web_files, "root", lambda: tmp_path / "web-files")
+    directory = tmp_path / "civil/articles"
+    directory.mkdir(parents=True)
+    (directory / "school-civil-9.json").write_text(json.dumps({"id": "school-civil-9", "category": "announcements", "title": "学院通知"}))
+    result = saved_web_files.save("https://civil.seu.edu.cn/files/a.pdf", "规则.pdf", b"pdf", ".pdf", source_url="https://civil.seu.edu.cn/c1a9/page.htm")
+    assert "/announcements/school-civil-9/" in result["path"]

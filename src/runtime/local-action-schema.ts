@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { noticeSourceEnum, requireNoticeSource } from "../shared/notice-sources.js";
 
 export const focusActionSchema = z.object({
   kind: z.enum(["notice", "course"]),
   title: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(2_000),
-  categories: z.array(z.enum(["news", "academic", "lectures", "student_status", "practice", "teaching_research", "downloads"])).min(1).max(7).optional(),
+  source: z.enum(noticeSourceEnum).optional(),
+  categories: z.array(z.string().min(1)).min(1).optional(),
   courseName: z.string().trim().max(200).optional(),
   teacherNames: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   sourceKeys: z.array(z.string().trim().min(1)).max(20).optional(),
@@ -12,6 +14,10 @@ export const focusActionSchema = z.object({
   summary: z.boolean().default(true),
   summaryInstructions: z.string().trim().max(2_000).optional(),
 }).strict().superRefine((value, context) => {
+  if (value.kind === "notice") {
+    const source = requireNoticeSource(value.source ?? "jwc");
+    if (value.categories?.some(category => !source.categories[category])) context.addIssue({code: "custom", path: ["categories"], message: "不支持的通知栏目"});
+  }
   if (value.kind === "course" && !value.courseName) {
     context.addIssue({ code: "custom", path: ["courseName"], message: "课程关注必须提供课程名称" });
   }

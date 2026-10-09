@@ -22,12 +22,19 @@ def read_attachment(
     parse_document,
     refresh=False,
     source_name="",
+    notice=None,
 ) -> dict:
     validate_url(url)
     existing = saved_web_files.cached(url)
     if existing and not refresh:
         if existing.get("parsed"):
-            return existing
+            if notice is None:
+                return existing
+            return saved_web_files.save(
+                url, name, Path(existing["path"]).read_bytes(), extension,
+                markdown=existing["markdown"], source_url=referer,
+                source_name=source_name, notice=notice,
+            )
         path = Path(existing["path"])
         original = path.read_bytes()
     else:
@@ -41,7 +48,7 @@ def read_attachment(
         )
         validate_signature(original, extension)
         existing = saved_web_files.save(
-            url, name, original, extension, source_url=referer, source_name=source_name
+            url, name, original, extension, source_url=referer, source_name=source_name, notice=notice
         )
         path = Path(existing["path"])
     raise_if_cancelled()
@@ -58,4 +65,5 @@ def read_attachment(
         markdown=parsed["markdown"],
         source_url=referer,
         source_name=source_name,
+        notice=notice,
     )

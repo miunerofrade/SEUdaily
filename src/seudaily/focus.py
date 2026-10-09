@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 
 from .optional_runtime import openai_client as OpenAI
 
-from .jwc import JWC_CATEGORIES, JwcService
+from .notice_sources import source_config
+from .notice_adapters import create_notice_adapter
 from .runtime_paths import env_value
 from .schedule import ScheduleService
 from .service import CourseService, summarize_course
@@ -156,28 +157,34 @@ class FocusService:
                     description = "、".join(
                         str(value).strip() for value in legacy_keywords if str(value).strip()
                     )
-            categories = raw.get(
-                "categories", (existing or {}).get("categories", ["news", "academic"])
-            )
+            source = raw.get("source", (existing or {}).get("source", "jwc"))
+            config = source_config(source)
+            previous_source = (existing or {}).get("source", "jwc")
+            defaults = ["news", "academic"] if source == "jwc" else list(config.categories)
+            categories = raw.get("categories", (existing or {}).get("categories", defaults) if source == previous_source else defaults)
+
             if not description:
                 raise ValueError("请描述需要大模型持续关注的通知")
             if not isinstance(categories, list) or not categories:
                 raise ValueError("通知 Focus 至少需要一个栏目")
-            unknown = [value for value in categories if value not in JWC_CATEGORIES]
+            unknown = [value for value in categories if value not in config.categories]
             if unknown:
-                raise ValueError(f"不支持的教务处栏目: {', '.join(unknown)}")
+                raise ValueError(f"不支持的通知栏目: {', '.join(unknown)}")
+            unchanged = (description == previous_description and source == previous_source
+                         and set(categories) == set((existing or {}).get("categories", defaults)))
             item.update(
+                source=source,
                 description=description,
                 categories=list(dict.fromkeys(categories)),
-                seenArticleIds=(existing or {}).get("seenArticleIds", []),
+                seenArticleIds=(existing or {}).get("seenArticleIds", []) if unchanged else [],
                 reviewedArticleIds=(
                     (existing or {}).get("reviewedArticleIds", [])
-                    if description == previous_description
+                    if unchanged
                     else []
                 ),
                 generatedQueries=(
                     (existing or {}).get("generatedQueries", [])
-                    if description == previous_description
+                    if unchanged
                     else []
                 ),
             )
@@ -252,6 +259,9 @@ class FocusService:
             state = self._load()
             changed = False
             for item in state["items"]:
+                if item.get("kind") == "notice" and "source" not in item:
+                    item["source"] = "jwc"
+                    changed = True
                 thread_id = str(item.get("threadId") or item.get("id") or "")
                 resource_id = str(
                     item.get("resourceId") or "seudaily-focus-local"
@@ -412,7 +422,7 @@ class FocusService:
             focus["description"]
         )
         focus["generatedQueries"] = queries
-        service = JwcService(background_sync=True)
+        service = create_notice_adapter({"source": focus.get("source", "jwc"), "backgroundSync": True})
         candidates_by_id: dict[str, dict[str, Any]] = {}
         for query in queries:
             result = service.search(
