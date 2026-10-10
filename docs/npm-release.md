@@ -16,6 +16,10 @@ Actions → `npm release candidate` → Run workflow，选择 main，版本必�
 
 ## npm 发布与 Trusted Publisher
 
+2026-10-10 发布 **1.1.18**，主包和三个可选组件版本一致。[发布工作流](https://github.com/miunerofrade/SEUdaily/actions/runs/38042554789) 的九组跨平台验收全部通过，四个包使用 Trusted Publisher 发布。修复了 Windows 引用文档换行导致哈希变化、测试路径差异，以及微信保存状态在 HTTP 就绪之后恢复造成的服务生命周期竞态。
+
+公开包完整性与来源证明：[1.1.18 发布记录](research/data/npm-release-1.1.18.json)。发布包包含拆分后的业务参考文档、共享操作契约及对应可选组件；不包含开发测试、临时产物或用户配置。
+
 2026-10-05 已发布统一版本 **1.1.1**：`seudaily`、`@miunerofrade/seudaily-web`、`@miunerofrade/seudaily-python`、`@miunerofrade/seudaily-browser`。主包使用公共名称，三个可选组件使用维护者个人 scope；注册表维护者与候选完整性均已核验。
 
 四个包的 Trusted Publisher 统一绑定：

@@ -1,0 +1,143 @@
+{
+  "version": "1.1.18",
+  "sourceCommit": "96905612f29ab47494f0bf1aef7b19501485a882",
+  "workflow": "https://github.com/miunerofrade/SEUdaily/actions/runs/38042554789",
+  "packages": [
+    {
+      "component": "web",
+      "name": "@miunerofrade/seudaily-web",
+      "version": "1.1.18",
+      "filename": "miunerofrade-seudaily-web-1.1.18.tgz",
+      "integrity": "sha512-O9ygoVb8MI9ShrwPhKf0BGVQW8DyJe6dO74CvGVMf7h3HbkWziCPescVCzJIVdmyjL/AN5Nuji9fgiyxvKq0CQ==",
+      "size": 1121418,
+      "unpackedSize": 2242640,
+      "registry": {
+        "shasum": "daf3c2df3d619f0a6cac69d2e3a09b3f671960b2",
+        "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-web/-/seudaily-web-1.1.18.tgz",
+        "fileCount": 66,
+        "integrity": "sha512-O9ygoVb8MI9ShrwPhKf0BGVQW8DyJe6dO74CvGVMf7h3HbkWziCPescVCzJIVdmyjL/AN5Nuji9fgiyxvKq0CQ==",
+        "signatures": [
+          {
+            "sig": "MEYCIQD16dwsqc46lHZvsF9deRuwCu59XnizUKI9TeJ1rVRTRgIhAJvbV7VySaexdtZcfSm/nlMdy+HekOdzqpOFc2VEDoDs",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEYCIQCezLBWUPx82VrN2N0zET1EKKXESV5vexYkhNeBuaKDkgIhAMakXxoVbn4m/mHlme6BIOcb2sPeW5PeNtmy83lKOMmc",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-web@1.1.18",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 2242640
+      }
+    },
+    {
+      "component": "python",
+      "name": "@miunerofrade/seudaily-python",
+      "version": "1.1.18",
+      "filename": "miunerofrade-seudaily-python-1.1.18.tgz",
+      "integrity": "sha512-KM2su7n4rOX/E6s3DuUMF/CsFI8a55t9E2WfxA5t0i94DAgPkT1MXUH5IjclB02w6GF/UEDvr+uDMduoXTUSaA==",
+      "size": 324045,
+      "unpackedSize": 546642,
+      "registry": {
+        "shasum": "3d5fe7d96a8f6bd52b52e8f31d322c91e86b028b",
+        "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-python/-/seudaily-python-1.1.18.tgz",
+        "fileCount": 11,
+        "integrity": "sha512-KM2su7n4rOX/E6s3DuUMF/CsFI8a55t9E2WfxA5t0i94DAgPkT1MXUH5IjclB02w6GF/UEDvr+uDMduoXTUSaA==",
+        "signatures": [
+          {
+            "sig": "MEUCIQDE0S4YqPnUIWI7elpC8h4P0sYB3HCSkK84zj4Qap7gewIgG3QzcIjYtye0stp6/5vRjPnrrheNExJCR9hKkcUtLaM=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIQCJ1g+U4rQNnsinWg4SXPFJGNfaWbQZvcppiD1UFVpscgIgFlqdaN/BVznSKEOe2e+VYV+Sfyz3gtAlvWu04e4j0aA=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-python@1.1.18",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 546642
+      }
+    },
+    {
+      "component": "browser",
+      "name": "@miunerofrade/seudaily-browser",
+      "version": "1.1.18",
+      "filename": "miunerofrade-seudaily-browser-1.1.18.tgz",
+      "integrity": "sha512-VPcxRB5Hhrtq5uwYKK49C+1fiJz6sipndIxgZGU5SMrY37hzLpKCwTAs4x7R73rwLM8vDvk64WRRvEbzOr4s4w==",
+      "size": 38782,
+      "unpackedSize": 129154,
+      "registry": {
+        "shasum": "74f0f6e403d428cc68e5303ab8752bb1f485b270",
+        "tarball": "https://registry.npmjs.org/@miunerofrade/seudaily-browser/-/seudaily-browser-1.1.18.tgz",
+        "fileCount": 5,
+        "integrity": "sha512-VPcxRB5Hhrtq5uwYKK49C+1fiJz6sipndIxgZGU5SMrY37hzLpKCwTAs4x7R73rwLM8vDvk64WRRvEbzOr4s4w==",
+        "signatures": [
+          {
+            "sig": "MEUCIQDwzqCt15tH+hJ1wMx4rnnoDLjpf/xlf+MO1ALvBFP/4AIgSM7loug7kfuHRpD0mLz62K2cGjQ6A8VlQSml7it6rLg=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEQCIGdMhL6RaQ72+7etYtFF9L9Ha29xx6D3l1jSBWmUsJP3AiBGa7cTyewgcUWhwsBJVE5oZ1EkN1Umaa3ClnVTSUIl8A==",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@miunerofrade%2fseudaily-browser@1.1.18",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 129154
+      }
+    },
+    {
+      "component": "host",
+      "name": "seudaily",
+      "version": "1.1.18",
+      "filename": "seudaily-1.1.18.tgz",
+      "integrity": "sha512-OUPtSjjzvVvdu9P0oOzfCaOOL8dDufrp2oqzMaU+h5wOqHABM2N+rqpf53JBxkpldfOjsxc2uEbvLs1ojBMuAg==",
+      "size": 831463,
+      "unpackedSize": 2757974,
+      "registry": {
+        "shasum": "4d8a710209df1c858dbbcdf53739fb7cd84fc72c",
+        "tarball": "https://registry.npmjs.org/seudaily/-/seudaily-1.1.18.tgz",
+        "fileCount": 69,
+        "integrity": "sha512-OUPtSjjzvVvdu9P0oOzfCaOOL8dDufrp2oqzMaU+h5wOqHABM2N+rqpf53JBxkpldfOjsxc2uEbvLs1ojBMuAg==",
+        "signatures": [
+          {
+            "sig": "MEUCIQDckPP5cDl/imEKw3q9laJB6kqLekrsCFQN1NXoeX9TyAIgA2nMP+HFi0HTx/t5q6G4u8EwJxfE8oMHYeqSNlvfNao=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIQC62XECoF/Pt/e8CV1+5D/dOzEVjOfoor3Mw5tgPqe7ugIgR70sIx0IvU8RKl16ml+MxIwZ9JchkC029JvGinBcVQQ=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/seudaily@1.1.18",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 2757974
+      }
+    }
+  ],
+  "publicInstallation": {
+    "hostVersion": "1.1.18",
+    "versionCommand": "passed",
+    "helpCommand": "passed",
+    "bundledReferences": "present",
+    "developerTests": "excluded"
+  },
+  "githubRelease": "https://github.com/miunerofrade/SEUdaily/releases/tag/v1.1.18"
+}
