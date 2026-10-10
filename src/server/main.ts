@@ -25,13 +25,16 @@ function hasEnabledFocus(): boolean {
 }
 const noticeAttachments=new NoticeAttachments(runtimeRoot,runPythonTool,knowledge);
 let stopping = false;
+// A saved channel determines service lifetime. Restore it before advertising readiness;
+// reference indexing may be much slower on Windows and must not delay that decision.
+await startWeChatRuntime();
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: Number(process.env.SEUDAILY_PORT ?? 4111) }, () => {
     console.log(`SEUdaily API ready at http://127.0.0.1:${process.env.SEUDAILY_PORT ?? 4111}`);
     void agentStore.ready.then(async () => {
       try {await loadBuiltinKnowledge();} catch(error) {console.error('内置参考资料登记失败，下次启动可重试',error);}
       const webEntries=await webLibraryEntries(projectRoot);
       await knowledge.relocateSources([...webEntries].flatMap(([path,item])=>item.legacyPaths.map(oldPath=>({oldPath,path}))));
-      knowledge.start(); noticeAttachments.start(); await startWeChatRuntime(); if (process.env.SEUDAILY_PERSISTENT === '1' || !process.env.SEUDAILY_INSTALL_ROOT || hasEnabledFocus()) startFocusRuntime();
+      knowledge.start(); noticeAttachments.start(); if (process.env.SEUDAILY_PERSISTENT === '1' || !process.env.SEUDAILY_INSTALL_ROOT || hasEnabledFocus()) startFocusRuntime();
     }).catch(error => { console.error('后端初始化失败，数据库已保留', error); void shutdown(1); });
 });
 const stopClientReaper = startClientReaper();
