@@ -21,7 +21,7 @@ export async function run() {
       {id:2,state:'preparing',message:'正在安装 Firefox 浏览器'},
       {id:3,state:'ready',message:'运行环境准备完成'},
     ]};
-    if (path.startsWith('/api/memory/threads?')) return {threads:path.includes('resourceId=seudaily-web-local')?threads:[]};
+    if (path.startsWith('/app/conversations?')) return {threads};
     if (_method === 'DELETE' && !path.includes('/queue')) { threads=[]; record({deleted:true}); return {deleted:true}; }
     if (path.includes('/queue')) {
       if (_method === 'POST') { queue.push({id:String(queue.length+1),state:'pending',...body}); record({queued:body}); return {id:queue.at(-1).id}; }

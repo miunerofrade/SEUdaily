@@ -95,6 +95,7 @@ test('serve is shared by ordinary commands, survives disconnected clients and re
   // A committed upload and persisted DB state must survive abrupt backend death.
   await f.request('/app/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataUrl:'data:image/png;base64,aW1hZ2U=',name:'fixture.png'})});
   const db = new DatabaseSync(join(f.directory,'.seudaily','agent.db'));
+  db.exec('PRAGMA busy_timeout=5000');
   db.prepare("INSERT INTO metadata VALUES('restart-fixture','retained')").run();
   db.prepare("INSERT INTO runs VALUES('run-fixture','thread','resource','running','{}')").run();
   db.close();
@@ -159,6 +160,7 @@ test('ordinary commands restore a saved WeChat binding as a persistent service a
   const f=await fixture(t);const service=f.start(['serve']);await eventually(()=>f.request('/app/wechat'));
   const initial=await f.request('/api');
   const db=new DatabaseSync(join(f.directory,'.seudaily','agent.db'));
+  db.exec('PRAGMA busy_timeout=5000');
   db.prepare('INSERT INTO wechat_account VALUES(1,?)').run(JSON.stringify({token:'fixture-token',botId:'fixture-bot',userId:'fixture-user',base:'https://ilinkai.weixin.qq.com',cursor:'saved-cursor',needsLogin:true}));db.close();
   await f.request('/app/runtime/stop',{method:'POST'});await eventually(async()=>assert.notEqual(service.exitCode,null));
   await exec(process.execPath,[cli,'sessions',...f.args],{env:f.env});
