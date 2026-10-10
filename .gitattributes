@@ -1,0 +1,2 @@
+# Bundled references use byte-level hashes; checkout must preserve LF on every OS.
+docs/references/** text eol=lf

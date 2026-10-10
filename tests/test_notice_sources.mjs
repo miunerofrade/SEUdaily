@@ -60,7 +60,7 @@ test('third-source notices and attachments appear under the configured instituti
  await writeFile(webMetadataPath(root,article.attachments[0].url),JSON.stringify({name:'规则.pdf',url:article.attachments[0].url,path:original,sha256:sha256(bytes),sourceUrl:article.url}));
  const entries=await webLibraryEntries(project,loadNoticeSources({...noticeSources,civil:additional}));
  assert.equal(entries.size,2);
- for(const [path,entry] of entries){assert.deepEqual(entry.sections,[{source:'土木工程学院',label:'学院通知'}]);assert.match(path,/civil.seu.edu.cn\/announcements\/seu-civil-9\//);}
+ for(const [path,entry] of entries){assert.deepEqual(entry.sections,[{source:'土木工程学院',label:'学院通知'}]);assert.match(path.replaceAll('\\','/'),/civil.seu.edu.cn\/announcements\/seu-civil-9\//);}
 });
 
 test('source identifiers remain discoverable without matching arbitrary words',async()=>{

@@ -235,7 +235,7 @@ def test_third_source_attachment_and_focus_lifecycle(tmp_path, monkeypatch):
     stored = web_attachments.read_attachment(None, url, "规则.pdf", ".pdf", referer=article["url"],
             timeout=1, max_bytes=1000, validate_url=lambda u: u,
             parse_document=lambda *a, **k: {"markdown": "通知正文"}, source_name="土木工程学院", notice=article)
-    assert "civil.seu.edu.cn/announcements/seu-civil-9/" in stored["path"]
+    assert "civil.seu.edu.cn/announcements/seu-civil-9/" in Path(stored["path"]).as_posix()
     again = web_attachments.read_attachment(None, url, "规则.pdf", ".pdf", referer=article["url"],
             timeout=1, max_bytes=1000, validate_url=lambda u: u,
             parse_document=lambda *a, **k: pytest.fail("cached PDF should not be parsed"), notice=article)
@@ -259,4 +259,4 @@ def test_old_attachment_call_resolves_registry_cache(tmp_path, monkeypatch):
     directory.mkdir(parents=True)
     (directory / "school-civil-9.json").write_text(json.dumps({"id": "school-civil-9", "category": "announcements", "title": "学院通知"}))
     result = saved_web_files.save("https://civil.seu.edu.cn/files/a.pdf", "规则.pdf", b"pdf", ".pdf", source_url="https://civil.seu.edu.cn/c1a9/page.htm")
-    assert "/announcements/school-civil-9/" in result["path"]
+    assert "/announcements/school-civil-9/" in Path(result["path"]).as_posix()
