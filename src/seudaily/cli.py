@@ -446,6 +446,10 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
             base_url=payload.get("baseUrl"),
             model=payload.get("model"),
         )
+    if action == "anyshare-backup":
+        from .anyshare_backup import operate
+
+        return operate(payload)
     if action == "knowledge-index":
         from .knowledge_index import operate
 

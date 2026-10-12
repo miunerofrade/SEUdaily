@@ -16,9 +16,11 @@ import {
 } from "./course-tools.js";
 import { readWebPageTool } from "./web-reader.js";
 import { searchKnowledgeTool } from "./knowledge-tools.js";
+import { envValue } from "../runtime-paths.js";
+import { anyShareBackupTool } from "./anyshare-backup.js";
 import { webSearchTool } from "./web-search.js";
 
-export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace", "knowledge"]);
+export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace", "knowledge", "cloud-backup"]);
 export type ToolNamespace = z.infer<typeof toolNamespaceSchema>;
 
 type AnyTool = any;
@@ -40,6 +42,12 @@ const staticCapabilities: Capability[] = [
   { namespace: "web", tool: webSearchTool as AnyTool, aliases: ["互联网", "网页搜索", "最新", "web", "search"] },
   { namespace: "web", tool: readWebPageTool as AnyTool, aliases: ["网页正文", "url", "附件", "read page"] },
 ];
+
+function registeredCapabilities(): Capability[] {
+  return /^(1|true)$/i.test(envValue('SEUDAILY_EXPERIMENTAL_ANYSHARE', 'false') ?? '')
+    ? [...staticCapabilities, {namespace: 'cloud-backup', tool: anyShareBackupTool, aliases: ['东大云盘', '云盘备份', '资料库备份', 'AnyShare', 'cloud backup']}]
+    : staticCapabilities;
+}
 
 function requestValue(options: any, key: string) {
   const legacyKey = key.startsWith("seudaily") ? `cvstream${key.slice("seudaily".length)}` : key;
@@ -63,7 +71,8 @@ async function browserCapabilities(scope?: string): Promise<Capability[]> {
 }
 
 async function allCapabilities(includeBrowser: boolean, scope?: string) {
-  return includeBrowser ? [...staticCapabilities, ...await browserCapabilities(scope)] : staticCapabilities;
+  const capabilities = registeredCapabilities();
+  return includeBrowser ? [...capabilities, ...await browserCapabilities(scope)] : capabilities;
 }
 
 function normalizedWords(value: string) {
@@ -147,7 +156,7 @@ export const invokeCapabilityTool = createTool({
   id: "invoke-capability",
   toModelOutput: async (output: any) => {
     const name = output?.data?.brokerCapability?.name;
-    const tool = staticCapabilities.find(item => item.tool.id === name)?.tool;
+    const tool = registeredCapabilities().find(item => item.tool.id === name)?.tool;
     if (tool?.toModelOutput) return tool.toModelOutput(output);
     return {type: "text", value: JSON.stringify(output)};
   },
@@ -177,7 +186,7 @@ export const invokeCapabilityTool = createTool({
 
 export function namespaceTools(namespaces: Iterable<ToolNamespace>) {
   const selected = new Set(namespaces);
-  return Object.fromEntries(staticCapabilities.filter((item) => selected.has(item.namespace)).map((item) => [item.tool.id, item.tool]));
+  return Object.fromEntries(registeredCapabilities().filter((item) => selected.has(item.namespace)).map((item) => [item.tool.id, item.tool]));
 }
 
 export async function browserNamespaceTools(namespaces: Iterable<ToolNamespace>, scope?: string) {
