@@ -10,7 +10,7 @@ import { VERSION, PROTOCOL, defaultDataRoot } from './config.js';
 import { ensureComponent, ensurePython, cacheRoot } from './components.js';
 import { discoverServices, isServiceIdentity, processDirectory } from './services.js';
 import { acquireLock } from './lock.js';
-import { registerCacheUse, maintainCache } from './cache-maintenance.js';
+import { registerCacheUse } from './cache-maintenance.js';
 import { clientLease } from './client-lease.js';
 const options = parseCommand(process.argv.slice(2));
 if (options.values.help) { console.log(HELP); process.exit(0); }
@@ -31,7 +31,6 @@ process.env.SEUDAILY_PORT = String(options.port);
 process.env.SEUDAILY_API_URL = `http://127.0.0.1:${options.port}`;
 dotenv({ path: join(dataRoot, '.env') });
 const releaseCacheUse = await registerCacheUse();
-await maintainCache();
 const api = process.env.SEUDAILY_API_URL;
 async function request(path: string, method = 'GET', body?: unknown) {
   const response = await fetch(api + path, { method, ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(3000) });

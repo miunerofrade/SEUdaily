@@ -14,7 +14,11 @@ export async function systemdUnit(identity:BackendIdentity, platform=process.pla
   }
   const groups=await membership(identity.processId);
   const paths=groups.split('\n').map(line=>line.split(':').slice(2).join(':'));
-  const detected=paths.map(path=>path.split('/').at(-1)).find(name=>name?.endsWith('.service'));
+  // A subprocess inherits its parent's cgroup: CI runners and SSH services
+  // are not SEUdaily service units. Only infer legacy application units in
+  // the user manager; custom names require an explicit advertised unit.
+  const detected=paths.filter(path=>path.startsWith('/user.slice/'))
+    .flatMap(path=>path.split('/')).find(name=>/^seudaily(?:[-@.][\w@.-]*)?\.service$/.test(name));
   const unit=identity.serviceManager==='systemd-user' ? identity.serviceUnit ?? 'seudaily.service' : detected;
   if (!unit) return undefined;
   if (!/^[\w@.-]+\.service$/.test(unit)) throw new Error('systemd 服务名称无效');

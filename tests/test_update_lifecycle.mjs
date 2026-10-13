@@ -37,3 +37,13 @@ test('old and new systemd user services are verified before control operations',
  await assert.rejects(systemdUnit(old,'linux',membership,async()=>'/other.service'),/未停止后端/);
  assert.equal(await systemdUnit(old,'darwin',()=>assert.fail()),undefined);
 });
+
+test('inherited system and user service cgroups are not backend managers',async()=>{
+ const {systemdUnit}=await import('../src/distribution/systemd-update.ts');
+ for(const path of ['/system.slice/actions.runner.repo.service','/user.slice/user-1000.slice/user@1000.service/app.slice/runner.service','/system.slice/seudaily.service']) {
+  assert.equal(await systemdUnit(old,'linux',async()=>`0::${path}\n`,()=>assert.fail('must not control an enclosing service')),undefined);
+ }
+ // A custom backend unit can be advertised explicitly and still must match.
+ const path='/user.slice/user-1000.slice/user@1000.service/app.slice/custom-backend.service';
+ assert.equal(await systemdUnit({...old,serviceManager:'systemd-user',serviceUnit:'custom-backend.service'},'linux',async()=>`0::${path}\n`,async()=>path),'custom-backend.service');
+});

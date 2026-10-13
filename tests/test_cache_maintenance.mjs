@@ -64,3 +64,17 @@ test('uv cache links are retained rather than breaking an installed environment'
  assert.equal(report.uvPruned,false);assert.ok(report.warnings.some(w=>w.includes('符号链接')));
  assert.ok(existsSync(join(root,'uv-cache/archive')));
 });
+
+test('slow process discovery does not block startup and a new lease still protects deletion',async t=>{
+ const root=await fixture(t);await dir(root,'python/1.0.0');
+ let finish,started;
+ const discovering=new Promise(resolve=>{started=resolve;});
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const cleanup=cleanVersionCache(root,{...options,activeVersions:async()=>{started();return pending;}});
+ await discovering;
+ assert.ok(!existsSync(join(root,'maintenance.lock')));
+ const close=await registerCacheUse(root,'1.0.0');t.after(close);
+ finish([]);
+ assert.equal((await cleanup).removed.length,0);
+ assert.ok(existsSync(join(root,'python/1.0.0')));
+});

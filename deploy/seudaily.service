@@ -10,6 +10,7 @@ Type=simple
 ExecStart=/usr/bin/node /usr/local/lib/node_modules/seudaily/bin/seudaily.mjs serve --with-web --data-dir=%h/.local/share/seudaily --port=4111
 WorkingDirectory=%h
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=SEUDAILY_SYSTEMD_UNIT=seudaily.service
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=25s

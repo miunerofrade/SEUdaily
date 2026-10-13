@@ -9,9 +9,11 @@ import {createServer} from 'node:net';
 import {existsSync} from 'node:fs';
 import {setTimeout as delay} from 'node:timers/promises';
 import {VERSION} from '../src/distribution/config.ts';
+import {pathToFileURL} from 'node:url';
 const exec=promisify(execFile);
+const updateTimeout=process.platform==='win32'?120_000:20_000;
 
-for(const failInstall of [false,true]) test(failInstall ? 'real failed update restores the host, restarts old backend and removes rollback scratch' : 'real update CLI replaces the backend and reclaims previous environment after health', {timeout:30_000}, async t=>{
+for(const failInstall of [false,true]) test(failInstall ? 'real failed update restores the host, restarts old backend and removes rollback scratch' : 'real update CLI replaces the backend and reclaims previous environment after health', {timeout:updateTimeout+10_000}, async t=>{
  const root=await mkdtemp(join(tmpdir(),'seudaily-update-cli-'));
  t.after(()=>rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100}));
  const install=join(root,'node_modules','seudaily'),data=join(root,'data'),cache=join(root,'cache');
@@ -40,8 +42,8 @@ res.statusCode=404;res.end('{}');});server.listen(port,'127.0.0.1');`;
   const before=await fetch(api+'/api').then(r=>r.json());assert.equal(before.version,previousVersion);
   let result;
   try { result=await exec(process.execPath,[join(install,'dist/launcher.mjs'),'update','--data-dir',data,'--port',String(port)],{
-   env:{...process.env,SEUDAILY_CACHE_DIR:cache,npm_execpath:npm,NODE_OPTIONS:'--import='+loader},timeout:20_000,
-  }); } catch(error) { if(!failInstall) throw error;assert.equal(error.code,1); }
+   env:{...process.env,SEUDAILY_CACHE_DIR:cache,npm_execpath:npm,NODE_OPTIONS:'--import='+pathToFileURL(loader).href},timeout:updateTimeout,
+  }); } catch(error) { if(!failInstall) throw error;assert.equal(error.code,1);assert.match(error.stderr,/更新失败，请检查 npm 输出/); }
   if(!failInstall)assert.match(result.stdout,/新后端已就绪/);
   const after=await fetch(api+'/api').then(r=>r.json());assert.equal(after.version,failInstall?previousVersion:'99.0.0');assert.notEqual(after.processId,before.processId);
   assert.equal(existsSync(join(cache,'python',previousVersion)),failInstall);

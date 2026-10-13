@@ -104,6 +104,15 @@ export async function cleanVersionCache(root = rootPath(), options:Options = {})
   await mkdir(root, {recursive:true});
   root = await realpath(root);
   const report:CleanupReport = {removed:[], retainedVersions:[], warnings:[], uvPruned:false};
+  // Discover legacy processes before taking the maintenance lock. Slow OS
+  // queries must not block a starting launcher/core from pinning its version.
+  let active:string[];
+  try {
+    active = await (options.activeVersions ?? (() => runningVersions(root)))();
+    if (active.some(version => !versionName.test(version))) throw new Error('无法确认旧后端版本');
+  } catch {
+    report.warnings.push('无法确认运行中的旧版服务，跳过本次清理'); return report;
+  }
   const release = await acquireLock(join(root, 'maintenance.lock'), 30_000);
   let locked = true;
   try {
@@ -119,13 +128,7 @@ export async function cleanVersionCache(root = rootPath(), options:Options = {})
       else await rm(file);
     }
     // Pre-mechanism servers have no leases; preserve their advertised version too.
-    try {
-      const active = await (options.activeVersions ?? (() => runningVersions(root)))();
-      if (active.some(version => !versionName.test(version))) throw new Error('无法确认旧后端版本');
-      active.forEach(version => keep.add(version));
-    } catch {
-      report.warnings.push('无法确认运行中的旧版服务，跳过本次清理'); return report;
-    }
+    active.forEach(version => keep.add(version));
     report.retainedVersions = [...keep];
     for (const kind of ['components', 'python']) {
       const directory = join(root, kind);

@@ -19,6 +19,9 @@ process.once('exit', () => {
 });
 try {
   await import('../server/main.js');
+  // Process discovery (especially PowerShell on Windows) must not delay
+  // HTTP readiness or hold the cache lock before the core can register.
+  void maintainCache();
   // Reclaim versions whose last old client exits after an update.
   let maintaining = false;
   setInterval(() => {
