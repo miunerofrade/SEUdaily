@@ -1,6 +1,8 @@
 import { resolve } from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { registerCacheUse, maintainCache } from './cache-maintenance.js';
 import { acquireLock } from './lock.js';
+await registerCacheUse();
 const root = process.env.SEUDAILY_PROJECT_ROOT!;
 await mkdir(resolve(root, '.seudaily'), { recursive: true, mode: 0o700 });
 const release = await acquireLock(resolve(root, '.seudaily', 'core.lock'));
@@ -15,5 +17,14 @@ process.once('exit', () => {
       rmSync(lockPath, { recursive: true, force: true });
   } catch { /* released or absent */ }
 });
-try { await import('../server/main.js'); }
+try {
+  await import('../server/main.js');
+  // Reclaim versions whose last old client exits after an update.
+  let maintaining = false;
+  setInterval(() => {
+    if (maintaining) return;
+    maintaining = true;
+    void maintainCache().finally(() => { maintaining = false; });
+  }, 10 * 60_000).unref();
+}
 catch (error) { await release(); throw error; }

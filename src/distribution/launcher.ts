@@ -10,6 +10,7 @@ import { VERSION, PROTOCOL, defaultDataRoot } from './config.js';
 import { ensureComponent, ensurePython, cacheRoot } from './components.js';
 import { discoverServices, isServiceIdentity, processDirectory } from './services.js';
 import { acquireLock } from './lock.js';
+import { registerCacheUse, maintainCache } from './cache-maintenance.js';
 import { clientLease } from './client-lease.js';
 const options = parseCommand(process.argv.slice(2));
 if (options.values.help) { console.log(HELP); process.exit(0); }
@@ -29,6 +30,8 @@ process.env.SEUDAILY_CACHE_DIR = cacheRoot();
 process.env.SEUDAILY_PORT = String(options.port);
 process.env.SEUDAILY_API_URL = `http://127.0.0.1:${options.port}`;
 dotenv({ path: join(dataRoot, '.env') });
+const releaseCacheUse = await registerCacheUse();
+await maintainCache();
 const api = process.env.SEUDAILY_API_URL;
 async function request(path: string, method = 'GET', body?: unknown) {
   const response = await fetch(api + path, { method, ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(3000) });
@@ -90,23 +93,69 @@ if (options.command === 'ps') {
 }
 else if (options.command === 'import-data') { await importData(options.argument!); }
 else if (options.command === 'update') {
+  const releaseUpdate = await acquireLock(join(dirname(installRoot), '.seudaily-update.lock'));
+  try {
   const {prepareUpdate} = await import('./update.js');
   const update = await prepareUpdate(installRoot);
   if (!update.install) console.log('已是最新版本：' + update.version.current);
   else {
-    const identity = await probe();
-    if (identity) {
-      if (identity.persistent) throw new Error('常驻服务请先由服务管理器停止（systemctl --user stop seudaily），更新后再启动');
-      if (identity.name !== 'SEUdaily' || identity.protocol !== PROTOCOL || identity.dataRoot !== dataRoot) throw new Error('端口上的服务不属于当前 SEUdaily 数据目录');
-      await request('/app/runtime/stop', 'POST');
-      for (let attempt=0; attempt<100; attempt++) {
-        if (!await probe()) break;
-        if (attempt===99) throw new Error('后端仍在停止，请稍后再执行更新');
-        await delay(200);
-      }
-    }
-    await update.install();
+    const { completeUpdate } = await import('./update-lifecycle.js');
+    const { cleanVersionCache } = await import('./cache-maintenance.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execute = promisify(execFile);
+    let managerUnit: string | undefined;
+    await completeUpdate(update, dataRoot, PROTOCOL, {
+      probe,
+      stop: async identity => {
+        const {systemdUnit} = await import('./systemd-update.js');
+        const unit = await systemdUnit(identity);
+        if (unit) {
+          managerUnit = unit;
+          await execute('systemctl',['--user','stop',unit],{timeout:30_000});
+        } else await request('/app/runtime/stop','POST',{processId:identity.processId});
+      },
+      start: async (identity, expectedVersion) => {
+        if (managerUnit) await execute('systemctl',['--user','start',managerUnit],{timeout:30_000});
+        else {
+          await mkdir(join(dataRoot,'.seudaily','logs'),{recursive:true,mode:0o700});
+          const log = await open(join(dataRoot,'.seudaily','logs','core.log'),'a',0o600);
+          const environment: NodeJS.ProcessEnv = {...process.env,SEUDAILY_UPDATE_RESTART_MANAGED:identity.managed && !identity.persistent ? '1' : '0'};
+          delete environment.SEUDAILY_BUILD_VERSION;
+          const child = spawn(process.execPath,[join(installRoot,'bin','seudaily.mjs'),'serve',...(identity.web?['--with-web']:[]),'--data-dir',dataRoot,'--port',String(options.port)],{
+            cwd:dataRoot,stdio:['ignore',log.fd,log.fd],detached:true,windowsHide:true,env:environment,
+          });
+          let failure:Error|undefined;
+          child.once('error',error=>{failure=error;});child.unref();await log.close();
+          for (let attempt=0;attempt<300;attempt++) {
+            await delay(100);
+            if (failure) throw failure;
+            const next = await probe();
+            if (next) {
+              if (next.name !== 'SEUdaily' || next.dataRoot !== dataRoot || next.version !== expectedVersion) throw new Error('后端重启后的身份或版本不符');
+              return;
+            }
+          }
+          throw new Error('后端重启超时，请检查 core.log');
+        }
+        for (let attempt=0;attempt<300;attempt++) {
+          const next = await probe();
+          if (next?.version === expectedVersion) return;
+          await delay(100);
+        }
+        throw new Error('systemd 后端重启超时');
+      },
+      healthy:()=>request('/app/health').then(()=>undefined),
+      wait:()=>delay(200),
+      cleanup:async version=>{
+        releaseCacheUse();
+        const result = await cleanVersionCache(undefined,{currentVersion:version});
+        for (const warning of result.warnings) console.error('缓存清理：'+warning);
+        console.log(`更新完成，新后端已就绪；清理了 ${result.removed.length} 个旧缓存目录。`);
+      },
+    });
   }
+  } finally { await releaseUpdate(); }
 }
 else if (options.command === 'status' || options.command === 'stop') {
   const identity = await probe();
@@ -153,8 +202,10 @@ if (options.command === 'vpn') {
 } else if (options.command === 'serve') {
   const identity = await probe();
   if (identity) { verify(identity); throw new Error('后端已运行；请先停止现有后端再启动 serve'); }
-  process.env.SEUDAILY_MANAGED = '0';
-  process.env.SEUDAILY_PERSISTENT = '1';
+  const restartedManaged = process.env.SEUDAILY_UPDATE_RESTART_MANAGED === '1';
+  delete process.env.SEUDAILY_UPDATE_RESTART_MANAGED;
+  process.env.SEUDAILY_MANAGED = restartedManaged ? '1' : '0';
+  process.env.SEUDAILY_PERSISTENT = restartedManaged ? '0' : '1';
   if (options.values['with-web']) {
     process.env.SEUDAILY_WEB_ROOT = join(await ensureComponent('web'), 'assets');
   }

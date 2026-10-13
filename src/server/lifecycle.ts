@@ -17,7 +17,7 @@ export function ensurePersistentRuntime() {
 }
 export function identity() {
   return { name: 'SEUdaily', runtime: 'agent', processId: process.pid, version: VERSION, protocol: PROTOCOL,
-    dataRoot: projectRoot, managed, persistent, web: !!webRoot, clients: clients.size };
+    dataRoot: projectRoot, managed, persistent, ...(process.platform === 'linux' && process.env.INVOCATION_ID ? {serviceManager:'systemd-user',serviceUnit:process.env.SEUDAILY_SYSTEMD_UNIT || 'seudaily.service'} : {}), web: !!webRoot, clients: clients.size };
 }
 export function installLifecycle(app: Hono) {
   app.post('/app/runtime/clients', async c => {

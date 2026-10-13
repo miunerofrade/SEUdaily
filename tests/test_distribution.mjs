@@ -213,25 +213,28 @@ test('explicit data import preserves originals and refuses overwrites or a runni
 
 test('update finds a newer version and updates the existing global installation', async () => {
   const temporary = await mkdtemp(join(tmpdir(), 'seudaily-update-'));
-  const previousFetch = globalThis.fetch, previousNpm = process.env.npm_execpath;
+  const previousFetch = globalThis.fetch, previousNpm = process.env.npm_execpath, previousCache = process.env.SEUDAILY_CACHE_DIR;
+  process.env.SEUDAILY_CACHE_DIR = join(temporary,'cache');
   try {
     const install = join(temporary, 'node_modules', 'seudaily');
     await mkdir(install, { recursive: true });
     await writeFile(join(install, 'package.json'), JSON.stringify({ name: 'seudaily', version: VERSION }));
     const cli = join(temporary, 'npm-cli.js'), output = join(temporary, 'installed.json');
-    await writeFile(cli, `const fs=require('node:fs');const args=process.argv.slice(2);if(args[0]==='root')console.log(${JSON.stringify(dirname(install))});else fs.writeFileSync(${JSON.stringify(output)},JSON.stringify(args));`);
+    await writeFile(cli, `const fs=require('node:fs');const args=process.argv.slice(2);if(args[0]==='root')console.log(${JSON.stringify(dirname(install))});else {fs.writeFileSync(${JSON.stringify(output)},JSON.stringify(args));fs.writeFileSync(${JSON.stringify(join(install,'package.json'))},JSON.stringify({name:'seudaily',version:'99.0.0'}));}`);
     process.env.npm_execpath = cli;
     globalThis.fetch = async () => new Response(JSON.stringify({version:'99.0.0'}), { status: 200 });
     assert.equal(newerVersion('1.2.0','1.1.2'),true);
     assert.equal(newerVersion('1.1.1','1.1.2'),false);
     const update = await prepareUpdate(install);
     await update.install();
+    await update.finalize();
     const args = JSON.parse(await readFile(output,'utf8'));
     assert.equal(args[0],'install');
     assert.ok(args.includes('--global'));
     assert.ok(args.includes('seudaily@99.0.0'));
   } finally {
     globalThis.fetch = previousFetch;
+    if(previousCache===undefined)delete process.env.SEUDAILY_CACHE_DIR;else process.env.SEUDAILY_CACHE_DIR=previousCache;
     if(previousNpm===undefined)delete process.env.npm_execpath;else process.env.npm_execpath=previousNpm;
     await rm(temporary,{recursive:true,force:true});
   }

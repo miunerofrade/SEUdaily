@@ -7,6 +7,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipSync } from 'fflate';
 import uvRelease from './uv-release.json' with { type: 'json' };
+import { maintainCache } from './cache-maintenance.js';
 import { acquireLock } from './lock.js';
 import { defaultCacheRoot, VERSION } from './config.js';
 const installationAbort = new AbortController();
@@ -72,7 +73,7 @@ export async function ensureComponent(name: Component): Promise<string> {
       await rm(temporary, { recursive: true, force: true });
       throw new Error(`${label}组件准备失败，可重试：${(error as Error).message}`);
     }
-  } finally { await release(); }
+  } finally { await release(); await maintainCache(); }
 }
 
 const UV_VERSION = uvRelease.version;
@@ -180,6 +181,8 @@ async function preparePython(): Promise<string> {
 
     process.env.SEUDAILY_UV_BINARY = uv;
     const environment = process.env;
+    // Managed environments must remain independent of the disposable download cache.
+    environment.UV_LINK_MODE = 'copy';
     console.error('正在准备基础校园 HTTP 运行环境…');
     try {
       // The final venv path must be used when creating it: scripts contain absolute paths.
@@ -191,10 +194,11 @@ async function preparePython(): Promise<string> {
         const found = await execute(uv, ['python', 'find', '--no-config', '--no-project', '--system', '--no-python-downloads', '>=3.11'], { env: environment, timeout: 30_000, windowsHide: true });
         interpreter = found.stdout.trim();
       } catch {
-        // No compatible interpreter exists: keep the downloaded runtime in our cache.
         environment.UV_PYTHON_INSTALL_DIR ??= join(cacheRoot(), 'python-runtime');
-        interpreter = '3.13';
-        setPreparation('python', 'preparing', '正在下载 Python 3.13 并创建虚拟环境…');
+        try {
+          interpreter = (await execute(uv, ['python','find','--no-config','--no-project','--managed-python','--no-python-downloads','3.13'], {env:environment,timeout:30_000,windowsHide:true})).stdout.trim();
+        } catch { interpreter = '3.13'; }
+        if (interpreter === '3.13') setPreparation('python', 'preparing', '正在下载 Python 3.13 并创建虚拟环境…');
       }
       if (interpreter !== '3.13') setPreparation('python', 'preparing', '正在使用已有 Python 创建虚拟环境…');
       await exec(uv, ['venv', '--python', interpreter, join(directory, 'venv')], { env: environment, timeout: 10 * 60_000 });
@@ -204,9 +208,10 @@ async function preparePython(): Promise<string> {
       await exec(uv, ['pip', 'install', '--python', executable, '--no-deps', join(component, wheel)], { env: environment, timeout: 10 * 60_000 });
       setPreparation('python', 'preparing', '正在下载并安装基础校园 HTTP 依赖…');
       await exec(uv, ['pip', 'install', '--python', executable, '--require-hashes', '-r', join(component, 'requirements.txt')], { env: environment, timeout: 10 * 60_000, maxBuffer: 2 * 1024 * 1024 });
+      await exec(executable, ['-c', `from importlib.metadata import version; assert version('seudaily-core') == ${JSON.stringify(VERSION)}`], {timeout:30_000});
       await writeFile(join(directory, 'ready.json'), JSON.stringify({ version: VERSION }), { mode: 0o600 });
       return executable;
     } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
 
-  } finally { await release(); }
+  } finally { await release(); await maintainCache(); }
 }
