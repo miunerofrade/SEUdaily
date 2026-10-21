@@ -25,6 +25,24 @@ test('workspace rejects symlink escapes and stale writes, preserves replacement 
  await assert.rejects(workspaceTarget('escape/elsewhere',true));
  await assert.rejects(workspaceTarget('../outside',true));
 });
+test('broker discovers workspace only with extra and rechecks permission on every call',async()=>{
+ const {searchCapabilitiesTool,invokeCapabilityTool}=await import('../src/runtime/tools/tool-broker.ts');
+ const query={query:'read_file',namespace:'workspace'};
+ for(const full of [false,true]) {
+  permissions.setFullAccessEnabled(full);permissions.setFullAccessExtraEnabled(false);
+  assert.equal((await searchCapabilitiesTool.execute(query,options)).count,0);
+  await assert.rejects(invokeCapabilityTool.execute({name:'mastra_workspace_read_file',arguments:{path:'example.txt'}},options),/工作区权限/);
+ }
+ permissions.setFullAccessExtraEnabled(true);
+ assert.ok((await searchCapabilitiesTool.execute(query,options)).results.some(item=>item.name==='mastra_workspace_read_file'));
+ assert.equal((await invokeCapabilityTool.execute({name:'mastra_workspace_read_file',arguments:{path:'example.txt'}},options)).status,'completed');
+ const focus={requestContext:new Map([...options.requestContext,['seudailyFocus',true]])};
+ assert.equal((await searchCapabilitiesTool.execute(query,focus)).count,0);
+ await assert.rejects(invokeCapabilityTool.execute({name:'mastra_workspace_read_file',arguments:{path:'example.txt'}},focus),/工作区权限/);
+ permissions.setFullAccessExtraEnabled(false);
+ await assert.rejects(invokeCapabilityTool.requireApproval({name:'mastra_workspace_read_file',arguments:{path:'example.txt'}},options),/工作区权限/);
+ permissions.setFullAccessExtraEnabled(true);
+});
 test('native command execution succeeds in staging, rejects project writes and omits secrets',async()=>{
  const output=await tool('execute_command').execute({command:process.platform==='win32'?'echo sandbox-ok':'printf sandbox-ok',background:false,timeout:5000},options);
  assert.equal(output.data.output.trim(),'sandbox-ok');assert.equal(output.data.exitCode,0);

@@ -18,6 +18,9 @@ def test_agent_keeps_only_core_tools_eager() -> None:
     assert "authorizeScheduleTool" not in source
     assert "requestBrowserTool" not in source
     assert "browserToolsLoaded" not in source
+    assert "namespaceTools" not in source
+    assert "browserNamespaceTools" not in source
+    assert "getWorkspaceTools" not in source
 
 
 def test_course_tool_module_exports_only_public_high_level_tools() -> None:

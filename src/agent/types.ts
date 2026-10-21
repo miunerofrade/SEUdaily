@@ -43,7 +43,6 @@ export type TurnContext = {
     skills?: string[];
     interface?: string;
     focus?: boolean;
-    capabilityNamespaces?: string[];
 };
 export type StoredMessage = {
     id: string;

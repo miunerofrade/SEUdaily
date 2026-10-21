@@ -2,7 +2,7 @@ import { noticeSources, noticeSourceIds } from "../../shared/notice-sources.js";
 import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
 
-import { isUnapprovedAccessEnabled } from "../permission-state.js";
+import { isFullAccessExtraEnabled, isUnapprovedAccessEnabled } from "../permission-state.js";
 import { getPlaywrightBrowserTools, isBrowserApprovalRequired } from "./browser-tools.js";
 import {
   auditTrainingPlanTool,
@@ -51,8 +51,21 @@ async function browserCapabilities(scope?: string): Promise<Capability[]> {
   }));
 }
 
-async function allCapabilities(includeBrowser: boolean, scope?: string) {
-  return includeBrowser ? [...staticCapabilities, ...await browserCapabilities(scope)] : staticCapabilities;
+let closeWorkspace: (()=>void) | undefined;
+export function closeBrokerWorkspace() { closeWorkspace?.(); }
+
+async function workspaceCapabilities(options: any): Promise<Capability[]> {
+  if (!isFullAccessExtraEnabled(options)) return [];
+  const module = await import('../workspace.js');
+  closeWorkspace = module.closeWorkspace;
+  return Object.values(await module.getWorkspaceTools()).map(tool => ({namespace:'workspace' as const,tool,aliases:['工作区','文件','终端','workspace','terminal',tool.id]}));
+}
+
+async function allCapabilities(includeBrowser: boolean, scope?: string, options?: any, includeWorkspace=false) {
+  return [...staticCapabilities,
+    ...includeBrowser ? await browserCapabilities(scope) : [],
+    ...includeWorkspace ? await workspaceCapabilities(options) : [],
+  ];
 }
 
 function normalizedWords(value: string) {
@@ -92,17 +105,13 @@ async function validateInput(tool: AnyTool, value: unknown) {
 
 async function capabilityFor(name: string, namespace: ToolNamespace | undefined, options: any) {
   const includeBrowser = namespace === 'browser' || name.startsWith('playwright_browser_');
-  const matches = (await allCapabilities(includeBrowser, requestValue(options, 'seudailyThreadId')))
+  const includeWorkspace = namespace === 'workspace' || name.startsWith('mastra_workspace_');
+  if (includeWorkspace && !isFullAccessExtraEnabled(options)) throw new Error('当前未开启工作区权限');
+  const matches = (await allCapabilities(includeBrowser, requestValue(options, 'seudailyThreadId'), options, includeWorkspace))
     .filter(item => item.tool.id === name && (!namespace || item.namespace === namespace));
   if (matches.length !== 1) throw new Error(`未找到可调用的能力：${name}。请使用 search-capabilities 查询正确的名称和参数。`);
   const capability = matches[0];
-  rememberNamespace(capability.namespace, options);
   return capability;
-}
-
-function rememberNamespace(namespace: string, options: any) {
-  const namespaces = options?.requestContext?.get?.('seudailyCapabilityNamespaces');
-  if (Array.isArray(namespaces) && !namespaces.includes(namespace)) namespaces.push(namespace);
 }
 
 export const searchCapabilitiesTool = createTool({
@@ -111,14 +120,14 @@ export const searchCapabilitiesTool = createTool({
   inputSchema: z.object({ query: z.string().trim().min(1).max(500), namespace: toolNamespaceSchema.optional() }).strict(),
   execute: async ({ query, namespace }, options) => {
     const includeBrowser = namespace === "browser" || /browser|playwright|浏览器|点击|输入|页面交互/i.test(query);
-    const capabilities = (await allCapabilities(includeBrowser, requestValue(options, "seudailyThreadId")))
+    const includeWorkspace = namespace === "workspace" || /工作区|文件|终端|workspace|terminal/i.test(query);
+    const capabilities = (await allCapabilities(includeBrowser, requestValue(options, "seudailyThreadId"), options, includeWorkspace))
       .filter((item) => !namespace || item.namespace === namespace)
       .map((item) => ({ item, score: capabilityScore(item, query) }))
       .filter((item) => item.score > 0 || Boolean(namespace))
       .sort((a, b) => b.score - a.score || a.item.tool.id.localeCompare(b.item.tool.id))
       .slice(0, 5);
     const results = capabilities.map(({ item }) => {
-      rememberNamespace(item.namespace, options);
       return { namespace: item.namespace, name: item.tool.id, description: item.tool.description, inputSchema: jsonSchema(item.tool) };
     });
     return { results, count: results.length };
@@ -156,12 +165,3 @@ export const invokeCapabilityTool = createTool({
     return { output, brokerCapability };
   },
 });
-
-export function namespaceTools(namespaces: Iterable<ToolNamespace>) {
-  const selected = new Set(namespaces);
-  return Object.fromEntries(staticCapabilities.filter((item) => selected.has(item.namespace)).map((item) => [item.tool.id, item.tool]));
-}
-
-export async function browserNamespaceTools(namespaces: Iterable<ToolNamespace>, scope?: string) {
-  return new Set(namespaces).has("browser") ? getPlaywrightBrowserTools(scope) : {};
-}

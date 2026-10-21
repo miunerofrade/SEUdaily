@@ -64,13 +64,13 @@ export const listSkillsTool = defineTool({
     execute: async () => ({ skills: await skillCatalog.list() }),
 });
 export const readSkillTool = defineTool({
-    id: 'read-skill', description: '按名称加载 Skill 的完整规则到当前运行。需要详细背景时，可指定 references/ 下的 Markdown 相对路径。',
+    id: 'read-skill', description: '按名称读取 Skill 的完整规则，正文作为工具结果追加到当前对话并保留在历史中。需要详细背景时，可指定 references/ 下的 Markdown 相对路径。',
     inputSchema: z.object({ name: z.string().regex(namePattern), reference: z.string().max(200).optional() }).strict(),
     execute: async ({ name, reference }, options) => {
         const content = await skillCatalog.read(name, reference);
         const selected = options.requestContext?.get('seudailySkills');
         if (!Array.isArray(selected)) throw new Error('当前运行缺少 Skill 上下文');
         if (!selected.includes(name)) selected.push(name);
-        return reference ? { name, reference, content } : { name, loaded: true, summary: '完整 Skill 已加载到本轮系统指令。' };
+        return { name, ...(reference ? {reference} : {}), content };
     },
 });

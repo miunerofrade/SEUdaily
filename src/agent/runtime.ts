@@ -24,6 +24,7 @@ export class AgentRuntime {
         provider: ModelProvider;
         tools: (context: TurnContext) => Promise<Record<string, ToolDefinition>>;
         instructions: (context: TurnContext) => Promise<string>;
+        initialContext?: (context: TurnContext) => Promise<ModelMessage[]>;
         resolveDocuments?: (refs: unknown) => Array<{ name: string; markdown: string }>;
         hydrate?: (messages: ModelMessage[]) => Promise<ModelMessage[]>;
         maxSteps?: number;
@@ -91,6 +92,7 @@ export class AgentRuntime {
                 parent = messageId;
             }
             context.parentMessageId = parent;
+            run.messages.push(...await this.config.initialContext?.(context) ?? []);
             // IDs and all new nodes are reserved together; conflicts roll back the entire turn.
             await this.config.store.reserveTurn(run, inputs, this.answerMessage(run));
             return this.drive(run, combined);
@@ -159,9 +161,8 @@ export class AgentRuntime {
         try {
             let tools = await this.config.tools(run.context);
             let definitions = Object.values(tools).map(tool => ({ type: 'function' as const, function: { name: tool.id, description: tool.description, parameters: toolJsonSchema(tool) } }));
-            run.context.capabilityNamespaces ??= [];
             run.context.skills ??= [];
-            const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityNamespaces', run.context.capabilityNamespaces]]);
+            const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []]]);
             requestContext.set('seudailyFocus', run.context.focus === true);
             requestContext.set('seudailySkills', run.context.skills);
             const options: ToolExecutionOptions = { requestContext, abortSignal: signal };

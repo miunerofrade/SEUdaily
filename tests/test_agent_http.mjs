@@ -14,7 +14,7 @@ process.env.SEUDAILY_PROJECT_ROOT=root;
 const {app}=await import('../src/server/app.ts');
 const {agentRuntime}=await import('../src/runtime/application.ts');
 const {agentStore}=await import('../src/runtime/storage.ts');
-const {agentInstructions}=await import('../src/runtime/instructions.ts');
+const {agentInstructions,turnInstructions}=await import('../src/runtime/instructions.ts');
 const request=(path,body)=>app.request('http://127.0.0.1:4111'+path,{method:body?'POST':'GET',headers:{host:'127.0.0.1:4111','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
 function input(thread,token,messages,resource='fixture'){return {messages,memory:{thread,resource},requestContext:{seudailyRunToken:token,seudailySkills:['training-plan-audit'],seudailyInterface:'cli'}};}
 function events(text){return text.split('\n\n').filter(block=>block.startsWith('data: ')&&!block.includes('[DONE]')).map(block=>JSON.parse(block.slice(6)));}
@@ -83,6 +83,14 @@ test('HTTP skill discovery, AGENTS.md settings and bound approval recovery',asyn
  assert.equal(mobile.metadata.titleProvisional,true);
  assert.ok(!conversations.threads.some(item=>item.id==='focus-hidden-fixture'));
  assert.equal((await request('/app/conversations/title',{threadId:'new-mobile-fixture',resourceId:'new-mobile-resource'})).status,404);
+ const fixedTools=['getCurrentDateTool','readTaskResultTool','listSkillsTool','readSkillTool','searchCapabilitiesTool','invokeCapabilityTool'];
+ for(const namespaces of [[],['training-plan'],['browser'],['workspace','knowledge']]) {
+  assert.deepEqual(Object.keys(await agentRuntime.config.tools({threadId:'tool-test',resourceId:'fixture',runToken:'test',namespaces})),fixedTools);
+ }
+ const plain={threadId:'skill-test',resourceId:'fixture',runToken:'skill'};
+ assert.equal(await agentInstructions(plain),await agentInstructions({...plain,namespaces:['training-plan'],skills:['training-plan-audit']}));
+ const selected=await turnInstructions({...plain,skills:['training-plan-audit']});assert.match(selected[0].content,/培养方案与毕业要求/);
+ assert.doesNotMatch(JSON.stringify(await turnInstructions({...plain,namespaces:['training-plan']})),/培养方案与毕业要求/);
  let executed=0,step=0;
  agentRuntime.config.tools=async()=>({probe:{id:'probe',description:'fixture',inputSchema:z.object({password:z.string()}),requireApproval:true,execute:async()=>{executed++;return {status:'completed'};}}});
  agentRuntime.config.provider={async *stream(){step++;yield {type:'complete',message:step%2?{role:'assistant',content:null,tool_calls:[{id:randomUUID(),type:'function',function:{name:'probe',arguments:'{"password":"fixture-private"}'}}]}:{role:'assistant',content:'done'}};}};

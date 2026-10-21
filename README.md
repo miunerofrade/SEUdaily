@@ -206,7 +206,9 @@ VPN 与业务门户分别维护登录会话，失效时重新认证。普通登�
 
 首次连接按需下载固定版本的 zju-connect 核心并校验 SHA256，也可用 `SEUDAILY_VPN_BINARY` 指定已有核心。它是独立的 AGPL-3.0 第三方程序，不包含在 npm 发布包内；对应许可证与源码入口见 [VPN 许可证说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/licensing-vpn.md)。
 
-扩展工具通过 `search-capabilities` 查询名称和参数，再由 `invoke-capability` 按 `name` 调用。已知名称可直接跨轮复用，无限时票据；每次调用仍校验参数并按当前权限模式审批。
+模型的原生工具列表只保留日期、结果读取、Skill 查询/读取、能力搜索/调用这六个入口。业务、浏览器及 Extra 工作区工具保留在服务端目录，按需通过 `search-capabilities` 查询；只有匹配项的说明和参数进入末尾工具结果，再由 `invoke-capability` 按 `name` 调用。已知名称可跨轮复用，无限时票据，每次调用仍校验参数与当前权限。普通/完全访问模式不返回工作区能力；Extra 可以发现并调用，Focus 不获得工作区权限。
+
+Skill 全文通过 `read-skill` 按需读取，作为工具结果保留在历史加载位置；用户明确选定的 Skill 则在本轮输入后追加一次。领域关键词不再自动把 Skill 正文拼回开头的系统提示，也不再改变原生工具列表。
 
 ## Focus 与工具权限
 

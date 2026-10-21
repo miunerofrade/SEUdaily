@@ -25,12 +25,17 @@ test('skill discovery, namespace activation, explicit selection and reference bo
  await symlink(join(root,'private.md'),join(root,'audit','references','escape.md'));
  await assert.rejects(catalog.read('audit','references/escape.md'));
 });
-test('model read-skill activates instructions on its next step and persists selection',async t=>{
+test('read-skill appends its body without rewriting the system prefix and survives later turns',async t=>{
  const store=new AgentStore(':memory:');t.after(()=>store.close());let calls=0;const requests=[];
  const provider={async *stream(messages){requests.push(messages);calls++;if(calls===1)yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'load',type:'function',function:{name:'read-skill',arguments:'{"name":"training-plan-audit"}'}}]}};else yield {type:'complete',message:{role:'assistant',content:'loaded'}};}};
  const context={threadId:'skill-test',resourceId:'test',runToken:randomUUID()};
- const runtime=new AgentRuntime({store,provider,tools:async()=>({'read-skill':readSkillTool}),instructions:async c=>(await skillCatalog.instructions(c.skills??[],[])).content});
+ const runtime=new AgentRuntime({store,provider,tools:async()=>({'read-skill':readSkillTool}),instructions:async ()=>'stable-system'});
  for await(const event of await runtime.runTurn([{role:'user',content:'fixture'}],context))assert.notEqual(event.type,'error');
- assert.equal(requests[0][0].content,'');assert.match(requests[1][0].content,/培养方案与毕业要求/);
+ assert.equal(requests[0][0].content,'stable-system');assert.equal(requests[1][0].content,'stable-system');
+ const loaded=requests[1].find(message=>message.role==='tool');assert.match(loaded.content,/培养方案与毕业要求/);
+ for await(const event of await runtime.runTurn([{role:'user',content:'next turn'}],{threadId:context.threadId,resourceId:context.resourceId,runToken:randomUUID(),skills:[]}))assert.notEqual(event.type,'error');
+ assert.equal(requests[2][0].content,'stable-system');
+ assert.equal(requests[2].filter(message=>message.role==='tool').length,1);
+ assert.equal(requests[2].find(message=>message.role==='tool').content,loaded.content);
  assert.deepEqual((await store.getRun(context.runToken)).context.skills,['training-plan-audit']);
 });
