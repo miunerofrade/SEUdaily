@@ -13,7 +13,7 @@ test('extracted message rendering keeps Markdown, errors, sources and prompt act
  const citation={id:'file-1',type:'file',title:'指南.pdf',localPath:'/tmp/guide.pdf',locator:'第 2 页'};
  const message={id:'reply',role:'assistant',createdAt:Date.now(),content:'**结论**\n\n```js\nconst x = 1;\n```',tools:[{id:'call',name:'search-knowledge',state:'failed',result:{status:'failed',summary:'检索失败',citations:[citation]}}]};
  const html=render(Message,{message,onSources:()=>{},onBranch:()=>{},canRegenerate:true});
- assert.match(html,/<strong>结论<\/strong>/);assert.match(html,/class="hljs"/);assert.match(html,/已完成思考，1 项操作失败/);assert.match(html,/lucide-circle-alert/);
+ assert.match(html,/<strong>结论<\/strong>/);assert.match(html,/class="hljs"/);assert.match(html,/已思考，1 项操作失败/);assert.match(html,/lucide-circle-alert/);
  assert.match(html,/aria-label="来源"/);assert.match(html,/aria-label="分支为新会话"/);assert.match(html,/aria-label="复制回答"/);assert.match(html,/<time /);
  assert.doesNotMatch(html,/message-sources-list/);
  assert.doesNotMatch(render(Message,{message:{...message,createdAt:Date.now()-25*3600_000}}),/<time /);
@@ -25,6 +25,7 @@ test('extracted message rendering keeps Markdown, errors, sources and prompt act
 
 test('saved timing and supplemental input remain visible outside the folded process',()=>{
  const html=render(Message,{message:{id:'reply',role:'assistant',createdAt:Date.now(),content:'最终回答',timing:{elapsedMs:68000,finishedAt:Date.now()},process:[{id:'supplement',type:'user-input',text:'按新的时间安排'}],tools:[]}});
- assert.match(html,/已思考 /);assert.match(html,/1 分 8 秒/);assert.match(html,/补充要求/);assert.match(html,/按新的时间安排/);
+ assert.match(html,/已思考 /);assert.match(html,/68 秒/);assert.match(html,/补充要求/);assert.match(html,/按新的时间安排/);
+ assert.equal((html.match(/thought-duration/g)??[]).length,1);assert.doesNotMatch(html,/lucide-bot|run-timing|已完成思考/);
  assert.equal(sidebarWidth(100,1400),220);assert.equal(sidebarWidth(900,1400),480);assert.equal(sidebarWidth(480,800),440);
 });

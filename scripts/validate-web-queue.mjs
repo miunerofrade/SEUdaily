@@ -56,12 +56,12 @@ try{
  assert.ok(toolStarted);
  await input.fill('updated requirement');await input.press('Control+Enter');
  await page.getByText('待补充到当前任务',{exact:true}).waitFor();
- await page.getByText(/已思考 [1-9]/).first().waitFor();
+ await page.locator('.tool-activity-item .elapsed-time').filter({hasText:/[1-9]\d* 秒/}).first().waitFor();
  assert.ok(releaseTool);releaseTool();
  await page.getByText('补充要求已采纳',{exact:true}).waitFor();
  await page.getByRole('button',{name:'发送消息',exact:true}).waitFor();
- const frozen=await page.locator('.run-timing').last().innerText();
- await page.waitForTimeout(1100);assert.equal(await page.locator('.run-timing').last().innerText(),frozen);
+ const frozen=await page.locator('.thought-duration').last().innerText();
+ await page.waitForTimeout(1100);assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
  const separator=page.getByRole('separator',{name:'调整导航栏宽度'});await separator.focus();await separator.press('Home');
  assert.equal(await separator.getAttribute('aria-valuenow'),'220');await separator.press('ArrowRight');assert.equal(await separator.getAttribute('aria-valuenow'),'230');
  await page.waitForTimeout(300); // Let the keyboard width transition finish before grabbing its edge.
@@ -69,7 +69,7 @@ try{
  await page.waitForFunction(()=>document.querySelector('.sidebar-resizer')?.getAttribute('aria-valuenow')==='340');
  await page.reload();await page.getByText('补充要求已采纳',{exact:true}).waitFor();
  assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).getAttribute('aria-valuenow'),'340');
- assert.equal(await page.locator('.run-timing').last().innerText(),frozen);
+ assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
  await page.setViewportSize({width:390,height:844});assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).isVisible(),false);
  assert.deepEqual(errors,[]);
  console.log(JSON.stringify({webQueue:true,arrowQueues:true,edit:true,delete:true,cancel:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));

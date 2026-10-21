@@ -1,7 +1,7 @@
 import {useEffect,useState} from 'react';
 import {durationLabel,elapsedTime,type RunTiming} from '../../../../src/shared/timing';
 
-export function Elapsed({timing,prefix=''}:{timing?:RunTiming;prefix?:string}) {
+export function Elapsed({timing,prefix='',secondsOnly=false}:{timing?:RunTiming;prefix?:string;secondsOnly?:boolean}) {
   const [now,setNow]=useState(Date.now);
   useEffect(()=>{
     setNow(Date.now());
@@ -10,5 +10,6 @@ export function Elapsed({timing,prefix=''}:{timing?:RunTiming;prefix?:string}) {
     return ()=>clearInterval(timer);
   },[timing?.startedAt]);
   if (!timing) return null;
-  return <span className="elapsed-time">{prefix}{durationLabel(elapsedTime(timing,now))}</span>;
+  const elapsed=elapsedTime(timing,now);
+  return <span className={`elapsed-time${secondsOnly ? ' thought-duration' : ''}`}>{prefix}{secondsOnly ? `${Math.floor(elapsed/1000)} 秒` : durationLabel(elapsed)}</span>;
 }

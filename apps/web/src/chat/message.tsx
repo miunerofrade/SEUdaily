@@ -1,4 +1,4 @@
-import {ArrowUp,BookOpen,Bot,ChevronRight,CircleAlert,FileText,Pencil,RefreshCw, X} from "lucide-react";
+import {ArrowUp,BookOpen,ChevronRight,CircleAlert,FileText,Pencil,RefreshCw, X} from "lucide-react";
 import {useEffect,useState,type ReactNode} from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -45,7 +45,7 @@ function ApprovalButtons({ tool, onApproval }: { tool: ToolRun; onApproval?: (ap
   return <div className="tool-approval"><span>需要你的许可才能继续</span><div><button type="button" onClick={() => onApproval(false)}>拒绝</button><button type="button" className="primary" onClick={() => onApproval(true)}>批准</button></div></div>;
 }
 
-function ToolActivity({ tools, process = [], streaming, reasoningActive, onApproval }: { tools: ToolRun[]; process?: AgentProcessEntry[]; streaming?: boolean; reasoningActive?: boolean; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
+function ToolActivity({ tools, process = [], streaming, reasoningActive, timing, onApproval }: { tools: ToolRun[]; process?: AgentProcessEntry[]; streaming?: boolean; reasoningActive?: boolean; timing?:ChatMessage['timing']; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
   const [open, setOpen] = useState(Boolean(streaming));
   const runningTool = [...tools].reverse().find((tool) => tool.state === "running");
   const approvalTool = [...tools].reverse().find((tool) => tool.state === "approval-requested");
@@ -77,22 +77,23 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
   }, [streaming]);
 
   const focusTool = runningTool ?? approvalTool ?? tools.at(-1);
+  const thoughtLabel=timing ? <Elapsed timing={timing} prefix="已思考 " secondsOnly /> : '已思考';
   const statusText = runningTool
     ? toolNarration(runningTool, "running")
     : approvalTool
       ? `等待批准：${toolLabel(approvalTool.name)}`
       : streaming
-        ? reasoningActive ? "正在思考" : "正在继续处理"
+        ? timing ? thoughtLabel : reasoningActive ? "正在思考" : "正在继续处理"
         : failedCount
-          ? `已完成思考，${failedCount} 项操作失败`
-          : "已完成思考";
+          ? <>{thoughtLabel}，{failedCount} 项操作失败</>
+          : thoughtLabel;
 
   return (
     <div className={`tool-activity ${open ? "open" : ""}`}>
       <button type="button" className="tool-activity-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <span className={`tool-activity-status ${runningTool ? "running" : failedCount ? "failed" : "done"}`}>
-          {failedCount && !runningTool ? <CircleAlert size={19} className="error-icon" /> : focusTool ? <ToolGlyph name={focusTool.name} size={19} /> : <Bot size={19} />}
-        </span>
+        {(runningTool || approvalTool || failedCount>0) && <span className={`tool-activity-status ${runningTool ? "running" : failedCount ? "failed" : "done"}`}>
+          {failedCount && !runningTool ? <CircleAlert size={19} className="error-icon" /> : focusTool && <ToolGlyph name={focusTool.name} size={19} />}
+        </span>}
         <span>{statusText}</span>
         <ChevronRight className="tool-activity-chevron" size={18} />
       </button>
@@ -163,7 +164,7 @@ function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApp
       const toolIds = new Set(block.entries.flatMap((entry) => entry.type === "tool" ? [entry.toolId] : []));
       const tools = (message.tools ?? []).filter((tool) => toolIds.has(tool.id) || (!block.entries.length && block.id === "activity-tools"));
       const active = index === lastActivityIndex && block === blocks.at(-1);
-      return <div className="inline-tools" key={block.id}><ToolActivity tools={tools} process={block.entries} streaming={active} reasoningActive={active && message.reasoningActive} onApproval={onApproval} /></div>;
+      return <div className="inline-tools" key={block.id}><ToolActivity tools={tools} process={block.entries} streaming={active} reasoningActive={active && message.reasoningActive} timing={index===lastActivityIndex ? message.timing : undefined} onApproval={onApproval} /></div>;
     })}
   </>;
 }
@@ -296,14 +297,14 @@ export function Message({ message, canRegenerate = false, disabled = false, onEd
   return (
     <article className="message assistant-message">
       <div className="assistant-body">
-        {message.timing && <div className="run-timing"><Elapsed timing={message.timing} prefix={message.error ? '已运行 ' : '已思考 '} /></div>}
+        {message.timing && (!hasProcess || (message.streaming && !message.tools?.length && !message.process?.some(entry=>entry.type==='reasoning'))) && <div className="thought-summary"><Elapsed timing={message.timing} prefix="已思考 " secondsOnly /></div>}
         {hasProcess && message.streaming && (
           <StreamingProcess message={message} onApproval={onApproval} />
         )}
         {hasProcess && !message.streaming && (
           <div className="inline-tools">
             {message.process?.filter(entry=>entry.type==='user-input').map(entry=><div key={entry.id} className="process-user-input"><small>补充要求</small><span>{entry.type==='user-input' ? entry.text : ''}</span></div>)}
-            <ToolActivity tools={message.tools ?? []} process={message.process?.filter(entry=>entry.type!=='user-input')} streaming={message.streaming} reasoningActive={message.reasoningActive} onApproval={onApproval} />
+            <ToolActivity tools={message.tools ?? []} process={message.process?.filter(entry=>entry.type!=='user-input')} streaming={message.streaming} reasoningActive={message.reasoningActive} timing={message.timing} onApproval={onApproval} />
           </div>
         )}
         {message.content ? (
