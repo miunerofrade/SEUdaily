@@ -44,6 +44,20 @@ try{
  await recent.press('Enter');
  assert.equal(await recent.getAttribute('aria-expanded'),'true');
  assert.equal(await page.locator('#recent-conversations .conversation-row').first().isVisible(),true);
+ // Long history must scroll inside the sidebar, leaving footer controls in view.
+ await page.locator('#recent-conversations').evaluate(list=>{
+  for(let i=0;i<40;i++){const row=list.firstElementChild.cloneNode(true);row.dataset.layoutFixture='true';list.append(row);}
+ });
+ const history=page.locator('.conversation-list');
+ assert.ok(await history.evaluate(node=>node.scrollHeight>node.clientHeight));
+ const footer=await page.locator('.sidebar-footer').boundingBox();
+ assert.ok(footer.y>=0 && footer.y+footer.height<=page.viewportSize().height);
+ await history.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+ assert.ok(await history.evaluate(node=>node.scrollTop>0));
+ const scrolledFooter=await page.locator('.sidebar-footer').boundingBox();
+ assert.equal(scrolledFooter.y,footer.y);
+ await page.locator('[data-layout-fixture]').evaluateAll(rows=>rows.forEach(row=>row.remove()));
+ await history.evaluate(node=>{node.scrollTop=0;});
  await input.fill('queued edit');
  const send=page.getByRole('button',{name:'加入队列',exact:true});
  assert.equal(await send.evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(17, 17, 17)');
