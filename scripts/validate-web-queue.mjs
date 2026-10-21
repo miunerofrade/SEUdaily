@@ -18,10 +18,11 @@ const {agentRuntime}=await import(source+'/src/runtime/application.ts');
 const {agentStore}=await import(source+'/src/runtime/storage.ts');
 const {stopMessageQueue}=await import(source+'/src/server/message-queue.ts');
 let releaseTool;let toolStarted=false;
-agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}}});agentRuntime.config.instructions=async()=>'';
+agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable'})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
 agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
- const answer=text==='updated requirement'?'补充要求已采纳':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop'};}};
+ if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
+ const answer=text==='updated requirement'?'补充要求已采纳':text==='tool retry'?'已恢复并完成回答':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop'};}};
 const api=getRequestListener(app.fetch);
 const server=createServer(async(req,res)=>{if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
@@ -49,6 +50,8 @@ try{
  await page.getByRole('button',{name:'删除',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.composer-queue-row'));
  await input.fill('queued final');await input.press('Enter');await page.locator('.composer-queue-row').waitFor();
  await page.getByRole('button',{name:'停止回答',exact:true}).click();await page.getByRole('button',{name:'继续队列',exact:true}).waitFor();
+ await page.locator('.message-stopped').waitFor();assert.equal(await page.locator('.message-error').count(),0);
+ await page.getByText('正在等待取消',{exact:true}).waitFor();
  await page.getByRole('button',{name:'继续队列',exact:true}).click();
  await page.getByText('队列回答完成',{exact:true}).waitFor({timeout:10000});
  await input.fill('steer hold');await input.press('Enter');
@@ -70,9 +73,19 @@ try{
  await page.reload();await page.getByText('补充要求已采纳',{exact:true}).waitFor();
  assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).getAttribute('aria-valuenow'),'340');
  assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
+ await input.fill('tool retry');await input.press('Enter');await page.getByText('已恢复并完成回答',{exact:true}).waitFor();
+ const reply=page.locator('.assistant-message').last();
+ const thought=reply.locator('.tool-activity-toggle');assert.doesNotMatch(await thought.innerText(),/失败/);
+ await thought.click();await reply.getByText('fixture service unavailable',{exact:true}).waitFor();assert.equal(await reply.locator('.error-icon').count(),0);
+ const information=reply.getByRole('button',{name:'工具调用信息',exact:true});await information.click();
+ await page.getByRole('region',{name:'工具调用信息',exact:true}).getByText('fixture service unavailable',{exact:true}).waitFor();
+ await page.keyboard.press('Escape');assert.equal(await information.getAttribute('aria-expanded'),'false');
+ await information.click();await page.locator('.topbar').click({position:{x:200,y:20}});assert.equal(await information.getAttribute('aria-expanded'),'false');
  await page.setViewportSize({width:390,height:844});assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).isVisible(),false);
+ await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
+ await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({webQueue:true,arrowQueues:true,edit:true,delete:true,cancel:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
+ console.log(JSON.stringify({webQueue:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
  releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }
