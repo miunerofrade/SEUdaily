@@ -9,6 +9,7 @@ const root=await mkdtemp(join(tmpdir(),'seudaily-http-'));
 await writeFile(join(root,'package.json'),'{}');await writeFile(join(root,'pyproject.toml'),'');
 await mkdir(join(root,'.agent','skills'),{recursive:true});
 await cp(new URL('../.agent/skills/training-plan-audit',import.meta.url),join(root,'.agent','skills','training-plan-audit'),{recursive:true});
+await writeFile(join(root,'AGENT.md'),'LEGACY_AGENT_RULE');
 process.env.SEUDAILY_PROJECT_ROOT=root;
 const {app}=await import('../src/server/app.ts');
 const {agentRuntime}=await import('../src/runtime/application.ts');
@@ -18,8 +19,10 @@ const request=(path,body)=>app.request('http://127.0.0.1:4111'+path,{method:body
 function input(thread,token,messages,resource='fixture'){return {messages,memory:{thread,resource},requestContext:{seudailyRunToken:token,seudailySkills:['training-plan-audit'],seudailyInterface:'cli'}};}
 function events(text){return text.split('\n\n').filter(block=>block.startsWith('data: ')&&!block.includes('[DONE]')).map(block=>JSON.parse(block.slice(6)));}
 
-test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async t=>{
+test('HTTP skill discovery, AGENTS.md settings and bound approval recovery',async t=>{
  t.after(async()=>{await agentRuntime.shutdown();await agentStore.close();await rm(root,{recursive:true,force:true});});
+ assert.equal(await readFile(join(root,'AGENTS.md'),'utf8'),'LEGACY_AGENT_RULE');
+ assert.equal((await (await request('/app/settings')).json()).agentInstructions,'LEGACY_AGENT_RULE');
  // The normal chat upload endpoint must index automatically, without /knowledge add.
  const upload=async()=>{
   const form=new FormData();form.append('file',new File(['考试占比为百分之六十。'],'课程说明.txt'));
@@ -69,7 +72,7 @@ test('HTTP skill discovery, AGENT.md settings and bound approval recovery',async
  assert.equal((await (await request('/app/skills')).json()).skills[0].name,'training-plan-audit');
  const saved=await request('/app/settings',{agentInstructions:'FIXTURE_AGENT_RULE'});
  assert.equal(saved.status,200);
- assert.equal(await readFile(join(root,'AGENT.md'),'utf8'),'FIXTURE_AGENT_RULE');
+ assert.equal(await readFile(join(root,'AGENTS.md'),'utf8'),'FIXTURE_AGENT_RULE');
  assert.equal((await (await request('/app/settings')).json()).agentInstructions,'FIXTURE_AGENT_RULE');
  assert.match(await agentInstructions({threadId:'x',resourceId:'x',runToken:'x'}),/FIXTURE_AGENT_RULE/);
  await agentStore.ensureThread({threadId:'new-mobile-fixture',resourceId:'new-mobile-resource',interface:'mobile'});

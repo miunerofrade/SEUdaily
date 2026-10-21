@@ -10,7 +10,7 @@ export const commands: Record<string, string> = {
   audit: "培养方案 Skill 核查",
   notices: "校园通知",
   focus: "关注任务",
-  settings: "编辑环境变量和 AGENT.md",
+  settings: "编辑环境变量和 AGENTS.md",
   knowledge: '知识库：list / add "路径" / search 问题 / retry ID / remove ID',
   queue: "查看待发送消息；resume 继续暂停的队列",
   vpn: "连接校园 VPN（使用已保存端口）；status / disconnect / verify / resend",

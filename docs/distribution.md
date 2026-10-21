@@ -62,7 +62,7 @@ VPN 核心继续独立按需下载；源代码/AGPL 说明见 [VPN 许可证记�
 | Windows | `%LOCALAPPDATA%/SEUdaily` | `%LOCALAPPDATA%/SEUdaily/cache` |
 | Linux | `$XDG_DATA_HOME/seudaily`，默认 `~/.local/share/seudaily` | `$XDG_CACHE_HOME/seudaily`，默认 `~/.cache/seudaily` |
 
-用户数据目录内保存 `.env`、`AGENT.md`、`.agent/skills/`、`.seudaily/`、`exports/`；数据库仍为 `.seudaily/agent.db`。安装升级不写这些文件。`--data-dir` 或 `SEUDAILY_DATA_DIR` 选择数据目录；`SEUDAILY_CACHE_DIR` 选择缓存目录，`--port` 同时改变服务端口、CLI 地址和本地 Host/Origin 校验。
+用户数据目录内保存 `.env`、`AGENTS.md`、`.agent/skills/`、`.seudaily/`、`exports/`；数据库仍为 `.seudaily/agent.db`。安装升级不写这些文件。`--data-dir` 或 `SEUDAILY_DATA_DIR` 选择数据目录；`SEUDAILY_CACHE_DIR` 选择缓存目录，`--port` 同时改变服务端口、CLI 地址和本地 Host/Origin 校验。
 
 新默认目录不会自动读取旧仓库中的凭据或历史。停止旧后端后，用显式导入保留原件；目标必须为空：
 

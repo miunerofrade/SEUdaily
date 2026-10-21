@@ -69,7 +69,7 @@ async function importData(source: string) {
   const from = resolve(source);
   const relation = relative(from, dataRoot);
   if (!relation || !isAbsolute(relation) && !relation.startsWith('..')) throw new Error('目标目录不能位于来源目录内部');
-  const entries = ['.env', 'AGENT.md', '.agent', '.seudaily', 'exports', 'cookies.json', 'config.json'];
+  const entries = ['.env', 'AGENTS.md', 'AGENT.md', '.agent', '.seudaily', 'exports', 'cookies.json', 'config.json'];
   if (!(await readdir(dataRoot).catch(() => [])).every(name => name === '.DS_Store')) throw new Error('导入目标必须为空；请指定新的 --data-dir');
   if (!existsSync(join(from, 'pyproject.toml')) || !existsSync(join(from, '.seudaily'))) throw new Error('来源不是包含运行数据的旧 SEUdaily 仓库');
   if (existsSync(join(from, '.seudaily', 'core.lock')) || existsSync(join(from, '.seudaily', 'agent.db-wal'))) throw new Error('请先停止旧后端，再导入，避免复制正在写入的数据库');

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -146,7 +146,11 @@ function migrateLegacyRuntimeDirectory(): void {
 migrateLegacyRuntimeDirectory();
 
 export const runtimeRoot = resolve(projectRoot, ".seudaily");
-export const agentInstructionsPath = resolve(projectRoot, 'AGENT.md');
+export const agentInstructionsPath = resolve(projectRoot, 'AGENTS.md');
+const legacyInstructionsPath = resolve(projectRoot, 'AGENT.md');
+if (!existsSync(agentInstructionsPath) && existsSync(legacyInstructionsPath)) {
+  renameSync(legacyInstructionsPath, agentInstructionsPath);
+}
 export const taskRuntimeRoot = resolve(runtimeRoot, "tasks");
 export const sandboxWorkspaceRoot = resolve(runtimeRoot, "sandbox-workspace");
 

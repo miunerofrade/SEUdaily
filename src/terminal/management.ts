@@ -10,7 +10,7 @@ export async function settingsForm(s:Session):Promise<Form> {
  const data=await s.client.json('/app/settings');
  const labels:Record<string,string>={DASHSCOPE_API_KEY:'阿里云 API Key',SEUDAILY_EMBEDDING_MODEL:'向量嵌入模型（默认 qwen3.7-text-embedding）',SEUDAILY_RERANK_MODEL:'重排模型（默认 qwen3.7-text-rerank）',SEUDAILY_EMBEDDING_BASE_URL:'向量服务地址（默认阿里云百炼）',DEEPSEEK_API_KEY:'DeepSeek API 密钥',DEEPSEEK_MODEL:'模型',TAVILY_API_KEY:'Tavily 搜索密钥',SEUDAILY_VPN_BINARY:'VPN 核心路径（可选）',SEUDAILY_VPN_DNS_SERVER:'校园 DNS 地址',SEUDAILY_USERNAME:'校园账号',SEUDAILY_PASSWORD:'校园密码',SEUDAILY_ASR_API_KEY:'语音转写 API 密钥',SEUDAILY_WHISPER_MODEL:'本地 Whisper 模型',SEUDAILY_FULL_ACCESS:'完全访问权限',SEUDAILY_FULL_ACCESS_EXTRA:'工作区文件与终端权限'};
  const booleanFields=new Set(['SEUDAILY_FULL_ACCESS','SEUDAILY_FULL_ACCESS_EXTRA']);
- return {title:'设置 · 空白密钥保持原值',fields:[...data.fields.map((f:any)=>({...field(f.name,(labels[f.name] ?? f.name)+(f.configured?' · 已配置':''),f.value),secret:f.secret,...(booleanFields.has(f.name)?{choices:[{value:'false',label:'关闭'},{value:'true',label:'开启'}]}:{})})),{...field('agentInstructions','全局对话规则（AGENT.md）',data.agentInstructions),multiline:true}],save:async values=>{
+ return {title:'设置 · 空白密钥保持原值',fields:[...data.fields.map((f:any)=>({...field(f.name,(labels[f.name] ?? f.name)+(f.configured?' · 已配置':''),f.value),secret:f.secret,...(booleanFields.has(f.name)?{choices:[{value:'false',label:'关闭'},{value:'true',label:'开启'}]}:{})})),{...field('agentInstructions','全局对话规则（AGENTS.md）',data.agentInstructions),multiline:true}],save:async values=>{
  const {agentInstructions,...env}=values;
  const result=await s.client.json('/app/settings','POST',{values:env,agentInstructions});
  s.show(result.restartRequired?'设置已保存。退出后执行 seudaily stop，再启动 seudaily，配置即可生效。':'设置已保存；下一轮对话生效。');
