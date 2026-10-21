@@ -894,6 +894,11 @@ export default function App() {
 
   const composer = (
     <form className={`composer-wrap ${active.messages.length ? "" : "centered"}`} onSubmit={onSubmit}>
+      {!!queueState.items.length && <div className="composer-queue" aria-label="待发送队列">
+        {queueState.items.map(item => <div key={item.id} className="composer-queue-row"><span title={item.error || item.text}><small>{item.state === 'running' ? '发送中' : item.state === 'pending' ? item.delivery==='steer' && item.runToken===queueState.runToken ? '待补充到当前任务' : '已排队，等待发送' : '已暂停'}</small> {item.text || `${item.images.length + item.documents.length} 个附件`}{item.error && ` · ${item.error}`}</span><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item,true)}>编辑</button><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item)}>删除</button></div>)}
+        {queueState.progress?.text && <div className="composer-queue-progress">{queueState.progress.text}</div>}
+        {queueState.items.some(item => item.state === 'paused') && <button type="button" onClick={() => void queueRequest(queuePath.replace('?', '/resume?'), 'POST', {}).catch(error => setConversationError(error.message))}>继续队列</button>}
+      </div>}
       <div className="composer">
         {slashOpen && <div className="slash-menu">
           <div className="slash-menu-heading">命令 <span>↑↓ 选择 · Tab / Enter 补全 · Esc 收起</span></div>
@@ -926,13 +931,7 @@ export default function App() {
         <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
         {(sending || queueState.active) && !draft.trim() && !pendingImages.length && !pendingDocuments.length ? <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'} title="停止回答"><CircleStop size={19} /></button> :
         <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
-        {(sending || queueState.active) && !!draft.trim() && <button type="button" className="composer-steer" disabled={uploadingAttachments || !!pendingImages.length || !!pendingDocuments.length || !!selectedSkill} onClick={()=>void send(draft,{steer:true})} title="Ctrl+Enter：当前模型响应或工具完成后读取，不中断正在执行的操作">补充当前任务</button>}
       </div>
-      {!!queueState.items.length && <div className="composer-queue" aria-label="待发送队列">
-        {queueState.items.map(item => <div key={item.id} className="composer-queue-row"><span title={item.error || item.text}><small>{item.state === 'running' ? '发送中' : item.state === 'pending' ? item.delivery==='steer' && item.runToken===queueState.runToken ? '待补充到当前任务' : '已排队，等待发送' : '已暂停'}</small> {item.text || `${item.images.length + item.documents.length} 个附件`}{item.error && ` · ${item.error}`}</span><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item,true)}>编辑</button><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item)}>删除</button></div>)}
-        {queueState.progress?.text && <div className="composer-queue-progress">{queueState.progress.text}</div>}
-        {queueState.items.some(item => item.state === 'paused') && <button type="button" onClick={() => void queueRequest(queuePath.replace('?', '/resume?'), 'POST', {}).catch(error => setConversationError(error.message))}>继续队列</button>}
-      </div>}
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
       <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>

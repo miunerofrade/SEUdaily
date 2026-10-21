@@ -34,7 +34,15 @@ try{
  
  const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
- await input.fill('queued edit');await page.getByRole('button',{name:'加入队列',exact:true}).click();await page.locator('.composer-queue-row').waitFor();
+ await input.fill('queued edit');
+ const send=page.getByRole('button',{name:'加入队列',exact:true});
+ assert.equal(await send.evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(17, 17, 17)');
+ assert.equal(await page.locator('.composer-steer').count(),0);
+ await send.click();await page.locator('.composer-queue-row').waitFor();
+ const composerBox=await page.locator('.composer').boundingBox(),queueBox=await page.locator('.composer-queue').boundingBox();
+ assert.ok(queueBox.y+queueBox.height<=composerBox.y);
+ assert.ok(queueBox.width<composerBox.width);
+ assert.ok(Math.abs((queueBox.x+queueBox.width/2)-(composerBox.x+composerBox.width/2))<2);
  await page.getByRole('button',{name:'编辑',exact:true}).click();await page.waitForFunction(()=>document.querySelector('textarea').value==='queued edit');
  assert.equal(await page.locator('.composer-queue-row').count(),0);
  await input.fill('queued delete');await input.press('Enter');await page.locator('.composer-queue-row').waitFor();
