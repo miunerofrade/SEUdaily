@@ -102,6 +102,19 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             file = path / 'requests.jsonl'
             return [json.loads(line) for line in file.read_text().splitlines()] if file.exists() else []
 
+        def wait_for_output(text, timeout=5):
+            # Session.busy clears before Ink's scheduled render reaches the PTY.
+            # Keep draining the real terminal rather than treating idle as painted.
+            expected = text.encode()
+            deadline = time.monotonic() + timeout
+            while expected not in output and time.monotonic() < deadline and proc.poll() is None:
+                pump(.025)
+            assert expected in output, (
+                f'terminal output timed out waiting for {text!r}; exit={proc.poll()}; '
+                f'busy={(path / "session-busy").exists()}; recent requests={records()[-3:]!r}\n'
+                f'PTY output tail:\n{output.decode(errors="replace")[-6000:]}'
+            )
+
         try:
             deadline = time.monotonic() + 15
             while b'fixture-model' not in output and time.monotonic() < deadline and proc.poll() is None: pump(.01)
@@ -127,7 +140,7 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             assert not [r for r in records() if 'messages' in r], 'IME commit must stay in draft'
             send(b'\r', .35)
             assert records()[-1]['messages'] == '中文输入'
-            assert '回答完成' in output.decode(), 'streamed answer missing'
+            wait_for_output('回答完成')
             send('LF 提交'); send(b'\n', .35)
             assert records()[-1]['messages'] == 'LF 提交'
             send('连续 Enter'); send(b'\r\r', .35)
