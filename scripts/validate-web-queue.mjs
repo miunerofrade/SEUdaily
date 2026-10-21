@@ -18,7 +18,7 @@ const {agentRuntime}=await import(source+'/src/runtime/application.ts');
 const {agentStore}=await import(source+'/src/runtime/storage.ts');
 const {stopMessageQueue}=await import(source+'/src/server/message-queue.ts');
 let releaseTool;let toolStarted=false;
-agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable'})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
+agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable',data:{reason:'fixture upstream detail',attempt:2}})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
 agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
  if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
@@ -100,6 +100,18 @@ try{
  const reply=page.locator('.assistant-message').last();
  const thought=reply.locator('.tool-activity-toggle');assert.doesNotMatch(await thought.innerText(),/失败/);
  await thought.click();await reply.getByText('fixture service unavailable',{exact:true}).waitFor();assert.equal(await reply.locator('.error-icon').count(),0);
+ const toolRows=reply.locator('.tool-activity-heading');
+ assert.equal(await reply.locator('.tool-result-feedback').count(),0);
+ await toolRows.first().click();
+ await reply.getByRole('region',{name:'工具返回结果'}).getByText(/fixture upstream detail/).waitFor();
+ assert.equal(await toolRows.nth(1).getAttribute('aria-expanded'),'false');
+ await toolRows.nth(1).click();assert.equal(await reply.locator('.tool-result-feedback').count(),2);
+ await thought.click();assert.equal(await reply.locator('.tool-result-feedback').count(),0);
+ await thought.click();assert.equal(await reply.locator('.tool-result-feedback').count(),0);
+ assert.deepEqual(await toolRows.evaluateAll(rows=>rows.map(row=>row.getAttribute('aria-expanded'))),['false','false']);
+ await toolRows.first().focus();await toolRows.first().press('Enter');
+ assert.equal(await toolRows.first().getAttribute('aria-expanded'),'true');
+ await toolRows.first().press('Enter');assert.equal(await reply.locator('.tool-result-feedback').count(),0);
  const information=reply.getByRole('button',{name:'工具调用信息',exact:true});await information.click();
  await page.getByRole('region',{name:'工具调用信息',exact:true}).getByText('fixture service unavailable',{exact:true}).waitFor();
  await page.keyboard.press('Escape');assert.equal(await information.getAttribute('aria-expanded'),'false');
