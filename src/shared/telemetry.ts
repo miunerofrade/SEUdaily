@@ -20,11 +20,7 @@ export function telemetryLabel(
     (prompt !== undefined && output !== undefined
       ? prompt + output
       : undefined);
-  const hit = usage.prompt_cache_hit_tokens;
-  const ratio =
-    prompt !== undefined && hit !== undefined && prompt > 0
-      ? ((100 * hit) / prompt).toFixed(1) + "%"
-      : "—";
+  const ratio = cacheHitLabel(usage);
   if (compact)
     return `${model} · effort ${effort} · tokens ${total?.toLocaleString("en-US") ?? "—"} · 缓存 ${ratio}`;
   return `${model} · effort ${effort} · tokens ${total?.toLocaleString("en-US") ?? "—"} (in ${prompt?.toLocaleString("en-US") ?? "—"} / out ${output?.toLocaleString("en-US") ?? "—"}) · 缓存 ${ratio}`;
@@ -42,4 +38,14 @@ export function conversationUsage(messages: ReadonlyArray<{ role: string; id: st
   for (const usage of runs.values())
     for (const [key, value] of Object.entries(usage)) total[key] = (total[key] ?? 0) + value;
   return total;
+}
+
+export function cacheHitLabel(usage: Usage): string {
+  const prompt=usage.prompt_tokens, hit=usage.prompt_cache_hit_tokens;
+  return prompt!==undefined && hit!==undefined && prompt>0
+    ? ((100*hit)/prompt).toFixed(1)+'%' : '—';
+}
+
+export function latestTurnLabel(usage: Usage): string {
+  return `最近一轮（in ${usage.prompt_tokens?.toLocaleString('en-US') ?? '—'} / out ${usage.completion_tokens?.toLocaleString('en-US') ?? '—'}） · 缓存 ${cacheHitLabel(usage)}`;
 }

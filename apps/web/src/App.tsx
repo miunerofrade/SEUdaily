@@ -16,7 +16,7 @@ import { PromptVersions } from "./prompt-versions";
 import { messageContent, editedDocumentContent, writeConversationCache } from "./conversation-cache";
 import { mergeServerConversation } from "./conversation-sync";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
-import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
+import { conversationUsage, normalizedUsage, telemetryLabel, latestTurnLabel } from "../../../src/shared/telemetry";
 import { ArrowUp, BookOpen, ChevronRight, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
@@ -205,7 +205,8 @@ export default function App() {
   const activeMessages=useMemo(()=>activeRaw.messagesLoaded === false ? [] : conversationPath(activeRaw.messages,activeRaw.activeLeaf).filter(message=>!message.hidden),[activeRaw.messages,activeRaw.activeLeaf,activeRaw.messagesLoaded]);
   const active = { ...activeRaw, messages:activeMessages };
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
-  const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage);
+  const telemetry = telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage, true).replace("tokens ", "累计 tokens ").replace("缓存 ", "累计缓存 ");
+  const latestTelemetry = latestTurnLabel(normalizedUsage([...active.messages].reverse().find(message => message.role === "assistant")?.usage));
   const recentConversations = useMemo(() => [
     ...conversations.filter((conversation) => (conversation.messages.length || conversation.messagesLoaded === false)).map((conversation) => ({ kind: "chat" as const, conversation })),
     ...focusConversations.map((conversation) => ({ kind: "focus" as const, conversation })),
@@ -934,7 +935,7 @@ export default function App() {
         <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
       </div>
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
-      {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
+      {!!active.messages.length && <div className="composer-telemetry" aria-label="模型、会话累计和最近一轮用量" title={telemetryLabel(agentInfo.model, agentInfo.effort, activeUsage)}>{`${telemetry} · ${latestTelemetry}`.split(" · ").map((item,index)=><span key={index}>{item}</span>)}</div>}
       <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>
     </form>
   );

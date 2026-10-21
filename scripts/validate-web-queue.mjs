@@ -22,7 +22,7 @@ agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',input
 agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
  if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
- const answer=text==='updated requirement'?'补充要求已采纳':text==='tool retry'?'已恢复并完成回答':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop'};}};
+ const answer=text==='updated requirement'?'补充要求已采纳':text==='tool retry'?'已恢复并完成回答':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:750}};}};
 const api=getRequestListener(app.fetch);
 const server=createServer(async(req,res)=>{if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
@@ -97,6 +97,10 @@ try{
  assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).getAttribute('aria-valuenow'),'340');
  assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
  await input.fill('tool retry');await input.press('Enter');await page.getByText('已恢复并完成回答',{exact:true}).waitFor();
+ await page.getByText('最近一轮（in 1,000 / out 100）',{exact:true}).waitFor();
+ const telemetry=page.locator('.composer-telemetry');assert.equal(await telemetry.count(),1);
+ assert.match(await telemetry.innerText(),/累计缓存/);assert.match(await telemetry.innerText(),/缓存 75.0%/);
+ assert.ok((await telemetry.boundingBox()).height<=18,'desktop telemetry stays on one line');
  const reply=page.locator('.assistant-message').last();
  const thought=reply.locator('.tool-activity-toggle');assert.doesNotMatch(await thought.innerText(),/失败/);
  await thought.click();await reply.getByText('fixture service unavailable',{exact:true}).waitFor();assert.equal(await reply.locator('.error-icon').count(),0);
