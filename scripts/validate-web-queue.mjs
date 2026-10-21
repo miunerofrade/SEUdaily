@@ -35,6 +35,15 @@ try{
  
  const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
+ const recent=page.getByRole('button',{name:'最近',exact:true});
+ await page.locator('#recent-conversations .conversation-row').first().waitFor();
+ await recent.click();
+ assert.equal(await recent.getAttribute('aria-expanded'),'false');
+ assert.equal(await page.locator('#recent-conversations').isVisible(),false);
+ assert.equal(await page.getByRole('button',{name:'停止回答',exact:true}).isVisible(),true);
+ await recent.press('Enter');
+ assert.equal(await recent.getAttribute('aria-expanded'),'true');
+ assert.equal(await page.locator('#recent-conversations .conversation-row').first().isVisible(),true);
  await input.fill('queued edit');
  const send=page.getByRole('button',{name:'加入队列',exact:true});
  assert.equal(await send.evaluate(node=>getComputedStyle(node).backgroundColor),'rgb(17, 17, 17)');

@@ -17,7 +17,7 @@ import { messageContent, editedDocumentContent, writeConversationCache } from ".
 import { mergeServerConversation } from "./conversation-sync";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage, telemetryLabel } from "../../../src/shared/telemetry";
-import { ArrowUp, BookOpen, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, ChevronRight, CircleAlert, CircleStop, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentInput } from "./api";
@@ -143,6 +143,7 @@ export default function App() {
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [recentCollapsed, setRecentCollapsed] = useState(false);
   const sidebarResize=useSidebarResize();
   const [navOpen, setNavOpen] = useState(false);
   const [sending, setSending] = useState(false);
@@ -970,7 +971,10 @@ export default function App() {
           <button className={view === "notices" ? "active" : ""} onClick={() => openView("notices")}><SidebarIcon kind="notice" /><span>教务通知</span></button>
         </nav>
         <nav className="conversation-list" aria-label="历史对话">
-          <div className="nav-label">最近</div>
+          <button type="button" className="nav-label recent-toggle" aria-expanded={!recentCollapsed} aria-controls="recent-conversations" onClick={() => setRecentCollapsed(value => !value)}>
+            最近<ChevronRight size={14} aria-hidden="true" />
+          </button>
+          <div id="recent-conversations" hidden={recentCollapsed}>
           {recentConversations.map(({ kind, conversation }) => (
             <div key={`${kind}-${conversation.id}`} className={`conversation-row ${kind === "focus" ? "focus-conversation" : ""} ${(kind === "chat" && view === "chat" && conversation.id === active.id) || (kind === "focus" && view === "focus" && conversation.focusId === selectedFocusId) ? "active" : ""}`}>
               <button className="conversation-item" onClick={() => kind === "focus" ? openFocusConversation(conversation.focusId || conversation.id) : (() => { setActiveId(conversation.id); setView("chat"); setNavOpen(false); })()}>
@@ -987,6 +991,7 @@ export default function App() {
               </button>}
             </div>
           ))}
+          </div>
         </nav>
         <div className="sidebar-footer">
           <button className={`settings-button ${view === "settings" ? "active" : ""}`} onClick={() => openView("settings")}><SidebarIcon kind="settings" /><span>设置</span></button>
