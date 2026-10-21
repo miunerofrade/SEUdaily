@@ -168,14 +168,14 @@ export async function runPythonTool(action, payload) {
     setFullAccessEnabled(false); setFullAccessExtraEnabled(false);
     const apply = proposeLocalActionTool.inputSchema.parse({kind:"set_semester",mode:"apply",schedule:{semester:{startDate:"2026-09-21"}}});
     assert.equal(proposeLocalActionTool.requireApproval(apply, options), true);
-    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:apply}, options), true);
-    const applied = await invokeCapabilityTool.execute({ticket:capability.ticket,arguments:apply},options);
+    assert.equal(await invokeCapabilityTool.requireApproval({name:capability.name,arguments:apply}, options), true);
+    const applied = await invokeCapabilityTool.execute({name:capability.name,arguments:apply},options);
     assert.deepEqual(applied.data.change, {operation:"semester",semester:{startDate:"2026-09-21"}});
     assert.match((await invokeCapabilityTool.toModelOutput(applied)).value, /本地设置已更新/);
     const preview = {...apply, mode:"preview"};
-    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:preview}, options), false);
+    assert.equal(await invokeCapabilityTool.requireApproval({name:capability.name,arguments:preview}, options), false);
     setFullAccessEnabled(true);
-    assert.equal(await invokeCapabilityTool.requireApproval({ticket:capability.ticket,arguments:apply}, options), false);
+    assert.equal(await invokeCapabilityTool.requireApproval({name:capability.name,arguments:apply}, options), false);
     setFullAccessEnabled(false);
     assert.equal(proposeLocalActionTool.inputSchema.safeParse({kind:"add_schedule",schedule:{course:{courseName:"周期课",startPeriod:1,endPeriod:2}}}).success, false);
     assert.equal(proposeLocalActionTool.inputSchema.safeParse({kind:"add_schedule_once",schedule:{date:"2026-10-07",course:{courseName:"单次课",startPeriod:1,endPeriod:2}}}).success, true);
@@ -186,20 +186,24 @@ export async function runPythonTool(action, payload) {
     assert.equal((await searchCapabilitiesTool.execute({query:"get-academic-calendar",namespace:"schedule"},options)).results.some(item=>item.name === "get-academic-calendar"), false);
     assert.ok(capability.inputSchema.properties.kind);
     assert.ok(capability.inputSchema.properties.schedule.properties.course.properties.weeks);
-    await assert.rejects(invokeCapabilityTool.execute({ ticket: capability.ticket, arguments: { kind: "create_focus" } }, options), /focus/);
-    await assert.rejects(invokeCapabilityTool.execute({ ticket: capability.ticket, arguments: {} }, {
-      requestContext: { get: () => "another-run" },
-    }), /票据/);
-    const savedTickets = [];
-    const durableOptions = {requestContext:{get:key=>key === "seudailyRunToken" ? "durable-run" : key === "seudailyCapabilityTickets" ? savedTickets : undefined}};
-    const durable = (await searchCapabilitiesTool.execute({query:"修改课表",namespace:"local-actions"},durableOptions)).results[0];
-    const actualNow = Date.now;
+    await assert.rejects(invokeCapabilityTool.execute({ name: capability.name, arguments: { kind: "create_focus" } }, options), /focus/);
+    assert.equal('ticket' in capability, false);
+    assert.equal('expiresInSeconds' in result, false);
+    assert.equal(invokeCapabilityTool.inputSchema.safeParse({ticket:'cap-old',arguments:apply}).success,false);
+    const otherRun = {requestContext:{get:key=>key === 'seudailyRunToken' ? 'another-run' : undefined}};
+    // Names work in a different run, without discovery and regardless of time elapsed.
+    assert.equal(await invokeCapabilityTool.requireApproval({name:capability.name,arguments:apply},otherRun),true);
+    assert.equal((await invokeCapabilityTool.execute({name:capability.name,arguments:preview},otherRun)).status,'completed');
+    await assert.rejects(invokeCapabilityTool.execute({name:'unknown-capability',arguments:{}},options),/未找到可调用的能力/);
+    await assert.rejects(invokeCapabilityTool.execute({name:capability.name,namespace:'web',arguments:apply},options),/未找到可调用的能力/);
+    const actualNow=Date.now;
     try {
-      Date.now = () => actualNow() + 11 * 60_000;
-      await assert.rejects(invokeCapabilityTool.execute({ticket:durable.ticket,arguments:apply},durableOptions), /票据/);
-      const approvedOptions = {requestContext:{get:key=>key === "seudailyApprovedCapabilityTicket" ? durable.ticket : durableOptions.requestContext.get(key)}};
-      assert.equal((await invokeCapabilityTool.execute({ticket:durable.ticket,arguments:apply},approvedOptions)).status,"completed");
-    } finally {Date.now = actualNow;}
+      Date.now=()=>actualNow()+24*60*60_000;
+      assert.equal(await invokeCapabilityTool.requireApproval({name:capability.name,arguments:apply},otherRun),true);
+      assert.equal((await invokeCapabilityTool.execute({name:capability.name,arguments:preview},otherRun)).status,'completed');
+    } finally {Date.now=actualNow;}
+    assert.equal(await invokeCapabilityTool.requireApproval({name:'playwright_browser_click',arguments:{element:'fixture',target:'ref-1'}},options),true);
+    assert.equal(await invokeCapabilityTool.requireApproval({name:'playwright_browser_snapshot',arguments:{}},options),false);
   } finally {
     if (previousRoot === undefined) delete process.env.SEUDAILY_PROJECT_ROOT;
     else process.env.SEUDAILY_PROJECT_ROOT = previousRoot;

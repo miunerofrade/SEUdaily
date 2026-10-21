@@ -206,6 +206,8 @@ VPN 与业务门户分别维护登录会话，失效时重新认证。普通登�
 
 首次连接按需下载固定版本的 zju-connect 核心并校验 SHA256，也可用 `SEUDAILY_VPN_BINARY` 指定已有核心。它是独立的 AGPL-3.0 第三方程序，不包含在 npm 发布包内；对应许可证与源码入口见 [VPN 许可证说明](https://github.com/miunerofrade/SEUdaily/blob/main/docs/licensing-vpn.md)。
 
+扩展工具通过 `search-capabilities` 查询名称和参数，再由 `invoke-capability` 按 `name` 调用。已知名称可直接跨轮复用，无限时票据；每次调用仍校验参数并按当前权限模式审批。
+
 ## Focus 与工具权限
 
 创建 Focus 前会提示授权：该任务可免逐次工具审批，但不获得 extra 工作区文件和终端能力。编辑要求沿用同一任务与会话，后续执行使用新要求并保留历史版本；暂停停止自动执行，删除撤回授权。Focus 没有自动到期时间，登录续接请求有效期为 30 分钟。

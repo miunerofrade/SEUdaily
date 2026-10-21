@@ -43,7 +43,7 @@ export type TurnContext = {
     skills?: string[];
     interface?: string;
     focus?: boolean;
-    capabilityTickets?: Array<{ id: string; name: string; namespace: string; expiresAt: number }>;
+    capabilityNamespaces?: string[];
 };
 export type StoredMessage = {
     id: string;

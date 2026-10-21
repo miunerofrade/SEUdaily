@@ -17,6 +17,7 @@ node_modules/
 config.json
 # Settings-managed project instructions
 /AGENT.md
+/AGENTS.md
 browser_data/
 .seudaily/
 .cvstream/

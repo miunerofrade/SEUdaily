@@ -159,9 +159,9 @@ export class AgentRuntime {
         try {
             let tools = await this.config.tools(run.context);
             let definitions = Object.values(tools).map(tool => ({ type: 'function' as const, function: { name: tool.id, description: tool.description, parameters: toolJsonSchema(tool) } }));
-            run.context.capabilityTickets ??= [];
+            run.context.capabilityNamespaces ??= [];
             run.context.skills ??= [];
-            const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityTickets', run.context.capabilityTickets]]);
+            const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityNamespaces', run.context.capabilityNamespaces]]);
             requestContext.set('seudailyFocus', run.context.focus === true);
             requestContext.set('seudailySkills', run.context.skills);
             const options: ToolExecutionOptions = { requestContext, abortSignal: signal };
@@ -181,7 +181,6 @@ export class AgentRuntime {
                         payload.args = redactValue(parsed);
                         if (decision?.callId === call.id && !decision.approved)
                             throw new Error('用户拒绝了工具执行');
-                        requestContext.set('seudailyApprovedCapabilityTicket', decision?.approved && decision.callId === call.id && tool.id === 'invoke-capability' ? parsed.ticket : undefined);
                         const approvalRequired = typeof tool.requireApproval === 'function' ? await tool.requireApproval(parsed, options) : tool.requireApproval;
                         if (approvalRequired && decision?.callId !== call.id) {
                             run.status = 'waiting';
@@ -223,7 +222,6 @@ export class AgentRuntime {
                         modelOutput = JSON.stringify(output);
                     }
                     decision = undefined;
-                    requestContext.delete('seudailyApprovedCapabilityTicket');
                     run.executing = undefined;
                     const existing = run.parts.find(part => part.type === 'tool-invocation' && part.toolInvocation?.toolCallId === call.id);
                     payload.finishedAt=Date.now();

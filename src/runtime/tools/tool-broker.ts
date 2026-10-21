@@ -1,5 +1,4 @@
 import { noticeSources, noticeSourceIds } from "../../shared/notice-sources.js";
-import { randomUUID } from "node:crypto";
 import { defineTool as createTool } from "../../agent/tool.js";
 import { z } from "zod";
 
@@ -23,11 +22,6 @@ export type ToolNamespace = z.infer<typeof toolNamespaceSchema>;
 
 type AnyTool = any;
 type Capability = { namespace: ToolNamespace; tool: AnyTool; aliases: string[]; approvalRequired?: boolean };
-type Ticket = { id: string; runToken: string; capability: Capability; expiresAt: number };
-
-const tickets = new Map<string, Ticket>();
-const ticketLifetimeMs = 10 * 60 * 1000;
-
 const staticCapabilities: Capability[] = [
   { namespace: "knowledge", tool: searchKnowledgeTool, aliases: ["知识库", "上传资料", "我的文件", "文档检索", "knowledge", "rag"] },
   { namespace: "schedule", tool: getScheduleTool, aliases: ["课表", "schedule", "timetable", "上课"] },
@@ -45,11 +39,6 @@ function requestValue(options: any, key: string) {
   const legacyKey = key.startsWith("seudaily") ? `cvstream${key.slice("seudaily".length)}` : key;
   const value = options?.requestContext?.get?.(key) ?? options?.requestContext?.get?.(legacyKey);
   return typeof value === "string" ? value : "";
-}
-
-function pruneTickets() {
-  const now = Date.now();
-  for (const [id, ticket] of tickets) if (ticket.expiresAt <= now) tickets.delete(id);
 }
 
 async function browserCapabilities(scope?: string): Promise<Capability[]> {
@@ -101,29 +90,26 @@ async function validateInput(tool: AnyTool, value: unknown) {
   return result?.value ?? value;
 }
 
-async function ticketFor(id: string, runToken: string, options: any) {
-  pruneTickets();
-  let ticket = tickets.get(id);
-  if (!ticket) {
-    const saved = options?.requestContext?.get?.("seudailyCapabilityTickets")?.find((entry: any) => entry.id === id);
-    // A durable, explicitly approved pending call may outlive its discovery ticket.
-    // Only AgentRuntime supplies this binding after validating the persisted approval.
-    if (saved && (saved.expiresAt > Date.now() || requestValue(options, "seudailyApprovedCapabilityTicket") === id)) {
-      const capability = (await allCapabilities(saved.namespace === "browser", requestValue(options, "seudailyThreadId"))).find(item => item.tool.id === saved.name && item.namespace === saved.namespace);
-      if (capability) ticket = { id, runToken, capability, expiresAt: saved.expiresAt };
-    }
-  }
-  if (!ticket || ticket.runToken !== runToken) throw new Error("能力票据不存在、已过期或不属于当前运行");
-  return ticket;
+async function capabilityFor(name: string, namespace: ToolNamespace | undefined, options: any) {
+  const includeBrowser = namespace === 'browser' || name.startsWith('playwright_browser_');
+  const matches = (await allCapabilities(includeBrowser, requestValue(options, 'seudailyThreadId')))
+    .filter(item => item.tool.id === name && (!namespace || item.namespace === namespace));
+  if (matches.length !== 1) throw new Error(`未找到可调用的能力：${name}。请使用 search-capabilities 查询正确的名称和参数。`);
+  const capability = matches[0];
+  rememberNamespace(capability.namespace, options);
+  return capability;
+}
+
+function rememberNamespace(namespace: string, options: any) {
+  const namespaces = options?.requestContext?.get?.('seudailyCapabilityNamespaces');
+  if (Array.isArray(namespaces) && !namespaces.includes(namespace)) namespaces.push(namespace);
 }
 
 export const searchCapabilitiesTool = createTool({
   id: "search-capabilities",
-  description: "当当前工具不足以完成任务时，在 SEUdaily 的可信能力目录中查找最相关的工具。最多返回五个可在当前运行中调用的能力票据。",
+  description: "当当前工具不足以完成任务时，在 SEUdaily 的可信能力目录中查找最相关的工具。最多返回五个能力的稳定名称、说明和参数 Schema，可用 invoke-capability 按名称调用。",
   inputSchema: z.object({ query: z.string().trim().min(1).max(500), namespace: toolNamespaceSchema.optional() }).strict(),
   execute: async ({ query, namespace }, options) => {
-    const runToken = requestValue(options, "seudailyRunToken");
-    if (!runToken) throw new Error("当前运行缺少 Broker 绑定令牌");
     const includeBrowser = namespace === "browser" || /browser|playwright|浏览器|点击|输入|页面交互/i.test(query);
     const capabilities = (await allCapabilities(includeBrowser, requestValue(options, "seudailyThreadId")))
       .filter((item) => !namespace || item.namespace === namespace)
@@ -132,14 +118,10 @@ export const searchCapabilitiesTool = createTool({
       .sort((a, b) => b.score - a.score || a.item.tool.id.localeCompare(b.item.tool.id))
       .slice(0, 5);
     const results = capabilities.map(({ item }) => {
-      const id = `cap-${randomUUID()}`;
-      const expiresAt = Date.now() + ticketLifetimeMs;
-      tickets.set(id, { id, runToken, capability: item, expiresAt });
-      const saved = options?.requestContext?.get?.("seudailyCapabilityTickets");
-      if (Array.isArray(saved)) { saved.splice(0, saved.length, ...saved.filter((entry: any) => entry.expiresAt > Date.now()).slice(-50)); saved.push({ id, name: item.tool.id, namespace: item.namespace, expiresAt }); }
-      return { ticket: id, namespace: item.namespace, name: item.tool.id, description: item.tool.description, inputSchema: jsonSchema(item.tool) };
+      rememberNamespace(item.namespace, options);
+      return { namespace: item.namespace, name: item.tool.id, description: item.tool.description, inputSchema: jsonSchema(item.tool) };
     });
-    return { results, count: results.length, expiresInSeconds: ticketLifetimeMs / 1_000 };
+    return { results, count: results.length };
   },
 });
 
@@ -151,21 +133,21 @@ export const invokeCapabilityTool = createTool({
     if (tool?.toModelOutput) return tool.toModelOutput(output);
     return {type: "text", value: JSON.stringify(output)};
   },
-  description: "使用 search-capabilities 在当前运行中签发的 ticket 调用对应能力。不接受工具名，ticket 与线程、运行和具体能力绑定。",
-  inputSchema: z.object({ ticket: z.string().startsWith("cap-"), arguments: z.record(z.string(), z.unknown()).default({}) }).strict(),
-  requireApproval: async ({ ticket, arguments: input }: { ticket: string; arguments: Record<string, unknown> }, options) => {
-    const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
-    const tool = entry.capability.tool;
+  description: "按稳定的能力名称调用工具，名称可跨轮复用；未知名称或参数时先用 search-capabilities 查询。仍遵守该能力的参数校验和审批规则。历史记录中的 ticket 已停用，不要再传递。",
+  inputSchema: z.object({ name: z.string().trim().min(1), namespace: toolNamespaceSchema.optional(), arguments: z.record(z.string(), z.unknown()).default({}) }).strict(),
+  requireApproval: async ({ name, namespace, arguments: input }: { name: string; namespace?: ToolNamespace; arguments: Record<string, unknown> }, options) => {
+    const entry = await capabilityFor(name, namespace, options);
+    const tool = entry.tool;
     const parsed = await validateInput(tool, input);
     const required = typeof tool.requireApproval === "function" ? await tool.requireApproval(parsed, options) : tool.requireApproval;
-    return Boolean(required || (entry.capability.approvalRequired && !isUnapprovedAccessEnabled(options)));
+    return Boolean(required || (entry.approvalRequired && !isUnapprovedAccessEnabled(options)));
   },
-  execute: async ({ ticket, arguments: input }, options) => {
-    const entry = await ticketFor(ticket, requestValue(options, "seudailyRunToken"), options);
-    const parsed = await validateInput(entry.capability.tool, input);
-    if (!entry.capability.tool.execute) throw new Error(`能力 ${entry.capability.tool.id} 不可执行`);
-    const output = await entry.capability.tool.execute(parsed, options as any);
-    const brokerCapability = { name: entry.capability.tool.id, namespace: entry.capability.namespace };
+  execute: async ({ name, namespace, arguments: input }, options) => {
+    const entry = await capabilityFor(name, namespace, options);
+    const parsed = await validateInput(entry.tool, input);
+    if (!entry.tool.execute) throw new Error(`能力 ${entry.tool.id} 不可执行`);
+    const output = await entry.tool.execute(parsed, options as any);
+    const brokerCapability = { name: entry.tool.id, namespace: entry.namespace };
     if (output && typeof output === "object" && !Array.isArray(output)) {
       const record = output as Record<string, unknown>;
       const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
