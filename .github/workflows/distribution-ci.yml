@@ -62,7 +62,7 @@ jobs:
           systemd-analyze verify "$RUNNER_TEMP/seudaily.service"
       - name: Node regression and isolated npm installation
         timeout-minutes: 8
-        run: node --import tsx --test --test-timeout=240000 tests/*.mjs
+        run: node scripts/test-node.mjs
       - name: Python regression
         run: uv run --group test --extra knowledge pytest -q
       - name: Build fixed terminal/browser fixtures

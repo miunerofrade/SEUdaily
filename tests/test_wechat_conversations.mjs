@@ -17,6 +17,9 @@ async function eventually(check) {
   throw last;
 }
 async function fixture(t, options={}) {
+  // Node 22.22/24.12 can misparse non-ASCII raw stdout mixed with test IPC
+  // (nodejs/node#64706). Diagnostic events retain logs in the test protocol.
+  t.mock.method(console,'info',(...args)=>t.diagnostic(args.join(' ')));
   const store = new AgentStore(':memory:'); await store.ready;
   const seed = new WeChatRuntime(store.client); await seed.initialize(); await seed.close();
   await store.client.execute({sql:'INSERT INTO wechat_account VALUES(1,?)',args:[JSON.stringify(account)]});

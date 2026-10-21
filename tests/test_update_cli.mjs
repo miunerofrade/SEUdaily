@@ -46,7 +46,7 @@ res.statusCode=404;res.end('{}');});server.listen(port,'127.0.0.1');`;
   }); } catch(error) { if(!failInstall) throw error;assert.equal(error.code,1);assert.match(error.stderr,/更新失败，请检查 npm 输出/); }
   if(!failInstall)assert.match(result.stdout,/新后端已就绪/);
   const after=await fetch(api+'/api').then(r=>r.json());assert.equal(after.version,failInstall?previousVersion:'99.0.0');assert.notEqual(after.processId,before.processId);
-  assert.equal(existsSync(join(cache,'python',previousVersion)),failInstall);
+  assert.equal(existsSync(join(cache,'python',previousVersion)),failInstall,JSON.stringify({stdout:result?.stdout,stderr:result?.stderr,leases:await readdir(join(cache,'leases'))}));
   assert.deepEqual(await readdir(join(cache,'updates')),[]);
   assert.ok(!existsSync(join(root,'node_modules','.seudaily-update.lock')));
  } finally {
