@@ -48,3 +48,10 @@ test('a whole-turn failure remains visible and clean answers have no diagnostics
  assert.match(render(Message,{message:{...message,error:'模型服务连接失败'}}),/class="message-error"/);
  assert.doesNotMatch(render(Message,{message:{...message,content:'正常回答'}}),/aria-label="工具调用信息"/);
 });
+
+test('tool activity keeps time beside status and lists discovered capability names without tickets',()=>{
+ const message={id:'running',role:'assistant',createdAt:Date.now(),content:'',streaming:true,tools:[{id:'call',name:'searchCapabilitiesTool',state:'completed',startedAt:1000,finishedAt:3000,result:{status:'completed',summary:'已找到可用能力',results:[{name:'search-knowledge',description:'检索资料',ticket:'secret-ticket'},{name:'read-web-page',description:'读取网页'}]}}]};
+ const html=render(Message,{message});
+ assert.match(html,/class="tool-activity-heading"><strong>已找到可用能力<\/strong><span class="elapsed-time">2 秒<\/span><\/div>/);
+ assert.match(html,/class="tool-capabilities"/);assert.match(html,/search-knowledge/);assert.match(html,/read-web-page/);assert.doesNotMatch(html,/secret-ticket/);
+});

@@ -74,6 +74,13 @@ export function brokerCapabilityName(result: ToolResult | undefined) {
     : "";
 }
 
+export function discoveredCapabilities(tool: ToolRun): {name:string;description?:string}[] {
+  if (tool.name !== 'searchCapabilitiesTool' && tool.name !== 'search-capabilities') return [];
+  const data=tool.result?.data ?? tool.result;
+  if (!data || typeof data !== 'object' || !('results' in data) || !Array.isArray(data.results)) return [];
+  return data.results.filter((item): item is {name:string;description?:string} => Boolean(item && typeof item === 'object' && typeof item.name === 'string'));
+}
+
 export function toolLabel(name: string) {
   return toolLabels[name] ?? name.replace(/Tool$/, "");
 }

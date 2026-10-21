@@ -8,7 +8,7 @@ import {normalizeMathMarkdown} from "../markdown";
 import {libraryPreviewUrl} from "../api";
 import type {AgentActionRequest,AgentAuthRequest} from "../api";
 import type {AgentProcessEntry,ChatMessage,ImageAttachment,ToolRun} from "../types";
-import {ToolGlyph,toolLabel,toolNarration} from "./tool-presentation";
+import {ToolGlyph,toolLabel,toolNarration,discoveredCapabilities} from "./tool-presentation";
 import {CopyButton,MarkdownContent} from "./markdown-content";
 import {messageSources} from "./sources-sidebar";
 import {Elapsed} from './elapsed';
@@ -111,7 +111,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, timing,
               return (
                 <div className="tool-activity-item" key={entry.id}>
                   <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" ? <Info size={18} /> : tool.state === "approval-requested" ? <CircleAlert size={18} /> : <ToolGlyph name={tool.name} size={18} />}</span>
-                  <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong>{tool.startedAt!==undefined && <Elapsed timing={tool.finishedAt!==undefined ? {elapsedMs:Math.max(0,tool.finishedAt-tool.startedAt)} : tool.state==='running' ? {elapsedMs:0,startedAt:tool.startedAt} : undefined} />}<ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
+                  <div><div className="tool-activity-heading"><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong>{tool.startedAt!==undefined && <Elapsed timing={tool.finishedAt!==undefined ? {elapsedMs:Math.max(0,tool.finishedAt-tool.startedAt)} : tool.state==='running' ? {elapsedMs:0,startedAt:tool.startedAt} : undefined} />}</div>{discoveredCapabilities(tool).length > 0 && <ul className="tool-capabilities">{discoveredCapabilities(tool).map((capability,index) => <li key={`${capability.name}-${index}`} title={typeof capability.description === "string" ? capability.description : undefined}>{toolLabel(capability.name)}</li>)}</ul>}<ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
                 </div>
               );
             })}</div>)}
