@@ -7,6 +7,8 @@ import { AgentStore } from './storage.js';
 import { ContextMemory } from './memory.js';
 import { toolJsonSchema, type ToolDefinition, type ToolExecutionOptions } from './tool.js';
 import type { AgentEvent, ModelMessage, RunState, TurnContext } from './types.js';
+import {startTiming,stopTiming} from '../shared/timing.js';
+import {inferToolNamespaces} from './namespaces.js';
 export class BusyError extends Error {
     status = 409;
 }
@@ -132,7 +134,7 @@ export class AgentRuntime {
     }
     private answerMessage(run: RunState): import('./types.js').StoredMessage {
         const id = run.context.assistantMessageId ?? `${run.id}-assistant`;
-        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage } };
+        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage, timing:stopTiming(run.timing) } };
     }
     private async persist(run: RunState) {
         const message = this.answerMessage(run);
@@ -144,10 +146,19 @@ export class AgentRuntime {
         approved: boolean;
     }): AsyncGenerator<AgentEvent> {
         this.unstarted.delete(run.context.threadId);
-        const event = (type: string, payload: Record<string, any> = {}): AgentEvent => ({ type, payload }) as AgentEvent;
+        let inputChanged=false;
+        const event = (type: string, payload: Record<string, any> = {}): AgentEvent => ({ type, payload, timestamp:Date.now(), timing:run.timing ? {...run.timing} : undefined }) as AgentEvent;
+        const takeInput = async () => {
+            const before = run.parts.length;
+            await this.config.store.consumeInput(run,this.answerMessage(run));
+            const added = run.parts.slice(before).filter(part=>part.type==='user-input');
+            if (added.length) inputChanged=true;
+            for (const part of added) run.context.namespaces = [...new Set([...(run.context.namespaces ?? []),...inferToolNamespaces(part.text)])];
+            return added;
+        };
         try {
-            const tools = await this.config.tools(run.context);
-            const definitions = Object.values(tools).map(tool => ({ type: 'function', function: { name: tool.id, description: tool.description, parameters: toolJsonSchema(tool) } }));
+            let tools = await this.config.tools(run.context);
+            let definitions = Object.values(tools).map(tool => ({ type: 'function' as const, function: { name: tool.id, description: tool.description, parameters: toolJsonSchema(tool) } }));
             run.context.capabilityTickets ??= [];
             run.context.skills ??= [];
             const requestContext = new Map<string, any>([['seudailyRunToken', run.context.runToken], ['seudailyThreadId', run.context.threadId], ['seudailyResourceId', run.context.resourceId], ['seudailyToolNamespaces', run.context.namespaces ?? []], ['seudailyCapabilityTickets', run.context.capabilityTickets]]);
@@ -176,11 +187,17 @@ export class AgentRuntime {
                             run.status = 'waiting';
                             run.approval = { id: `approval-${randomUUID()}`, callId: call.id };
                             run.parts.push({ type: 'tool-invocation', toolInvocation: { ...payload, state: 'call', approvalId: run.approval.id } });
+                            run.timing=stopTiming(run.timing);
                             await this.persist(run);
                             yield event('tool-approval-request', { ...payload, approvalId: run.approval.id });
                             return;
                         }
                         run.executing = call.id;
+                        run.timing=startTiming(run.timing);
+                        payload.startedAt=Date.now();
+                        const pending=run.parts.find(part=>part.type==='tool-invocation' && part.toolInvocation?.toolCallId===call.id);
+                        if (pending) pending.toolInvocation={...payload,state:'running'};
+                        else run.parts.push({type:'tool-invocation',toolInvocation:{...payload,state:'running'}});
                         await this.persist(run); // Durable execution boundary: a restart cannot replay it.
                         yield event('tool-call', payload);
                         signal.throwIfAborted();
@@ -209,6 +226,7 @@ export class AgentRuntime {
                     requestContext.delete('seudailyApprovedCapabilityTicket');
                     run.executing = undefined;
                     const existing = run.parts.find(part => part.type === 'tool-invocation' && part.toolInvocation?.toolCallId === call.id);
+                    payload.finishedAt=Date.now();
                     const invocation = { ...payload, state: 'result', result: output };
                     if (existing)
                         existing.toolInvocation = invocation;
@@ -225,6 +243,7 @@ export class AgentRuntime {
                             run.messages.push({ role: 'tool', tool_call_id: skipped.id, content: '需要校园网环境，本轮已停止，工具未执行。' });
                         run.messages.push({ role: 'assistant', content: '需要校园网环境' });
                         run.status = 'completed';
+                        run.timing=stopTiming(run.timing);
                         await this.persist(run);
                         yield event('text-delta', { text: '需要校园网环境' });
                         yield event('finish');
@@ -236,6 +255,13 @@ export class AgentRuntime {
                     run.messages.push({role: 'user', content: run.pendingToolImages});
                     run.pendingToolImages = undefined;
                     await this.persist(run);
+                }
+                for (const part of await takeInput()) yield event('input-added',{id:part.id,text:part.text});
+                if (inputChanged) {
+                    tools = await this.config.tools(run.context);
+                    definitions = Object.values(tools).map(tool => ({type:'function' as const,function:{name:tool.id,description:tool.description,parameters:toolJsonSchema(tool)}}));
+                    requestContext.set('seudailyToolNamespaces',run.context.namespaces ?? []);
+                    inputChanged=false;
                 }
                 if (run.step >= (this.config.maxSteps ?? 30))
                     throw new Error('已达到本轮最多 30 步的限制，请缩小任务范围');
@@ -249,6 +275,7 @@ export class AgentRuntime {
                     const hydrated = runtime.config.hydrate ? await runtime.config.hydrate(context) : context;
                     let reasoningStarted = false, textPart: any, reasoningPart: any;
                     for await (const item of runtime.config.provider.stream(hydrated, definitions, signal)) {
+                        run.timing=startTiming(run.timing);
                         if (item.type === 'text') {
                             if (!textPart) {
                                 textPart = { type: 'text', text: '' };
@@ -301,7 +328,13 @@ export class AgentRuntime {
                 run.pendingCalls = message.tool_calls ?? [];
                 run.cursor = 0;
                 if (!run.pendingCalls.length) {
+                    const added=await takeInput();
+                    if (added.length) {
+                        for (const part of added) yield event('input-added',{id:part.id,text:part.text});
+                        continue;
+                    }
                     run.status = 'completed';
+                    run.timing=stopTiming(run.timing);
                     await this.persist(run);
                     // Post-processing must never delay or fail the completed answer.
                     void Promise.resolve().then(() => this.config.onCompleted?.(run)).catch(() => {});
@@ -313,6 +346,7 @@ export class AgentRuntime {
         }
         catch (error) {
             run.status = signal.aborted ? 'cancelled' : 'failed';
+            run.timing=stopTiming(run.timing);
             const text = signal.aborted ? '已停止本次回答。' : error instanceof Error ? redactText(error.message) : 'Agent 执行失败';
             const answered = new Set(run.messages.filter(message => message.role === 'tool').map(message => message.tool_call_id));
             for (const call of run.pendingCalls)
@@ -320,7 +354,12 @@ export class AgentRuntime {
                     run.messages.push({ role: 'tool', tool_call_id: call.id, content: '本轮中断，未完成的调用不得自动重放。' });
             if (signal.aborted && run.executing) {
                 const call = run.pendingCalls.find(item => item.id === run.executing);
-                if (call) run.parts.push({ type: 'tool-invocation', toolInvocation: { toolCallId: call.id, toolName: call.function.name, state: 'result', result: { status: 'cancelled', summary: '已取消', artifacts: [], citations: [], warnings: [], metrics: {} } } });
+                if (call) {
+                    const part=run.parts.find(part=>part.type==='tool-invocation' && part.toolInvocation?.toolCallId===call.id);
+                    const invocation={...(part?.toolInvocation ?? {}),toolCallId:call.id,toolName:call.function.name,state:'result',finishedAt:Date.now(),result:{status:'cancelled',summary:'已取消',artifacts:[],citations:[],warnings:[],metrics:{}}};
+                    if (part) part.toolInvocation=invocation;
+                    else run.parts.push({type:'tool-invocation',toolInvocation:invocation});
+                }
             }
             run.parts.push({ type: 'error', error: { message: text } });
             await this.persist(run);
@@ -329,6 +368,7 @@ export class AgentRuntime {
         finally {
             if (run.status === 'running') {
                 run.status = 'cancelled';
+                run.timing=stopTiming(run.timing);
                 await this.persist(run);
             }
             try {

@@ -1,4 +1,6 @@
 import { Message } from "./chat/message";
+import {useSidebarResize} from './sidebar-resize';
+import {stopTiming} from '../../../src/shared/timing';
 import { SourcesSidebar, messageSources } from "./chat/sources-sidebar";
 import { brokerCapabilityName } from "./chat/tool-presentation";
 import { WeChatPanel } from './wechat';
@@ -141,6 +143,7 @@ export default function App() {
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorRef = useRef<HTMLElement>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarResize=useSidebarResize();
   const [navOpen, setNavOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [queueState, setQueueState] = useState<{active:boolean;items:any[];progress?:{text:string};runToken?:string}>({active:false,items:[]});
@@ -385,6 +388,8 @@ export default function App() {
 
   function handleStreamEvent(conversationId: string, messageId: string, event: StreamEvent) {
     const payload = event.payload ?? {};
+    if (event.timing) mutateMessage(conversationId,messageId,message=>({...message,timing:event.timing}));
+    if (event.type==='input-added') mutateMessage(conversationId,messageId,message=>({...message,process:[...(message.process ?? []),{id:String(payload.id),type:'user-input',text:String(payload.text)}]}));
     if (event.type === "finish") {
       const usage = normalizedUsage(payload.usage);
       if (Object.keys(usage).length) mutateMessage(conversationId, messageId, message => ({ ...message, usage }));
@@ -426,6 +431,7 @@ export default function App() {
           id,
           name,
           state: approvalId ? "approval-requested" : "running",
+          startedAt: typeof payload.startedAt === 'number' ? payload.startedAt : event.timestamp,
           approvalId,
           args: payload.args as Record<string, unknown> | undefined,
           ...(approvalId ? { result: { status: "waiting_for_user", taskId: id, summary: "等待用户批准工具执行。", artifacts: [], citations: [], warnings: [], metrics: {} } } : {}),
@@ -470,6 +476,8 @@ export default function App() {
           state: result?.status === "failed" ? "failed" : "completed",
           args: payload.args as Record<string, unknown> | undefined,
           result,
+          ...(typeof payload.startedAt === 'number' ? {startedAt:payload.startedAt} : {}),
+          finishedAt: typeof payload.finishedAt === 'number' ? payload.finishedAt : event.timestamp,
           }),
         };
       });
@@ -596,8 +604,9 @@ export default function App() {
         ...message,
         streaming: false,
         reasoningActive: false,
+        timing:stopTiming(message.timing),
         error: aborted ? "已停止本次回答。" : error instanceof Error ? error.message : "请求失败，请稍后重试。",
-        tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, state: "failed" as const } : tool),
+        tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, finishedAt:Date.now(), state: "failed" as const } : tool),
       }));
     } finally {
       if (abortRef.current === controller) { abortRef.current = null; activeStreamRef.current = null; }
@@ -675,7 +684,7 @@ export default function App() {
     } catch(error) { setConversationError((error as Error).message); }
     finally { setStopping(false); }
   }
-  async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string } = {}) {
+  async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string; steer?:boolean } = {}) {
     const text = prompt.trim();
     if ((!text && !pendingImages.length && !pendingDocuments.length) || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
     if (!options.preserveComposer && /^\/ramdisk(?:\s|$)/i.test(text)) {
@@ -695,7 +704,7 @@ export default function App() {
       if (submittingRef.current) return;
       submittingRef.current = true;
       try {
-        await queueRequest(queuePath, 'POST', {text,images:options.preserveComposer ? [] : pendingImages,documents:options.preserveComposer ? [] : pendingDocuments,skills:!options.preserveComposer && selectedSkill ? [selectedSkill] : [],interface:'web'});
+        await queueRequest(queuePath, 'POST', {text,images:options.preserveComposer ? [] : pendingImages,documents:options.preserveComposer ? [] : pendingDocuments,skills:!options.preserveComposer && selectedSkill ? [selectedSkill] : [],interface:'web',...(options.steer ? {delivery:'steer',runToken:activeStreamRef.current?.threadId===active.id ? activeStreamRef.current.runToken : queueState.runToken} : {})});
         if (!options.preserveComposer) {
           setDraft(current => current === prompt ? '' : current);
           setPendingImages(current => current.filter(image => !pendingImages.some(sent => sent.id === image.id)));
@@ -797,6 +806,9 @@ export default function App() {
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (ime.isComposing(event)) return;
+    if (event.key==='Enter' && !event.shiftKey && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();void send(draft,{steer:sending || queueState.active});return;
+    }
     if (slashOpen && !event.shiftKey) {
       if (event.key === 'Escape') { event.preventDefault(); setSlashDismissed(true); return; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -912,17 +924,18 @@ export default function App() {
         <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx,.txt,.md" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
         <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
-        {(sending || queueState.active) ? <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'}><CircleStop size={19} /></button> :
-        <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label="发送消息"><ArrowUp size={20} /></button>}
+        {(sending || queueState.active) && !draft.trim() && !pendingImages.length && !pendingDocuments.length ? <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'} title="停止回答"><CircleStop size={19} /></button> :
+        <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
+        {(sending || queueState.active) && !!draft.trim() && <button type="button" className="composer-steer" disabled={uploadingAttachments || !!pendingImages.length || !!pendingDocuments.length || !!selectedSkill} onClick={()=>void send(draft,{steer:true})} title="Ctrl+Enter：当前模型响应或工具完成后读取，不中断正在执行的操作">补充当前任务</button>}
       </div>
       {!!queueState.items.length && <div className="composer-queue" aria-label="待发送队列">
-        {queueState.items.map(item => <div key={item.id} className="composer-queue-row"><span title={item.error || item.text}><small>{item.state === 'running' ? '发送中' : item.state === 'pending' ? '待发送' : '已暂停'}</small> {item.text || `${item.images.length + item.documents.length} 个附件`}{item.error && ` · ${item.error}`}</span><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item,true)}>编辑</button><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item)}>删除</button></div>)}
+        {queueState.items.map(item => <div key={item.id} className="composer-queue-row"><span title={item.error || item.text}><small>{item.state === 'running' ? '发送中' : item.state === 'pending' ? item.delivery==='steer' && item.runToken===queueState.runToken ? '待补充到当前任务' : '已排队，等待发送' : '已暂停'}</small> {item.text || `${item.images.length + item.documents.length} 个附件`}{item.error && ` · ${item.error}`}</span><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item,true)}>编辑</button><button type="button" disabled={item.state === 'running'} onClick={() => void takeQueue(item)}>删除</button></div>)}
         {queueState.progress?.text && <div className="composer-queue-progress">{queueState.progress.text}</div>}
         {queueState.items.some(item => item.state === 'paused') && <button type="button" onClick={() => void queueRequest(queuePath.replace('?', '/resume?'), 'POST', {}).catch(error => setConversationError(error.message))}>继续队列</button>}
       </div>}
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="模型和当前会话用量">{telemetry.split(" · ").map((item, index) => <span key={index}>{item}</span>)}</div>}
-      {!!active.messages.length && <div className="composer-hint"><span>{sending || queueState.active ? "Enter 加入队列" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>}
+      <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>
     </form>
   );
 
@@ -940,7 +953,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell ${rightOpen && view === "chat" ? "with-inspector" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div style={sidebarResize.style} className={`app-shell ${sidebarResize.dragging ? 'resizing-sidebar' : ''} ${rightOpen && view === "chat" ? "with-inspector" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <CampusSmsDialog />
       <div className={`mobile-scrim ${navOpen ? "visible" : ""}`} onClick={() => setNavOpen(false)} />
       <aside className={`sidebar ${navOpen ? "open" : ""} ${sidebarCollapsed ? "collapsed" : ""}`}>
@@ -980,6 +993,7 @@ export default function App() {
           <button className={`settings-button ${view === "settings" ? "active" : ""}`} onClick={() => openView("settings")}><SidebarIcon kind="settings" /><span>设置</span></button>
           <WeChatPanel />
         </div>
+        {!sidebarCollapsed && sidebarResize.separator}
       </aside>
 
       {view === "chat" ? <main className={`chat-panel ${active.messages.length ? "has-messages" : "empty"}`}>

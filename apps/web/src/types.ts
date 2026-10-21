@@ -29,6 +29,8 @@ export type ToolResult = {
 };
 
 export type ToolRun = {
+  startedAt?: number;
+  finishedAt?: number;
   id: string;
   name: string;
   state: "running" | "approval-requested" | "completed" | "failed";
@@ -40,7 +42,7 @@ export type ToolRun = {
 export type AgentProcessEntry =
   | {
       id: string;
-      type: "reasoning" | "narration";
+      type: "reasoning" | "narration" | "user-input";
       text: string;
     }
   | {
@@ -66,6 +68,7 @@ export type ChatMessage = {
   streaming?: boolean;
   brokerRunToken?: string;
   usage?: Record<string, number>;
+  timing?: import('../../../src/shared/timing').RunTiming;
   error?: string;
 };
 
@@ -101,6 +104,8 @@ export type Conversation = {
 };
 
 export type StreamEvent = {
+  timestamp?: number;
+  timing?: import('../../../src/shared/timing').RunTiming;
   type: string;
   runId?: string;
   payload?: Record<string, unknown>;

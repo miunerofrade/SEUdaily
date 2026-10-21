@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {getRequestListener} from '@hono/node-server';
 import {webkit,firefox,chromium} from 'playwright';
 import {fileURLToPath} from 'node:url';
+import {z} from 'zod';
 const source=fileURLToPath(new URL('..',import.meta.url));
 const port=Number(process.env.SEUDAILY_WEB_TEST_PORT || 42498);
 const root=await mkdtemp(join(tmpdir(),'seudaily-web-queue-'));
@@ -16,8 +17,11 @@ const {app}=await import(source+'/src/server/app.ts');
 const {agentRuntime}=await import(source+'/src/runtime/application.ts');
 const {agentStore}=await import(source+'/src/runtime/storage.ts');
 const {stopMessageQueue}=await import(source+'/src/server/message-queue.ts');
-agentRuntime.config.tools=async()=>({});agentRuntime.config.instructions=async()=>'';
-agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}yield {type:'text',text:'队列回答完成'};yield {type:'complete',message:{role:'assistant',content:'队列回答完成'},finishReason:'stop'};}};
+let releaseTool;let toolStarted=false;
+agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}}});agentRuntime.config.instructions=async()=>'';
+agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
+ if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
+ const answer=text==='updated requirement'?'补充要求已采纳':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop'};}};
 const api=getRequestListener(app.fetch);
 const server=createServer(async(req,res)=>{if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
@@ -30,7 +34,7 @@ try{
  
  const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
- await input.fill('queued edit');await input.press('Enter');await page.locator('.composer-queue-row').waitFor();
+ await input.fill('queued edit');await page.getByRole('button',{name:'加入队列',exact:true}).click();await page.locator('.composer-queue-row').waitFor();
  await page.getByRole('button',{name:'编辑',exact:true}).click();await page.waitForFunction(()=>document.querySelector('textarea').value==='queued edit');
  assert.equal(await page.locator('.composer-queue-row').count(),0);
  await input.fill('queued delete');await input.press('Enter');await page.locator('.composer-queue-row').waitFor();
@@ -39,8 +43,28 @@ try{
  await page.getByRole('button',{name:'停止回答',exact:true}).click();await page.getByRole('button',{name:'继续队列',exact:true}).waitFor();
  await page.getByRole('button',{name:'继续队列',exact:true}).click();
  await page.getByText('队列回答完成',{exact:true}).waitFor({timeout:10000});
+ await input.fill('steer hold');await input.press('Enter');
+ await page.getByText('正在执行wait',{exact:true}).first().waitFor();
+ assert.ok(toolStarted);
+ await input.fill('updated requirement');await input.press('Control+Enter');
+ await page.getByText('待补充到当前任务',{exact:true}).waitFor();
+ await page.getByText(/已思考 [1-9]/).first().waitFor();
+ assert.ok(releaseTool);releaseTool();
+ await page.getByText('补充要求已采纳',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'发送消息',exact:true}).waitFor();
+ const frozen=await page.locator('.run-timing').last().innerText();
+ await page.waitForTimeout(1100);assert.equal(await page.locator('.run-timing').last().innerText(),frozen);
+ const separator=page.getByRole('separator',{name:'调整导航栏宽度'});await separator.focus();await separator.press('Home');
+ assert.equal(await separator.getAttribute('aria-valuenow'),'220');await separator.press('ArrowRight');assert.equal(await separator.getAttribute('aria-valuenow'),'230');
+ await page.waitForTimeout(300); // Let the keyboard width transition finish before grabbing its edge.
+ const bounds=await separator.boundingBox();await page.mouse.move(bounds.x+4,bounds.y+30);await page.mouse.down();await page.mouse.move(340,bounds.y+30);await page.mouse.up();
+ await page.waitForFunction(()=>document.querySelector('.sidebar-resizer')?.getAttribute('aria-valuenow')==='340');
+ await page.reload();await page.getByText('补充要求已采纳',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).getAttribute('aria-valuenow'),'340');
+ assert.equal(await page.locator('.run-timing').last().innerText(),frozen);
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({webQueue:true,edit:true,delete:true,cancel:true,resume:true,pageErrors:errors}));
+ console.log(JSON.stringify({webQueue:true,arrowQueues:true,edit:true,delete:true,cancel:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
- await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
+ releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }

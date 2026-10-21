@@ -45,4 +45,18 @@ test('shared queue preserves drafts, sends FIFO, pauses on cancel/error, and res
  await until(async()=>!(await (await request(queue('ten-images'))).json()).items.length);
  assert.equal((await agentStore.allMessages('ten-images','fixture'))[0].content.parts.filter(part=>part.type==='file').length,10);
  const history=await agentStore.allMessages('hold','fixture');assert.deepEqual(history.filter(m=>m.role==='user').map(m=>m.content.content),['hold','one','two']);
+ // A text correction is consumed by the current loop; an ordinary draft still
+ // waits for its own turn, and stale tokens cannot target another execution.
+ {
+ let release,started;const gate=new Promise(resolve=>{release=resolve;});const ready=new Promise(resolve=>{started=resolve;});const requests=[];
+ agentRuntime.config.provider={async *stream(messages){requests.push(structuredClone(messages));if(requests.length===1){yield {type:'text',text:'working'};started();await gate;}yield {type:'text',text:'finished'};yield {type:'complete',message:{role:'assistant',content:'finished'}};}};
+ const steeringRun=drain(agentRuntime.runTurn([{role:'user',content:'start'}],{threadId:'steering',resourceId:'fixture',runToken:'steering-run'}));await ready;
+ const stale=await request(queue('steering'),'POST',{text:'wrong run',delivery:'steer',runToken:'stale'});assert.equal(stale.status,409);
+ const unsupported=await request(queue('steering'),'POST',{text:'with file',delivery:'steer',runToken:'steering-run',images:draft.images});assert.equal(unsupported.status,400);
+ const accepted=await request(queue('steering'),'POST',{text:'correction',delivery:'steer',runToken:'steering-run'});assert.equal(accepted.status,200);
+ const visible=await (await request(queue('steering'))).json();assert.equal(visible.items[0].delivery,'steer');
+ release();await steeringRun;assert.equal(requests.length,2);assert.equal(requests[1].at(-1).content,'correction');
+ assert.equal((await (await request(queue('steering'))).json()).items.length,0);
+ assert.equal((await agentStore.allMessages('steering','fixture')).at(-1).content.parts.find(p=>p.type==='user-input').text,'correction');
+ }
 });

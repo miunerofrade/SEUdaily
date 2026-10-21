@@ -1,3 +1,5 @@
+import type { RunTiming } from '../shared/timing.js';
+
 export type ContentPart = {
     type: string;
     [key: string]: any;
@@ -17,14 +19,16 @@ export type ToolCall = {
         arguments: string;
     };
 };
-export type AgentEvent =
+export type AgentEvent = (
     | { type: 'text-delta' | 'reasoning-delta'; payload: { text: string } }
     | { type: 'reasoning-start' | 'reasoning-end'; payload: Record<string, never> }
-    | { type: 'tool-call'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown> } }
+    | { type: 'tool-call'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; startedAt?: number } }
     | { type: 'tool-approval-request'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; approvalId: string } }
-    | { type: 'tool-result'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; result: any } }
+    | { type: 'tool-result'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; result: any; startedAt?: number; finishedAt?: number } }
     | { type: 'finish'; payload: { usage?: Record<string, number> } }
-    | { type: 'error'; payload: { error: { message: string } } };
+    | { type: 'input-added'; payload: { id: string; text: string } }
+    | { type: 'error'; payload: { error: { message: string } } }
+) & { timestamp?: number; timing?: RunTiming };
 export type TurnContext = {
     threadId: string;
     resourceId: string;
@@ -54,6 +58,7 @@ export type StoredMessage = {
         modelMessages?: ModelMessage[];
         runToken?: string;
         usage?: Record<string, number>;
+        timing?: RunTiming;
     };
     sequence?: number;
 };
@@ -83,4 +88,5 @@ export type RunState = {
     startedAt: string;
     inputMessageIds?: string[];
     usage?: Record<string, number>;
+    timing?: RunTiming;
 };

@@ -159,3 +159,61 @@ test('completed post-processing sees persisted answers and cannot delay the repl
  assert.ok(output.some(event=>event.type==='finish'));await began;release();
  assert.equal((await f.store.getRun(context.runToken)).status,'completed');
 });
+
+test('steering waits for all tool replies, keeps FIFO order and stays in the same durable turn',async t=>{
+ let release,started;const gate=new Promise(resolve=>{release=resolve;});const ready=new Promise(resolve=>{started=resolve;});
+ const tool={id:'probe',description:'fixture',inputSchema:z.object({}),execute:async()=>{started();await gate;return result('done');}};
+ const f=setup(t,[call(),{role:'assistant',content:'updated answer'},{role:'assistant',content:'next answer'}],{probe:tool});
+ const context=ctx();const running=events(f.runtime.runTurn(user('original'),context));await ready;
+ for(const [id,text,delivery,runToken] of [['first','correction one','steer',context.runToken],['normal','next turn','queue',context.runToken],['second','correction two','steer',context.runToken],['other-run','other','steer','different']]) {
+  await f.store.client.execute({sql:"INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES(?,?,?,'pending',?,'')",args:[id,'test','resource',JSON.stringify({text,delivery,runToken})]});
+ }
+ assert.equal(f.provider.requests.length,1);release();const out=await running;
+ assert.deepEqual(out.filter(e=>e.type==='input-added').map(e=>e.payload.text),['correction one','correction two']);
+ assert.deepEqual(f.provider.requests[1].slice(-3).map(m=>[m.role,m.content]),[['tool',JSON.stringify(result('done'))],['user','correction one'],['user','correction two']]);
+ const messages=await f.store.allMessages('test','resource');assert.equal(messages.length,2);
+ assert.deepEqual(messages[1].content.parts.filter(p=>p.type==='user-input').map(p=>p.text),['correction one','correction two']);
+ assert.deepEqual((await f.store.client.execute('SELECT id FROM message_queue ORDER BY sequence')).rows.map(row=>row.id),['normal','other-run']);
+ const run=await f.store.getRun(context.runToken);assert.equal(run.status,'completed');assert.equal(run.id,context.runToken);
+ assert.ok(run.timing.elapsedMs>=0);assert.equal(run.timing.startedAt,undefined);
+ const invocation=run.parts.find(p=>p.type==='tool-invocation').toolInvocation;
+ assert.ok(invocation.finishedAt>=invocation.startedAt);assert.equal(run.parts.filter(p=>p.type==='tool-invocation').length,1);
+ await events(f.runtime.runTurn(user('next'),ctx()));
+ assert.equal(f.provider.requests[2].filter(m=>m.role==='user'&&m.content==='correction one').length,1);
+});
+
+test('steering arriving during a final model response continues before completing',async t=>{
+ const f=setup(t,[]);let release,started;const gate=new Promise(resolve=>{release=resolve;});const ready=new Promise(resolve=>{started=resolve;});
+ let calls=0;const seen=[];
+ f.runtime.config.provider={async *stream(messages){seen.push(structuredClone(messages));if(!calls++){yield {type:'text',text:'provisional'};started();await gate;}else yield {type:'text',text:'corrected'};yield {type:'complete',message:{role:'assistant',content:calls===1?'provisional':'corrected'}};}};
+ const context=ctx();const running=events(f.runtime.runTurn(user('question'),context));await ready;
+ await f.store.client.execute({sql:"INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES('input','test','resource','pending',?,'')",args:[JSON.stringify({text:'new requirement',delivery:'steer',runToken:context.runToken})]});
+ release();const out=await running;assert.equal(out.filter(e=>e.type==='finish').length,1);assert.equal(seen.length,2);assert.equal(seen[1].at(-1).content,'new requirement');
+});
+
+test('timing starts at first response, freezes for approval and survives resuming',async t=>{
+ const {startTiming,stopTiming,elapsedTime,durationLabel}=await import('../src/shared/timing.ts');
+ let timing=startTiming(undefined,1000);assert.equal(elapsedTime(timing,3500),2500);
+ timing=stopTiming(timing,3500);assert.equal(elapsedTime(timing,90000),2500);
+ timing=startTiming(timing,90000);timing=stopTiming(timing,91500);assert.equal(timing.elapsedMs,4000);
+ assert.equal(durationLabel(61000),'1 分 1 秒');assert.equal(durationLabel(999),'0 秒');
+ const tool={id:'probe',description:'fixture',inputSchema:z.object({}),requireApproval:true,execute:async()=>result('ok')};
+ const f=setup(t,[call(),{role:'assistant',content:'done'}],{probe:tool});const context=ctx();
+ const first=await events(f.runtime.runTurn(user('go'),context));const waiting=await f.store.getRun(context.runToken);
+ assert.equal(waiting.timing.startedAt,undefined);assert.ok(waiting.timing.finishedAt);
+ assert.equal(waiting.parts.find(p=>p.type==='tool-invocation').toolInvocation.startedAt,undefined);
+ const out=await events(f.runtime.resumeApproval({approvalId:waiting.approval.id,approved:true},context));
+ assert.equal(out.at(-1).timing.startedAt,undefined);assert.ok(out.at(-1).timing.elapsedMs>=first.at(-1).timing.elapsedMs);
+ assert.deepEqual((await f.store.allMessages('test','resource')).at(-1).content.timing,out.at(-1).timing);
+});
+
+test('a failed steering transaction retains the draft and rolls back in-memory input',async t=>{
+ const f=setup(t,[]);const context=ctx();await f.runtime.runTurn(user('start'),context);
+ const run=await f.store.getRun(context.runToken);
+ await f.store.client.execute({sql:"INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES('kept','test','resource','pending',?,'')",args:[JSON.stringify({text:'keep this',delivery:'steer',runToken:run.id})]});
+ await f.store.client.execute("CREATE TRIGGER reject_update BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT, 'fixture write failed'); END");
+ const before=structuredClone(run);
+ await assert.rejects(f.store.consumeInput(run,f.runtime.answerMessage(run)),/fixture write failed/);
+ assert.deepEqual(run,before);assert.equal((await f.store.client.execute('SELECT id FROM message_queue')).rows[0].id,'kept');
+ await f.store.client.execute('DROP TRIGGER reject_update');await f.runtime.discardUnstartedTurn(context);
+});

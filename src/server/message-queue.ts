@@ -108,15 +108,25 @@ export function installMessageQueue(app: Hono, normalize: (input: unknown) => Pr
         return c.json({ active: agentRuntime.isActive(threadId), runToken: agentRuntime.activeRunToken(threadId), progress: progress.get(threadId), items: rows.rows.map(row => ({ id: row.id, state: row.state, error: row.error, ...JSON.parse(String(row.payload)) })) });
     });
     app.post(path, async (c) => {
-        const resourceId = id.parse(c.req.query('resourceId')), threadId = id.parse(c.req.param('id')), draft = draftSchema.parse(await c.req.json());
+        const body = await c.req.json();
+        const resourceId = id.parse(c.req.query('resourceId')), threadId = id.parse(c.req.param('id')), draft = draftSchema.parse(body);
         if (!draft.text.trim() && !draft.images.length && !draft.documents.length)
             return c.json({ error: '消息不能为空' }, 400);
         if (draft.images.length + draft.documents.length > 10)
             return c.json({ error: '每轮最多 10 个附件' }, 400);
         await agentStore.ensureThread({ threadId, resourceId, interface:draft.interface });
+        const delivery = z.enum(['queue','steer']).default('queue').parse(body.delivery);
+        let runToken:string|undefined;
+        if (delivery === 'steer') {
+            runToken = id.parse(body.runToken);
+            if (agentRuntime.activeRunToken(threadId) !== runToken)
+                return c.json({error:'当前任务已结束或发生变化，请按 Enter 加入队列。'},409);
+            if (draft.images.length || draft.documents.length || draft.skills.length)
+                return c.json({error:'当前任务补充支持文字；附件或技能请按 Enter 加入队列。'},400);
+        }
         const queueId = randomUUID();
-        await agentStore.client.execute({ sql: "INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES(?,?,?,'pending',?,'')", args: [queueId, threadId, resourceId, JSON.stringify(draft)] });
-        return c.json({ id: queueId });
+        await agentStore.client.execute({ sql: "INSERT INTO message_queue(id,threadId,resourceId,state,payload,error) VALUES(?,?,?,'pending',?,'')", args: [queueId, threadId, resourceId, JSON.stringify({...draft,...(delivery === 'steer' ? {delivery,runToken} : {})})] });
+        return c.json({ id: queueId, delivery });
     });
     app.post(path + '/resume', async (c) => {
         const resourceId = id.parse(c.req.query('resourceId'));

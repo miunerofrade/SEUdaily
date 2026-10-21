@@ -216,9 +216,10 @@ export class AgentStore {
     private assertRunMessage(run: RunState, message?: StoredMessage) {
         if (run.id !== run.context.runToken || (message && (message.id !== (run.context.assistantMessageId ?? `${run.id}-assistant`) || message.role !== 'assistant' || message.threadId !== run.context.threadId || message.resourceId !== run.context.resourceId || message.content.parentId === message.id))) throw new Error('运行与消息归属不一致');
     }
-    private async saveOwned(run?: RunState, message?: StoredMessage) {
+    private async saveOwned(run?: RunState, message?: StoredMessage, consumeInput = false) {
         if (run) this.assertRunMessage(run, message);
         await this.ready;
+        const beforeInput = consumeInput && run ? {parts:run.parts.length,messages:run.messages.length} : undefined;
         const tx = await this.client.transaction('write');
         try {
             if (run) {
@@ -230,13 +231,26 @@ export class AgentStore {
                 if (existing && (existing.threadId !== message.threadId || existing.resourceId !== message.resourceId || existing.role !== message.role || (run && JSON.parse(String(existing.content)).runToken !== run.id))) throw new Error('消息 ID 不属于当前运行或角色');
                 if (message.content.parentId === message.id) throw new Error('消息不能引用自身为父节点');
             }
+            if (consumeInput && run && message) {
+                const rows = await tx.execute({sql:"SELECT id,payload FROM message_queue WHERE threadId=? AND resourceId=? AND state='pending' AND json_extract(payload,'$.delivery')='steer' AND json_extract(payload,'$.runToken')=? ORDER BY sequence",args:[run.context.threadId,run.context.resourceId,run.id]});
+                for (const row of rows.rows) {
+                    const {text} = JSON.parse(String(row.payload));
+                    run.messages.push({role:'user',content:text});
+                    run.parts.push({type:'user-input',id:String(row.id),text});
+                    await tx.execute({sql:'DELETE FROM message_queue WHERE id=?',args:[row.id]});
+                }
+            }
             if (run) await tx.execute(this.runStatement(run, true));
             if (message) {
                 await tx.execute(this.messageStatement(message, true));
                 await tx.execute({ sql: 'UPDATE threads SET updatedAt=? WHERE id=? AND resourceId=?', args: [new Date().toISOString(), message.threadId, message.resourceId] });
             }
             await tx.commit();
-        } catch (error) { await tx.rollback(); throw error; } finally { tx.close(); }
+        } catch (error) {
+            await tx.rollback();
+            if (beforeInput && run) {run.parts.length=beforeInput.parts;run.messages.length=beforeInput.messages;}
+            throw error;
+        } finally { tx.close(); }
     }
     async saveMessage(message: StoredMessage) { await this.saveOwned(undefined, message); }
     async deleteThread(threadId: string, resourceId?: string) {
@@ -248,6 +262,7 @@ export class AgentStore {
     }
     async saveRun(run: RunState) { await this.saveOwned(run); }
     async saveTurn(run: RunState, message: StoredMessage) { await this.saveOwned(run, message); }
+    async consumeInput(run: RunState, message: StoredMessage) { await this.saveOwned(run, message, true); }
     async getRun(id: string): Promise<RunState | undefined> {
         await this.ready;
         const result = await this.client.execute({ sql: 'SELECT state,status FROM runs WHERE id=?', args: [id] });

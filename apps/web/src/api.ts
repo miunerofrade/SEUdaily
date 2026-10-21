@@ -202,6 +202,7 @@ type StoredMessage = {
     parts?: Array<Record<string, unknown>>;
     runToken?: string;
     usage?: Record<string, number>;
+    timing?: ChatMessage['timing'];
   };
 };
 
@@ -217,6 +218,8 @@ function storedTools(parts: Array<Record<string, unknown>> = []): ToolRun[] {
       state: invocation.state !== "result" && typeof invocation.approvalId === "string" ? "approval-requested" : invocation.state === "result" ? (result?.status === "failed" ? "failed" : "completed") : "completed",
       args: invocation.args as Record<string, unknown> | undefined,
       result,
+      startedAt: typeof invocation.startedAt === 'number' ? invocation.startedAt : undefined,
+      finishedAt: typeof invocation.finishedAt === 'number' ? invocation.finishedAt : undefined,
     } satisfies ToolRun];
   });
 }
@@ -242,6 +245,7 @@ function finalStoredTextIndex(parts: Array<Record<string, unknown>> = []) {
 function storedProcess(parts: Array<Record<string, unknown>> = []): AgentProcessEntry[] {
   const finalTextIndex = finalStoredTextIndex(parts);
   return parts.flatMap((part, index): AgentProcessEntry[] => {
+    if (part.type === 'user-input') return [{id:String(part.id),type:'user-input',text:String(part.text)}];
     if (part.type === "reasoning") {
       const text = storedPartText(part).trim();
       return text ? [{ id: `reasoning-${index}`, type: "reasoning", text }] : [];
@@ -378,6 +382,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       documents,
       brokerRunToken: item.content?.runToken,
       usage: normalizedUsage(item.content?.usage),
+      timing: item.content?.timing,
       tools: item.role === "assistant" ? storedTools(parts) : undefined,
       process: item.role === "assistant" ? storedProcess(parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),

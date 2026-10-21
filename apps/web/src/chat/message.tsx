@@ -11,6 +11,7 @@ import type {AgentProcessEntry,ChatMessage,ImageAttachment,ToolRun} from "../typ
 import {ToolGlyph,toolLabel,toolNarration} from "./tool-presentation";
 import {CopyButton,MarkdownContent} from "./markdown-content";
 import {messageSources} from "./sources-sidebar";
+import {Elapsed} from './elapsed';
 function attachmentSource(image: ImageAttachment) { return image.dataUrl ?? (image.path ? libraryPreviewUrl(image.path) : ""); }
 
 function MessageTime({ timestamp }: { timestamp: number }) {
@@ -54,7 +55,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
     ...process,
     ...tools.filter((tool) => !referencedToolIds.has(tool.id)).map((tool) => ({ id: `tool-${tool.id}`, type: "tool" as const, toolId: tool.id })),
   ];
-  const sequence: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string }> = [];
+  const sequence: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string; userInput?:boolean }> = [];
   let activityEntries: AgentProcessEntry[] = [];
   const flushActivityEntries = () => {
     if (!activityEntries.length) return;
@@ -62,9 +63,9 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
     activityEntries = [];
   };
   for (const entry of entries) {
-    if (entry.type === "narration") {
+    if (entry.type === "narration" || entry.type === 'user-input') {
       flushActivityEntries();
-      if (entry.text.trim()) sequence.push({ id: entry.id, type: "text", text: entry.text });
+      if (entry.text.trim()) sequence.push({ id: entry.id, type: "text", text: entry.text,userInput:entry.type==='user-input' });
     } else {
       activityEntries.push(entry);
     }
@@ -98,7 +99,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
       {open && (
         <div className="tool-activity-sequence">
           {sequence.map((block) => block.type === "text"
-            ? <div className="tool-activity-text" key={block.id}><MarkdownContent text={block.text} /></div>
+            ? <div className={block.userInput ? 'process-user-input' : 'tool-activity-text'} key={block.id}>{block.userInput ? <><small>补充要求</small><span>{block.text}</span></> : <MarkdownContent text={block.text} />}</div>
             : <div className="tool-activity-list" key={block.id}>{block.entries.map((entry) => {
               if (entry.type === "reasoning") {
                 if (!entry.text.trim()) return null;
@@ -110,7 +111,7 @@ function ToolActivity({ tools, process = [], streaming, reasoningActive, onAppro
               return (
                 <div className="tool-activity-item" key={entry.id}>
                   <span className={tool.state === "running" ? "active" : ""}>{tool.state === "failed" || tool.state === "approval-requested" ? <CircleAlert size={18} className={tool.state === "failed" ? "error-icon" : undefined} /> : <ToolGlyph name={tool.name} size={18} />}</span>
-                  <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong><ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
+                  <div><strong>{tool.state === "approval-requested" ? `等待批准：${toolLabel(tool.name)}` : tool.result?.summary ?? toolNarration(tool, tool.state === "running" ? "running" : "completed")}</strong>{tool.startedAt!==undefined && <Elapsed timing={tool.finishedAt!==undefined ? {elapsedMs:Math.max(0,tool.finishedAt-tool.startedAt)} : tool.state==='running' ? {elapsedMs:0,startedAt:tool.startedAt} : undefined} />}<ApprovalButtons tool={tool} onApproval={(approved) => onApproval?.(tool, approved)} /></div>
                 </div>
               );
             })}</div>)}
@@ -127,7 +128,7 @@ function visibleUserContent(content: string) {
 
 
 function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApproval?: (tool: ToolRun, approved: boolean) => void }) {
-  const blocks: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string }> = [];
+  const blocks: Array<{ id: string; type: "activity"; entries: AgentProcessEntry[] } | { id: string; type: "text"; text: string; userInput?:boolean }> = [];
   let activity: AgentProcessEntry[] = [];
   const flushActivity = () => {
     if (!activity.length) return;
@@ -136,9 +137,9 @@ function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApp
   };
 
   for (const entry of message.process ?? []) {
-    if (entry.type === "narration") {
+    if (entry.type === "narration" || entry.type==='user-input') {
       flushActivity();
-      if (entry.text.trim()) blocks.push({ id: entry.id, type: "text", text: entry.text });
+      if (entry.text.trim()) blocks.push({ id: entry.id, type: "text", text: entry.text,userInput:entry.type==='user-input' });
     } else {
       activity.push(entry);
     }
@@ -158,7 +159,7 @@ function StreamingProcess({ message, onApproval }: { message: ChatMessage; onApp
 
   return <>
     {blocks.map((block, index) => {
-      if (block.type === "text") return <MarkdownContent key={block.id} text={block.text} />;
+      if (block.type === "text") return block.userInput ? <div key={block.id} className="process-user-input"><small>补充要求</small><span>{block.text}</span></div> : <MarkdownContent key={block.id} text={block.text} />;
       const toolIds = new Set(block.entries.flatMap((entry) => entry.type === "tool" ? [entry.toolId] : []));
       const tools = (message.tools ?? []).filter((tool) => toolIds.has(tool.id) || (!block.entries.length && block.id === "activity-tools"));
       const active = index === lastActivityIndex && block === blocks.at(-1);
@@ -295,12 +296,14 @@ export function Message({ message, canRegenerate = false, disabled = false, onEd
   return (
     <article className="message assistant-message">
       <div className="assistant-body">
+        {message.timing && <div className="run-timing"><Elapsed timing={message.timing} prefix={message.error ? '已运行 ' : '已思考 '} /></div>}
         {hasProcess && message.streaming && (
           <StreamingProcess message={message} onApproval={onApproval} />
         )}
         {hasProcess && !message.streaming && (
           <div className="inline-tools">
-            <ToolActivity tools={message.tools ?? []} process={message.process} streaming={message.streaming} reasoningActive={message.reasoningActive} onApproval={onApproval} />
+            {message.process?.filter(entry=>entry.type==='user-input').map(entry=><div key={entry.id} className="process-user-input"><small>补充要求</small><span>{entry.type==='user-input' ? entry.text : ''}</span></div>)}
+            <ToolActivity tools={message.tools ?? []} process={message.process?.filter(entry=>entry.type!=='user-input')} streaming={message.streaming} reasoningActive={message.reasoningActive} onApproval={onApproval} />
           </div>
         )}
         {message.content ? (
