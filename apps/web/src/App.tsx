@@ -940,7 +940,7 @@ export default function App() {
       </div>
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="会话用量"><span title={agentInfo.model}>{modelDisplayName(agentInfo.model)}</span><SessionStatistics messages={active.messages} contextWindowTokens={agentInfo.contextWindowTokens} usage={activeUsage} /></div>}
-      <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>
+      <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span></div>
     </form>
   );
 
