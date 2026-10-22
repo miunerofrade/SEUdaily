@@ -170,8 +170,14 @@ try{
  await input.fill('steer hold');await input.press('Enter');
  await page.getByText('正在执行wait',{exact:true}).first().waitFor();
  assert.ok(toolStarted);
+ await page.getByRole('button',{name:'上下文占用',exact:true}).click();
+ await page.getByRole('region',{name:'上下文占用',exact:true}).getByText('1,000 tok',{exact:true}).waitFor();
+ await page.keyboard.press('Escape');
  await page.reload();await page.getByText('正在执行wait',{exact:true}).first().waitFor();
  assert.equal(toolExecutions,1);
+ await page.getByRole('button',{name:'上下文占用',exact:true}).click();
+ await page.getByRole('region',{name:'上下文占用',exact:true}).getByText('1,000 tok',{exact:true}).waitFor();
+ await page.keyboard.press('Escape');
  await input.fill('updated requirement');await input.press('Control+Enter');
  await page.getByText('待补充到当前任务',{exact:true}).waitFor();
  await page.locator('.tool-activity-item .elapsed-time').filter({hasText:/[1-9]\d* 秒/}).first().waitFor();
@@ -236,7 +242,7 @@ try{
  await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
  await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({draftRefresh:true,imageDraftRefresh:true,draftIsolation:true,draftDeletion:true,lateUploadOwnership:true,draftClearedOnSend:true,borderless:true,fileDrop:true,filePaste:true,textPaste:true,webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
+ console.log(JSON.stringify({contextRetainedDuringRun:true,draftRefresh:true,imageDraftRefresh:true,draftIsolation:true,draftDeletion:true,lateUploadOwnership:true,draftClearedOnSend:true,borderless:true,fileDrop:true,filePaste:true,textPaste:true,webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
  releaseUpload?.();releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }

@@ -29,8 +29,8 @@ export function conversationStatistics(messages:ReadonlyArray<StatisticsMessage>
     if(valid(stats?.modelMs)){modelMs+=stats.modelMs;modelSamples++;}
     if(valid(stats?.ttftTotalMs)&&valid(stats?.ttftSamples)){ttftTotalMs+=stats.ttftTotalMs;ttftSamples+=stats.ttftSamples;}
     if(valid(stats?.generationMs)&&stats.generationMs>0&&valid(stats?.generatedTokens)){generationMs+=stats.generationMs;generatedTokens+=stats.generatedTokens;}
-    // Only the newest run can describe current context; don't reuse an older known value.
-    lastPromptTokens=valid(stats?.lastPromptTokens) ? stats.lastPromptTokens : undefined;
+    // Usage arrives at request completion; keep the latest measured value while a new run streams.
+    if(valid(stats?.lastPromptTokens))lastPromptTokens=stats.lastPromptTokens;
     for(const tool of message.tools ?? [])tools.set(`${token}:${tool.id}`,tool);
   }
   let toolMs=0,toolSamples=0;

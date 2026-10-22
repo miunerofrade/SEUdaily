@@ -26,9 +26,23 @@ test('session aggregation deduplicates approvals, weights speed, and uses last p
   assert.equal(stats.rounds,2);assert.equal(stats.steps,3);assert.equal(stats.modelMs,1500);assert.equal(stats.toolMs,300);
   assert.equal(stats.ttftMs,100);assert.equal(stats.tps,160000/1200);assert.equal(stats.lastPromptTokens,3000);
   const old=conversationStatistics([...messages,{id:'old',role:'assistant'}]);
-  assert.equal(old.lastPromptTokens,undefined);assert.equal(old.partial,true);
+  assert.equal(old.lastPromptTokens,3000);assert.equal(old.partial,true);
   assert.equal(conversationStatistics([{id:'old',role:'assistant'}]).modelMs,undefined);
   assert.equal(conversationStatistics([{id:'old',role:'assistant'}]).tps,undefined);
+});
+
+test('context usage retains the last measured input during a new run and replaces it when usage arrives',()=>{
+  const history=[{id:'first',role:'assistant',statistics:{lastPromptTokens:1000}}];
+  const pending={id:'second',role:'assistant',streaming:true,statistics:{modelSteps:1}};
+  const messages=[...history,pending];
+  assert.equal(conversationStatistics(messages).lastPromptTokens,1000);
+  const html=renderToStaticMarkup(React.createElement(SessionStatistics,{messages,usage:{},contextWindowTokens:2000}));
+  assert.match(html,/50%/);
+  assert.equal(conversationStatistics([...history,{...pending,statistics:{lastPromptTokens:600}}]).lastPromptTokens,600);
+  assert.equal(conversationStatistics([...history,{...pending,statistics:{lastPromptTokens:0}}]).lastPromptTokens,0);
+  assert.equal(conversationStatistics([...history,{...pending,statistics:{lastPromptTokens:NaN}}]).lastPromptTokens,1000);
+  assert.equal(conversationStatistics([pending]).lastPromptTokens,undefined);
+  assert.equal(conversationStatistics([]).lastPromptTokens,undefined);
 });
 
 test('runtime persists model statistics across approval while excluding tool and approval waits',async t=>{

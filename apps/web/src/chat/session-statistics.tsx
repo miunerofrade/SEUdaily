@@ -26,7 +26,7 @@ function ContextUsage({ratio,used,limit}:{ratio?:number;used?:number;limit?:numb
   const percent=ratio===undefined ? '—' : ratio>0 && ratio<.001 ? '<0.1%' : `${Number((ratio*100).toFixed(1))}%`;
   const icon=<svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7.5" stroke="currentColor" opacity=".25" strokeWidth="3" />{ratio!==undefined&&<circle cx="10" cy="10" r="7.5" pathLength="100" stroke="currentColor" strokeWidth="3" strokeDasharray={`${Math.min(100,Math.max(0,ratio*100))} 100`} transform="rotate(-90 10 10)" />}</svg>;
   return <MetricPopover title="上下文占用" icon={icon} label={percent}>
-    <dl><dt>最近一次请求输入</dt><dd>{tokens(used)}</dd><dt>应用上下文预算</dt><dd>{tokens(limit)}</dd><dt>占用</dt><dd>{percent}</dd></dl>
-    <p className="metric-note">使用 API 返回的最近一次请求输入 token，包含消息与工具定义；预算取应用配置，不代表模型官方最大窗口。旧记录未保存此数据时显示 —。</p>
+    <dl><dt>最近一次已统计的请求输入</dt><dd>{tokens(used)}</dd><dt>应用上下文预算</dt><dd>{tokens(limit)}</dd><dt>占用</dt><dd>{percent}</dd></dl>
+    <p className="metric-note">使用 API 最近一次已返回的输入 token，包含消息与工具定义；运行中保留该数值，新统计返回后更新。预算取应用配置，不代表模型官方最大窗口。尚无统计时显示 —。</p>
   </MetricPopover>;
 }
