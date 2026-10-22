@@ -209,13 +209,11 @@ button { color: inherit; }
 .code-toolbar .copy-button { color: #656d76; }
 .code-toolbar .copy-button:hover { background: rgba(0,0,0,.06); color: #111; }
 .message-meta { min-height: 30px; display: flex; flex-wrap:wrap; align-items: center; gap: 8px; margin-top: 7px; }
-.message-meta time, .message-meta .copy-button, .message-meta .message-action { opacity: .35; transition: opacity .15s; }
-.assistant-message:hover .message-meta time, .assistant-message:hover .message-meta .copy-button, .assistant-message:hover .message-meta .message-action, .message-meta button:focus-visible { opacity: 1; }
+.message-meta .copy-button, .message-meta .message-action { opacity: .35; transition: opacity .15s; }
+.assistant-message:hover .message-meta .copy-button, .assistant-message:hover .message-meta .message-action, .message-meta button:focus-visible { opacity: 1; }
 .message-action { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #777; cursor: pointer; }
 .message-action:hover { background: #f0f0f0; color: #222; }
 .message-action:disabled { opacity: .25 !important; cursor: default; }
-.user-meta time { opacity:.35; }
-.user-message:hover .user-meta time { opacity:1; }
 .user-meta { min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; }
 .user-meta .copy-button, .user-meta .message-action { opacity: 0; transition: opacity .15s; }
 .user-message:hover .user-meta .copy-button, .user-message:hover .user-meta .message-action, .user-meta button:focus-visible { opacity: 1; }
