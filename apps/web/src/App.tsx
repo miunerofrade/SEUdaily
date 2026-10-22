@@ -21,7 +21,7 @@ import { mergeServerConversation } from "./conversation-sync";
 import { conversationPath, withParents, latestDescendant } from '../../../src/shared/conversation-tree';
 import { conversationUsage, normalizedUsage } from "../../../src/shared/telemetry";
 import { ArrowUp, BookOpen, ChevronRight, CircleAlert, FileAudio, FileText, Hand, ListChecks, Menu, Paperclip, PanelLeft, Plus, Sparkles, Trash2, X } from "lucide-react";
-import { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { executeAgentActionRequest, executeAgentAuthRequest, deleteServerConversation, fetchSettings, fetchSkills, type ProjectSkill, libraryPreviewUrl, loadFocusConversations, loadServerConversations, loadConversationMessages, RESOURCE_ID, saveAccessMode, streamAgent, uploadDocument, uploadTemporaryImage } from "./api";
 import type { AgentActionRequest, AgentAuthRequest, AgentInput } from "./api";
 import { RamDiskPanel } from "./ramdisk-panel";
@@ -136,6 +136,8 @@ export default function App() {
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   const [pendingDocuments, setPendingDocuments] = useState<DocumentAttachment[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const fileDragDepth = useRef(0);
   const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState("");
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
@@ -209,6 +211,8 @@ export default function App() {
 
   const activeRaw = conversations.find((item) => item.id === activeId) ?? conversations[0];
   function resetComposerAttachments() {
+    fileDragDepth.current=0;
+    setDraggingFiles(false);
     attachmentUploadRef.current = null;
     setUploadingAttachments(false);
     setPendingImages([]); setPendingDocuments([]);
@@ -904,10 +908,38 @@ export default function App() {
   }
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-    if (!images.length) return;
+    const files = Array.from(event.clipboardData.files);
+    if (!files.length) return;
     event.preventDefault();
-    void addAttachments(images);
+    void addAttachments(files);
+  }
+
+  function onFileDragEnter(event: DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    fileDragDepth.current++;
+    setDraggingFiles(true);
+  }
+
+  function onFileDragOver(event: DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect='copy';
+  }
+
+  function onFileDragLeave(event: DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    fileDragDepth.current=Math.max(0,fileDragDepth.current-1);
+    if (!fileDragDepth.current) setDraggingFiles(false);
+  }
+
+  function onFileDrop(event: DragEvent<HTMLElement>) {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    fileDragDepth.current=0;
+    setDraggingFiles(false);
+    void addAttachments(Array.from(event.dataTransfer.files));
+    composerTextareaRef.current?.focus();
   }
 
   function onImageInput(event: ChangeEvent<HTMLInputElement>) {
@@ -929,7 +961,8 @@ export default function App() {
         {queueState.progress?.text && <div className="composer-queue-progress">{queueState.progress.text}</div>}
         {queueState.items.some(item => item.state === 'paused') && <button type="button" onClick={() => void queueRequest(queuePath.replace('?', '/resume?'), 'POST', {}).catch(error => setConversationError(error.message))}>继续队列</button>}
       </div>}
-      <div className="composer">
+      <div className={`composer ${draggingFiles ? "is-file-drop" : ""}`}>
+        {draggingFiles && <div className="composer-drop-hint" role="status">松开以添加文件</div>}
         {slashOpen && <div className="slash-menu">
           <div className="slash-menu-heading">命令 <span>↑↓ 选择 · Tab / Enter 补全 · Esc 收起</span></div>
           <div id="composer-slash-list" className="slash-menu-list" role="listbox" aria-label="斜杠命令" ref={slashListRef}>
@@ -1030,7 +1063,7 @@ export default function App() {
         {!sidebarCollapsed && sidebarResize.separator}
       </aside>
 
-      {view === "chat" ? <main className={`chat-panel ${active.messages.length ? "has-messages" : "empty"}`}>
+      {view === "chat" ? <main className={`chat-panel ${active.messages.length ? "has-messages" : "empty"}`} onDragEnter={onFileDragEnter} onDragOver={onFileDragOver} onDragLeave={onFileDragLeave} onDrop={onFileDrop}>
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setNavOpen(true)} aria-label="打开导航"><Menu size={20} /></button>
           {active.messages.length ? <h1 title={active.title}>{Array.from(active.title).slice(0, 10).join("")}{Array.from(active.title).length > 10 ? "…" : ""}</h1> : <span className="topbar-product">SEUdaily</span>}

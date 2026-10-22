@@ -23,8 +23,14 @@ agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=m
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
  if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
  const answer=text==='updated requirement'?'补充要求已采纳':text==='tool retry'?'已恢复并完成回答':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:750},metrics:{ttftMs:200,generationMs:1000,generatedTokens:99}};}};
+const uploads=[],uploadBodies=[];
 const api=getRequestListener(app.fetch);
-const server=createServer(async(req,res)=>{if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
+const server=createServer(async(req,res)=>{if(req.url==='/app/documents' && req.method==='POST'){
+ const chunks=[];for await(const chunk of req)chunks.push(chunk);
+ const body=Buffer.concat(chunks).toString(),filename=/filename="([^"]+)"/.exec(body)?.[1];
+ uploads.push(filename);uploadBodies.push(body);res.setHeader('Content-Type','application/json');
+ res.end(JSON.stringify({filename,mediaType:'text/plain',contextRef:'fixture-'+filename,markdown:'attachment fixture',charCount:18}));return;
+}if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
 let browser;
 try{
@@ -42,7 +48,37 @@ try{
  await page.getByRole('button',{name:'思考强度：低',exact:true}).click();
  await page.getByRole('menuitemradio',{name:'高',exact:true}).click();
  await page.getByRole('button',{name:'思考强度：高',exact:true}).waitFor();
- const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
+ // Exercise browser file events against the same document upload endpoint as the picker.
+ const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');
+ await page.locator('.chat-panel').evaluate(node=>{
+  const transfer=new DataTransfer();transfer.items.add(new File(['attachment fixture'],'dragged.txt',{type:'text/plain'}));
+  node.dispatchEvent(new DragEvent('dragenter',{dataTransfer:transfer,bubbles:true,cancelable:true}));
+ });
+ await page.getByText('松开以添加文件',{exact:true}).waitFor();
+ await page.locator('.chat-panel').evaluate(node=>{
+  const transfer=new DataTransfer();
+  for(const name of ['dragged.txt','dragged.md'])transfer.items.add(new File(['attachment fixture'],name,{type:'text/plain'}));
+  const event=new DragEvent('drop',{dataTransfer:transfer,bubbles:true,cancelable:true});
+  node.dispatchEvent(event);if(!event.defaultPrevented)throw Error('File drop would navigate away');
+ });
+ await page.getByRole('button',{name:'移除文件：dragged.txt',exact:true}).waitFor();
+ await page.getByRole('button',{name:'移除文件：dragged.md',exact:true}).waitFor();
+ assert.equal(await page.locator('.composer-drop-hint').count(),0);
+ await input.evaluate(node=>{
+  const clipboard=new DataTransfer();clipboard.items.add(new File(['attachment fixture'],'pasted.pdf',{type:'application/pdf'}));
+  const event=new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true});
+  node.dispatchEvent(event);if(!event.defaultPrevented)throw Error('File paste was ignored');
+ });
+ await page.getByRole('button',{name:'移除文件：pasted.pdf',exact:true}).waitFor();
+ assert.deepEqual(uploads.sort(),['dragged.md','dragged.txt','pasted.pdf']);
+ for(const body of uploadBodies)assert.match(body,/attachment fixture/);
+ const textPasteAllowed=await input.evaluate(node=>{
+  const clipboard=new DataTransfer();clipboard.setData('text/plain','ordinary text');
+  return node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
+ });
+ assert.equal(textPasteAllowed,true);
+ for(const name of uploads)await page.getByRole('button',{name:'移除文件：'+name,exact:true}).click();
+ await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
  await page.getByText('正在等待取消',{exact:true}).waitFor();
  const liveToken=agentRuntime.activeRunToken((await agentStore.listConversations(1))[0].id);
@@ -163,7 +199,7 @@ try{
  await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
  await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
+ console.log(JSON.stringify({fileDrop:true,filePaste:true,textPaste:true,webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
  releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }
