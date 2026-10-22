@@ -1,3 +1,4 @@
+import {reasoningEfforts} from '../shared/reasoning-effort.js';
 import {
   parseEnv,
   readEnvFile,
@@ -26,6 +27,14 @@ import {
 } from "./app-route-helpers.js";
 
 export const settingsRoutes = [
+  registerApiRoute("/app/agent-info", {
+    method:"POST", requiresAuth:false,
+    handler:async (c:any)=>{
+      const {effort}=z.object({effort:z.enum(reasoningEfforts)}).strict().parse(await c.req.json());
+      await updateEnvFile({DEEPSEEK_REASONING_EFFORT:effort});
+      return c.json({effort});
+    },
+  }),
   registerApiRoute("/app/runtime/preparation", {
     method: "GET",
     handler: async (c: any) =>

@@ -217,3 +217,17 @@ test('a failed steering transaction retains the draft and rolls back in-memory i
  assert.deepEqual(run,before);assert.equal((await f.store.client.execute('SELECT id FROM message_queue')).rows[0].id,'kept');
  await f.store.client.execute('DROP TRIGGER reject_update');await f.runtime.discardUnstartedTurn(context);
 });
+
+test('provider sends the currently selected effort on subsequent requests',async()=>{
+ const originalFetch=globalThis.fetch,previous=process.env.DEEPSEEK_REASONING_EFFORT;
+ try {
+  const requests=[];
+  globalThis.fetch=async (_url,options)=>{requests.push(JSON.parse(options.body));return new Response('data: '+JSON.stringify({choices:[{delta:{content:'ok'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');};
+  const provider=new DeepSeekProvider({apiKey:'fixture'});
+  for(const effort of ['none','low','high','max']) {
+   process.env.DEEPSEEK_REASONING_EFFORT=effort;
+   for await(const event of provider.stream(user('fixture'),[])){}
+   assert.equal(requests.at(-1).reasoning_effort,effort);
+  }
+ } finally {globalThis.fetch=originalFetch;if(previous===undefined)delete process.env.DEEPSEEK_REASONING_EFFORT;else process.env.DEEPSEEK_REASONING_EFFORT=previous;}
+});

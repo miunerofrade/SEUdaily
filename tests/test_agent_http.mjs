@@ -23,6 +23,12 @@ test('HTTP skill discovery, AGENTS.md settings and bound approval recovery',asyn
  t.after(async()=>{await agentRuntime.shutdown();await agentStore.close();await rm(root,{recursive:true,force:true});});
  assert.equal(await readFile(join(root,'AGENTS.md'),'utf8'),'LEGACY_AGENT_RULE');
  assert.equal((await (await request('/app/settings')).json()).agentInstructions,'LEGACY_AGENT_RULE');
+ const effortSaved=await request('/app/agent-info',{effort:'low'});assert.equal(effortSaved.status,200);
+ assert.equal((await (await request('/app/agent-info')).json()).effort,'low');
+ assert.match(await readFile(join(root,'.env'),'utf8'),/DEEPSEEK_REASONING_EFFORT=low/);
+ assert.equal((await request('/app/agent-info',{effort:'invalid'})).status,400);
+ assert.equal((await (await request('/app/agent-info')).json()).effort,'low');
+ await request('/app/agent-info',{effort:'high'});
  // The normal chat upload endpoint must index automatically, without /knowledge add.
  const upload=async()=>{
   const form=new FormData();form.append('file',new File(['考试占比为百分之六十。'],'课程说明.txt'));

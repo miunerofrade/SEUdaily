@@ -805,3 +805,7 @@ export function saveAccessMode(mode: "normal" | "full" | "extra") {
 
 export type ProjectSkill = { name: string; description: string; namespaces: string[] };
 export function fetchSkills() { return jsonRequest<{ skills: ProjectSkill[] }>("/app/skills"); }
+
+export function saveReasoningEffort(effort: import('../../../src/shared/reasoning-effort').ReasoningEffort) {
+  return jsonRequest<{effort: import('../../../src/shared/reasoning-effort').ReasoningEffort}>('/app/agent-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({effort})});
+}

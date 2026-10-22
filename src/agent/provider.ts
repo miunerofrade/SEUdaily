@@ -1,3 +1,4 @@
+import {reasoningEfforts,type ReasoningEffort} from '../shared/reasoning-effort.js';
 import { redactValue } from './redaction.js';
 import type { ModelMessage, ToolCall } from './types.js';
 export type ProviderEvent = {
@@ -51,6 +52,10 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
     }
 }
 export const DEFAULT_REASONING_EFFORT = 'high';
+export function getReasoningEffort(): ReasoningEffort {
+    const value=process.env.DEEPSEEK_REASONING_EFFORT;
+    return reasoningEfforts.includes(value as ReasoningEffort) ? value as ReasoningEffort : DEFAULT_REASONING_EFFORT;
+}
 export class DeepSeekProvider implements ModelProvider {
     constructor(private config: {
         apiKey?: string;
@@ -64,7 +69,7 @@ export class DeepSeekProvider implements ModelProvider {
         const response = await fetch(`${(this.config.baseUrl ?? 'https://api.deepseek.com').replace(/\/$/, '')}/chat/completions`, {
             method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: this.config.model ?? process.env.DEEPSEEK_MODEL ?? 'deepseek-flash', messages: redactValue(messages), stream,
-                ...(stream ? { reasoning_effort: DEFAULT_REASONING_EFFORT, max_tokens: 8192, stream_options: { include_usage: true }, ...(tools.length ? { tools } : {}) } : { max_tokens: 4096, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }),
+                ...(stream ? { reasoning_effort: getReasoningEffort(), max_tokens: 8192, stream_options: { include_usage: true }, ...(tools.length ? { tools } : {}) } : { max_tokens: 4096, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }),
             }),
             signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(360000)]) : AbortSignal.timeout(360000),
         });

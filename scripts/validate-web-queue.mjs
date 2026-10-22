@@ -33,8 +33,18 @@ try{
  await page.route('**/*',route=>new URL(route.request().url()).hostname==='127.0.0.1' ? route.continue() : route.abort());
  await page.goto('http://127.0.0.1:'+server.address().port);
  
+ await page.getByRole('button',{name:'思考强度：高',exact:true}).click();
+ await page.getByRole('menuitemradio',{name:'低',exact:true}).click();
+ await page.getByRole('button',{name:'思考强度：低',exact:true}).waitFor();
+ assert.equal(await page.getByRole('menu',{name:'选择思考强度'}).count(),0);
+ await page.reload();await page.getByRole('button',{name:'思考强度：低',exact:true}).click();
+ await page.keyboard.press('Escape');assert.equal(await page.getByRole('menu',{name:'选择思考强度'}).count(),0);
+ await page.getByRole('button',{name:'思考强度：低',exact:true}).click();
+ await page.getByRole('menuitemradio',{name:'高',exact:true}).click();
+ await page.getByRole('button',{name:'思考强度：高',exact:true}).waitFor();
  const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'思考强度：高',exact:true}).isDisabled(),true);
  const recent=page.getByRole('button',{name:'最近',exact:true});
  await page.locator('#recent-conversations .conversation-row').first().waitFor();
  await recent.click();
