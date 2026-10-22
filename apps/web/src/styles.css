@@ -209,8 +209,8 @@ button { color: inherit; }
 .code-toolbar .copy-button { color: #656d76; }
 .code-toolbar .copy-button:hover { background: rgba(0,0,0,.06); color: #111; }
 .message-meta { min-height: 30px; display: flex; flex-wrap:wrap; align-items: center; gap: 8px; margin-top: 7px; }
-.message-meta .copy-button, .message-meta .message-action { opacity: .35; transition: opacity .15s; }
-.assistant-message:hover .message-meta .copy-button, .assistant-message:hover .message-meta .message-action, .message-meta button:focus-visible { opacity: 1; }
+.message-meta .copy-button, .message-meta .message-action, .message-meta .usage-trigger { opacity: .35; transition: opacity .15s; }
+.assistant-message:hover .message-meta .copy-button, .assistant-message:hover .message-meta .message-action, .assistant-message:hover .message-meta .usage-trigger, .message-meta .usage-trigger[aria-expanded="true"], .message-meta button:focus-visible { opacity: 1; }
 .message-action { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #777; cursor: pointer; }
 .message-action:hover { background: #f0f0f0; color: #222; }
 .message-action:disabled { opacity: .25 !important; cursor: default; }
@@ -615,6 +615,8 @@ a.source-entry:hover { background:#f5f5f5; }
 .usage-popover { display:inline-flex; min-width:0; }
 .usage-trigger { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:0; border-radius:7px; background:transparent; color:#858a92; font:inherit; font-size:12px; line-height:20px; white-space:nowrap; cursor:pointer; }
 .usage-trigger:hover, .usage-trigger:focus-visible, .usage-trigger[aria-expanded="true"] { background:#f0f1f3; color:#555b63; }
+.message-meta .usage-trigger { color:#777; }
+.message-meta .usage-trigger:hover, .message-meta .usage-trigger:focus-visible, .message-meta .usage-trigger[aria-expanded="true"] { color:#222; background:#f0f0f0; }
 .usage-trigger svg { flex-shrink:0; }
 .usage-panel { position:fixed; z-index:80; overflow:auto; padding:16px; border:1px solid #e9eaec; border-radius:16px; background:#fafafb; box-shadow:0 6px 28px #00000012; color:#7c828c; font-size:13px; line-height:1.6; font-variant-numeric:tabular-nums; }
 .usage-panel header { display:flex; align-items:center; gap:8px; padding-bottom:12px; border-bottom:1px solid #e0e2e5; color:#202329; }
