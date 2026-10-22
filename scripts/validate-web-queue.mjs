@@ -17,9 +17,9 @@ const {app}=await import(source+'/src/server/app.ts');
 const {agentRuntime}=await import(source+'/src/runtime/application.ts');
 const {agentStore}=await import(source+'/src/runtime/storage.ts');
 const {stopMessageQueue}=await import(source+'/src/server/message-queue.ts');
-let releaseTool;let toolStarted=false,toolExecutions=0;
+let releaseTool,releaseUpload;let toolStarted=false,toolExecutions=0;
 agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;toolExecutions++;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable',data:{reason:'fixture upstream detail',attempt:2}})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
-agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
+agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'||text.startsWith('hold\n\n<!-- seudaily:documents -->')){if(text!=='hold')assert.match(text,/attachment fixture/);yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
  if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
  const answer=text==='updated requirement'?'补充要求已采纳':text==='tool retry'?'已恢复并完成回答':'队列回答完成';yield {type:'text',text:answer};yield {type:'complete',message:{role:'assistant',content:answer},finishReason:'stop',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:750},metrics:{ttftMs:200,generationMs:1000,generatedTokens:99}};}};
@@ -28,7 +28,7 @@ const api=getRequestListener(app.fetch);
 const server=createServer(async(req,res)=>{if(req.url==='/app/documents' && req.method==='POST'){
  const chunks=[];for await(const chunk of req)chunks.push(chunk);
  const body=Buffer.concat(chunks).toString(),filename=/filename="([^"]+)"/.exec(body)?.[1];
- uploads.push(filename);uploadBodies.push(body);res.setHeader('Content-Type','application/json');
+ uploads.push(filename);uploadBodies.push(body);if(filename==='late.txt')await new Promise(resolve=>{releaseUpload=resolve;});res.setHeader('Content-Type','application/json');
  res.end(JSON.stringify({filename,mediaType:'text/plain',contextRef:'fixture-'+filename,markdown:'attachment fixture',charCount:18}));return;
 }if(['/app/focus','/app/ramdisk','/app/vpn','/app/library'].some(path=>req.url.split('?')[0]===path)){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'completed',data:{items:[],state:'disconnected',mounted:false}}));return;}if(req.url.startsWith('/api/')||req.url.startsWith('/app/'))return api(req,res);try{const name=req.url.split('?')[0];const file=resolve(source,'dist/components/web/assets',name==='/'?'index.html':name.slice(1));const bytes=await readFile(file);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(bytes);}catch{res.statusCode=404;res.end();}});
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
@@ -77,8 +77,45 @@ try{
   return node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
  });
  assert.equal(textPasteAllowed,true);
- for(const name of uploads)await page.getByRole('button',{name:'移除文件：'+name,exact:true}).click();
+ await input.evaluate(node=>{
+  const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0AAAAABJRU5ErkJggg=='),character=>character.charCodeAt(0));
+  const clipboard=new DataTransfer();clipboard.items.add(new File([png],'draft.png',{type:'image/png'}));
+  node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
+ });
+ await page.getByRole('button',{name:'移除图片：draft.png',exact:true}).waitFor();
+ await input.fill('draft in first conversation');
+ await page.reload();await page.waitForFunction(()=>document.querySelector('textarea')?.value==='draft in first conversation');
+ for(const name of uploads)await page.getByRole('button',{name:'移除文件：'+name,exact:true}).waitFor();
+ await page.waitForFunction(()=>document.querySelector('.composer-images img')?.naturalWidth>0);
+ assert.equal(await page.locator('.composer').evaluate(node=>getComputedStyle(node).borderTopWidth),'0px');
+ // An upload completing after a conversation switch still belongs to its origin.
+ await page.locator('.chat-panel').evaluate(node=>{
+  const transfer=new DataTransfer();transfer.items.add(new File(['attachment fixture'],'late.txt',{type:'text/plain'}));
+  node.dispatchEvent(new DragEvent('drop',{dataTransfer:transfer,bubbles:true,cancelable:true}));
+ });
+ await page.waitForFunction(()=>document.querySelector('.composer')?.textContent.includes('正在上传附件'));
+ await page.getByRole('button',{name:'新对话',exact:true}).click();
+ assert.equal(await input.inputValue(),'');assert.equal(await page.locator('.composer-file').count(),0);
+ await input.fill('draft in second conversation');
+ while(!releaseUpload)await new Promise(resolve=>setTimeout(resolve,10));releaseUpload();
+ await page.reload();await page.waitForFunction(()=>document.querySelector('textarea')?.value==='draft in second conversation');
+ assert.equal(await page.locator('.composer-file').count(),0);
+ await page.locator('.conversation-row:not(.active) .conversation-item').first().click();
+ await page.waitForFunction(()=>document.querySelector('textarea')?.value==='draft in first conversation');
+ await page.getByRole('button',{name:'移除文件：late.txt',exact:true}).waitFor();
+ assert.equal(await page.locator('.composer-file').count(),4);
+ await page.locator('.conversation-row:not(.active) .conversation-item').first().click();
+ assert.equal(await input.inputValue(),'draft in second conversation');
+ await page.locator('.conversation-row.active .conversation-delete').click();
+ await page.getByRole('dialog',{name:'删除这个对话？'}).getByRole('button',{name:'删除',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('textarea')?.value==='draft in first conversation');
+ await page.reload();await page.waitForFunction(()=>document.querySelector('textarea')?.value==='draft in first conversation');
+ assert.equal(await page.locator('.conversation-row').count(),1);
+ await page.getByRole('button',{name:'移除图片：draft.png',exact:true}).click();
+ for(const name of uploads.filter(name=>name!=='dragged.txt'))await page.getByRole('button',{name:'移除文件：'+name,exact:true}).click();
  await input.fill('hold');await input.press('Enter');
+ await page.waitForFunction(()=>document.querySelector('textarea')?.value==='');
+ assert.equal(await page.locator('.composer-file').count(),0);
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
  await page.getByText('正在等待取消',{exact:true}).waitFor();
  const liveToken=agentRuntime.activeRunToken((await agentStore.listConversations(1))[0].id);
@@ -199,7 +236,7 @@ try{
  await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
  await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({fileDrop:true,filePaste:true,textPaste:true,webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
+ console.log(JSON.stringify({draftRefresh:true,imageDraftRefresh:true,draftIsolation:true,draftDeletion:true,lateUploadOwnership:true,draftClearedOnSend:true,borderless:true,fileDrop:true,filePaste:true,textPaste:true,webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
- releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
+ releaseUpload?.();releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }

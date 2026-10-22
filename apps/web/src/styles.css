@@ -93,8 +93,8 @@ button { color: inherit; }
 .composer-wrap.centered { padding: 0; background: transparent; }
 .chat-panel.empty .composer-wrap { top:calc(-50vh + 12px); }
 .chat-panel.empty .welcome h2 { transform:translateY(-60px); }
-.composer { position:relative; width: min(768px, 100%); min-height: 52px; margin: 0 auto; display: flex; flex-wrap:wrap; align-items: flex-end; gap: 5px; padding: 7px 10px; border: 1px solid rgba(0,0,0,.08); border-radius: 28px; background: #fff; box-shadow:none; transition:border-color .15s; }
-.composer:focus-within { border-color: rgba(0,0,0,.15); box-shadow:none; }
+.composer { position:relative; width: min(768px, 100%); min-height: 52px; margin: 0 auto; display: flex; flex-wrap:wrap; align-items: flex-end; gap: 5px; padding: 7px 10px; border: 0; border-radius: 28px; background: #fff; box-shadow:none; }
+.composer:focus-within { box-shadow:none; }
 .composer-add-wrap { position:relative; width:36px; height:36px; flex:0 0 36px; align-self:flex-end; }
 .composer-add { width:36px; height:36px; aspect-ratio:1; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:transparent; color:#333; cursor:pointer; transition:background .15s, color .15s; }
 .composer-add:hover, .composer-add[aria-expanded="true"] { background:#ededed; color:#111; }
@@ -628,5 +628,5 @@ a.source-entry:hover { background:#f5f5f5; }
 .usage-panel dd { text-align:right; color:#626973; overflow-wrap:anywhere; }
 .metric-note { margin:12px 0 0; font-size:11px; line-height:1.6; color:#91959d; }
 
-.composer.is-file-drop { border-color:#888; background:#fafafa; }
+.composer.is-file-drop { background:#fafafa; outline:1px dashed #aaa; }
 .composer-drop-hint { flex:0 0 100%; padding:0 10px 6px; color:#666; font-size:12px; pointer-events:none; }

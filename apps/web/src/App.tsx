@@ -1,3 +1,4 @@
+import {useComposerDrafts,ACTIVE_CONVERSATION_KEY} from './composer-drafts';
 import {SessionStatistics} from './chat/session-statistics';
 import {modelDisplayName} from '../../../src/shared/session-statistics';
 import {EffortSelect} from './effort-select';
@@ -104,10 +105,17 @@ export default function App() {
   }, []);
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
   const [focusConversations, setFocusConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState(() => conversations[0].id);
+  const [activeId, setActiveId] = useState(() => {
+    try { const saved=localStorage.getItem(ACTIVE_CONVERSATION_KEY);return saved || conversations[0].id; }
+    catch { return conversations[0].id; }
+  });
+  const composerDrafts=useComposerDrafts(conversations,activeId,items=>setConversations(current=>[
+    ...current,...items.filter(item=>!current.some(existing=>existing.id===item.id)),
+  ]));
+  const {draft,setDraft,pendingImages,setPendingImages,pendingDocuments,setPendingDocuments,selectedSkill,setSelectedSkill}=composerDrafts;
+  useEffect(()=>{try{localStorage.setItem(ACTIVE_CONVERSATION_KEY,activeId);}catch{}},[activeId]);
   const [selectedFocusId, setSelectedFocusId] = useState("");
   const [view, setView] = useState<AppView>("chat");
-  const [draft, setDraft] = useState("");
   const [agentInfo, setAgentInfo] = useState<{model:string;effort:string;contextWindowTokens?:number}>({ model: "—", effort: "—" });
   useEffect(() => {
     if (view !== "chat") return;
@@ -124,7 +132,6 @@ export default function App() {
       }).catch(() => undefined);
     return () => controller.abort();
   }, [view]);
-  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [projectSkills, setProjectSkills] = useState<ProjectSkill[]>([]);
   const [skillError, setSkillError] = useState("");
   useEffect(() => {
@@ -133,8 +140,6 @@ export default function App() {
     return () => { stopped = true; };
   }, []);
   const attachmentUploadRef = useRef<object | null>(null);
-  const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
-  const [pendingDocuments, setPendingDocuments] = useState<DocumentAttachment[]>([]);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const fileDragDepth = useRef(0);
@@ -215,9 +220,7 @@ export default function App() {
     setDraggingFiles(false);
     attachmentUploadRef.current = null;
     setUploadingAttachments(false);
-    setPendingImages([]); setPendingDocuments([]);
     setAttachmentError(""); setPreviewImage(null);
-    setSelectedSkill(null);
   }
   useLayoutEffect(() => {
     resetComposerAttachments();
@@ -226,9 +229,9 @@ export default function App() {
   const active = { ...activeRaw, messages:activeMessages };
   const activeUsage = useMemo(() => conversationUsage(active.messages), [active.messages]);
   const recentConversations = useMemo(() => [
-    ...conversations.filter((conversation) => (conversation.messages.length || conversation.messagesLoaded === false)).map((conversation) => ({ kind: "chat" as const, conversation })),
+    ...conversations.filter((conversation) => (conversation.messages.length || conversation.messagesLoaded === false || composerDrafts.hasDraft(conversation.id))).map((conversation) => ({ kind: "chat" as const, conversation })),
     ...focusConversations.map((conversation) => ({ kind: "focus" as const, conversation })),
-  ].sort((a, b) => b.conversation.updatedAt - a.conversation.updatedAt), [conversations, focusConversations]);
+  ].sort((a, b) => b.conversation.updatedAt - a.conversation.updatedAt), [conversations, focusConversations, composerDrafts.hasDraft]);
   const allTools = useMemo(() => active.messages.flatMap((message) => message.tools ?? []).reverse(), [active.messages]);
   const allArtifacts = useMemo(() => allTools.flatMap((tool) => tool.result?.artifacts ?? []), [allTools]);
 
@@ -298,10 +301,10 @@ export default function App() {
   }, [activeRaw.id, activeRaw.messagesLoaded, activeRaw.updatedAt, historyReload]);
 
   useEffect(() => {
-    if (!conversations.some((conversation) => conversation.id === activeId)) {
+    if (composerDrafts.ready && !conversations.some((conversation) => conversation.id === activeId)) {
       setActiveId(conversations[0].id);
     }
-  }, [activeId, conversations]);
+  }, [activeId, conversations, composerDrafts.ready]);
 
   const cacheSnapshotRef = useRef(conversations);
   cacheSnapshotRef.current = conversations;
@@ -375,16 +378,11 @@ export default function App() {
     setRightOpen(false);
     resetComposerAttachments();
     if (!active.messages.length && activeRaw.messagesLoaded !== false) {
-      setDraft("");
-      setNavOpen(false);
-      return;
+      if (!composerDrafts.hasDraft(active.id) && !uploadingAttachments) { setNavOpen(false); return; }
     }
     const conversation = createConversation();
     setConversations((current) => [conversation, ...current]);
     setActiveId(conversation.id);
-    setDraft("");
-    setPendingImages([]);
-    setPendingDocuments([]);
     setNavOpen(false);
   }
 
@@ -394,6 +392,7 @@ export default function App() {
     setDeleteError("");
     try {
       await deleteServerConversation(deleteTarget.id, deleteTarget.resourceId);
+      composerDrafts.remove(deleteTarget.id);
       historySyncRef.current += 1;
       setConversations(current => {
         const remaining = current.filter(conversation => conversation.id !== deleteTarget.id);
@@ -720,7 +719,7 @@ export default function App() {
   }
   async function send(prompt = draft, options: { preserveComposer?: boolean; displayText?: string; steer?:boolean } = {}) {
     const text = prompt.trim();
-    if ((!text && !pendingImages.length && !pendingDocuments.length) || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
+    if (!composerDrafts.ready || (!text && !pendingImages.length && !pendingDocuments.length) || attachmentUploadRef.current || activeRaw.messagesLoaded === false) return;
     if (!options.preserveComposer && /^\/ramdisk(?:\s|$)/i.test(text)) {
       if (ramdisk.busy) return;
       setDraft(''); setRightOpen(true);
@@ -873,7 +872,7 @@ export default function App() {
   }
 
   async function addAttachments(files: File[]) {
-    if (!files.length) return;
+    if (!files.length || !composerDrafts.ready) return;
     if (attachmentUploadRef.current) { setAttachmentError("附件正在上传，请稍候。"); return; }
     const remaining = MAX_ATTACHMENTS - pendingImages.length - pendingDocuments.length;
     if (remaining <= 0) { setAttachmentError("每轮最多 10 个附件，请删除不需要的附件。"); return; }
@@ -896,7 +895,6 @@ export default function App() {
         if (parsed.knowledge?.error) setAttachmentError("文档已添加，但自动入库失败：" + parsed.knowledge.error);
         return { document: { id: uid(), name: parsed.filename, mediaType: parsed.mediaType, contextRef: parsed.contextRef, markdown: parsed.markdown, charCount: parsed.charCount } satisfies DocumentAttachment };
       }));
-      if (attachmentUploadRef.current !== upload) return;
       setPendingImages(current => [...current, ...uploaded.flatMap(item => item.image ? [item.image] : [])]);
       setPendingDocuments(current => [...current, ...uploaded.flatMap(item => item.document ? [item.document] : [])]);
       if (accepted.length < files.length) setAttachmentError("部分文件未添加：每轮最多 10 个附件，并受格式与大小限制。");
@@ -969,9 +967,10 @@ export default function App() {
             {slashMatches.map((item, index) => <button type="button" role="option" id={`composer-slash-${index}`} aria-selected={index === selectedSlashIndex} className={index === selectedSlashIndex ? 'selected' : ''} key={item.command} onMouseDown={event => event.preventDefault()} onClick={() => completeSlashCommand(item.command)}><strong>{item.command}</strong><span>{item.description}</span></button>)}
           </div>
         </div>}
+        {composerDrafts.error && <div className="composer-attachment-error" role="status">{composerDrafts.error}</div>}
         {uploadingAttachments && <div className="composer-attachment-error">正在上传附件，请稍候…</div>}
         {attachmentError && !uploadingAttachments && <div className="composer-attachment-error">{attachmentError}</div>}
-        {!!pendingImages.length && <div className={`composer-images ${pendingImages.length > 2 ? "compact" : ""}`}>{pendingImages.map((image) => <div key={image.id}><button type="button" className="composer-image-preview" aria-label={`预览图片：${image.name}`} onClick={() => setPreviewImage(image)}><img src={image.dataUrl} alt={image.name} /></button><button type="button" className="composer-image-remove" aria-label={`移除图片：${image.name}`} onClick={() => setPendingImages((current) => current.filter((item) => item.id !== image.id))}><X size={12} /></button></div>)}</div>}
+        {!!pendingImages.length && <div className={`composer-images ${pendingImages.length > 2 ? "compact" : ""}`}>{pendingImages.map((image) => <div key={image.id}><button type="button" className="composer-image-preview" aria-label={`预览图片：${image.name}`} onClick={() => setPreviewImage(image)}><img src={attachmentSource(image)} alt={image.name} /></button><button type="button" className="composer-image-remove" aria-label={`移除图片：${image.name}`} onClick={() => setPendingImages((current) => current.filter((item) => item.id !== image.id))}><X size={12} /></button></div>)}</div>}
         {!!pendingDocuments.length && <div className="composer-files">{pendingDocuments.map((document) => <div className="composer-file" key={document.id}><FileText size={16} /><span title={document.name}>{document.name}</span><button type="button" aria-label={`移除文件：${document.name}`} onClick={() => setPendingDocuments((current) => current.filter((item) => item.id !== document.id))}><X size={13} /></button></div>)}</div>}
         <div className="composer-add-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setComposerMenuOpen(false); }}>
           <button type="button" className="composer-add" aria-label="添加内容或调用技能" title="添加内容或调用技能" aria-haspopup="menu" aria-expanded={composerMenuOpen} onClick={() => setComposerMenuOpen((value) => !value)}><Plus size={20} /></button>
@@ -991,10 +990,10 @@ export default function App() {
         </div>
         <input ref={fileInputRef} className="image-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.docx,.xlsx,.pptx,.txt,.md" multiple onChange={onImageInput} />
         {selectedSkill && <button type="button" className="selected-skill" onClick={() => setSelectedSkill(null)} title="移除当前技能"><span>{selectedSkill}</span><X size={13} /></button>}
-        <textarea ref={composerTextareaRef} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
+        <textarea ref={composerTextareaRef} disabled={!composerDrafts.ready} value={draft} aria-autocomplete="list" aria-controls={slashOpen ? 'composer-slash-list' : undefined} aria-activedescendant={slashOpen ? `composer-slash-${selectedSlashIndex}` : undefined} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} onCompositionStart={ime.onCompositionStart} onCompositionEnd={ime.onCompositionEnd} onKeyDown={onComposerKeyDown} placeholder="问问 SEUdaily，或粘贴图片" rows={1} />
         <EffortSelect effort={agentInfo.effort} busy={sending || queueState.active} onChange={effort=>setAgentInfo(current=>({...current,effort}))} />
         {(sending || queueState.active) && !draft.trim() && !pendingImages.length && !pendingDocuments.length ? <button type="button" className="send-button stop" disabled={stopping} onClick={() => void stopAnswer()} aria-label={stopping ? '正在停止' : '停止回答'} title="停止回答"><span className="stop-symbol" aria-hidden="true" /></button> :
-        <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
+        <button type="submit" className="send-button" disabled={!composerDrafts.ready || activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
       </div>
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
       {!!active.messages.length && <div className="composer-telemetry" aria-label="会话用量"><span title={agentInfo.model}>{modelDisplayName(agentInfo.model)}</span><SessionStatistics messages={active.messages} contextWindowTokens={agentInfo.contextWindowTokens} usage={activeUsage} /></div>}
