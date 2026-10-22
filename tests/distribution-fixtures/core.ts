@@ -75,7 +75,8 @@ if (mode === 'cli' || mode === 'mcp-child' || mode === 'browser') {
   (agentRuntime as any).config.tools = async () => ({});
   (agentRuntime as any).config.provider = {
     async *stream(messages: any[], _tools: any, signal: AbortSignal) {
-      if (messages.at(-1)?.content === 'cancel-fixture') {
+      // Trusted context can follow the user input; match the user turn itself.
+      if (messages.findLast(message => message.role === 'user')?.content === 'cancel-fixture') {
         notifyStarted();
         await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
       } else {
@@ -99,6 +100,7 @@ if (mode === 'cli' || mode === 'mcp-child' || mode === 'browser') {
       })));
       response.on('error', reject);
     });
+    req.setTimeout(10000, () => req.destroy(new Error(`Fixture HTTP request timed out: ${path}`)));
     req.on('error', reject); req.end(body ? JSON.stringify(body) : undefined);
   });
   const input = (thread: string, message: string) => ({ messages: message, memory: { thread, resource: 'fixture' }, requestContext: { seudailyRunToken: thread, seudailyInterface: 'cli' } });
@@ -110,7 +112,9 @@ if (mode === 'cli' || mode === 'mcp-child' || mode === 'browser') {
     const output = await response.text();
     assert.match(output, /HTTP 中文回答/); assert.match(output, /"type":"finish"/);
     const pending = request('/api/agents/seudaily-agent/stream', input('cancel-fixture', 'cancel-fixture'));
-    await started;
+    await Promise.race([started, pending.then(() => {
+      throw new Error('Cancellation fixture completed before its provider entered the cancellable request');
+    })]);
     const cancelPath = '/api/memory/threads/cancel-fixture/cancel?resourceId=fixture';
     assert.equal((await (await request(cancelPath, { runToken: 'wrong' })).json()).cancelled, false);
     assert.equal((await (await request(cancelPath, { runToken: 'cancel-fixture' })).json()).cancelled, true);

@@ -1,17 +1,23 @@
-import { test } from 'node:test';
+import { test,after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,writeFile,mkdir,symlink,rm,readFile } from 'node:fs/promises';
+import { mkdtemp,writeFile,symlink,rm,readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 const root=await mkdtemp(join(tmpdir(),'seudaily-workspace-'));
 await writeFile(join(root,'package.json'),'{}');await writeFile(join(root,'pyproject.toml'),'[project]\nname="fixture"\n');
 process.env.SEUDAILY_PROJECT_ROOT=root;
+const {agentStore}=await import('../src/runtime/storage.ts');
 const {getWorkspaceTools,workspaceTarget,closeWorkspace}=await import('../src/runtime/workspace.ts');
 const permissions=await import('../src/runtime/permission-state.ts');permissions.setFullAccessExtraEnabled(true);
 const tools=await getWorkspaceTools();
 const options={requestContext:new Map([['seudailyThreadId','fixture']])};
 const tool=name=>tools['mastra_workspace_'+name];
-process.on('exit',()=>closeWorkspace());
+after(async()=>{
+ closeWorkspace();
+ await agentStore.ready;
+ agentStore.close();
+ await rm(root,{recursive:true,force:true});
+});
 test('workspace rejects symlink escapes and stale writes, preserves replacement literals',async()=>{
  await writeFile(join(root,'example.txt'),'original');
  await assert.rejects(tool('write_file').execute({path:'example.txt',content:'unread'},options));
@@ -60,5 +66,4 @@ test('background command output and process tree cancellation are retained',asyn
  const output=await tool('get_process_output').execute({processId:launched.data.processId},options);assert.ok(output.data.output.includes('background-ok'));
  await tool('kill_process').execute({processId:launched.data.processId},options);
  const stopped=await tool('get_process_output').execute({processId:launched.data.processId},options);assert.notEqual(stopped.data.exitCode,null);
- closeWorkspace();await rm(root,{recursive:true,force:true});
 });
