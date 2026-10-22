@@ -39,6 +39,7 @@ export class AgentRuntime {
     }
     activeRunToken(threadId: string) { return this.active.get(threadId)?.runToken; }
     isActive(threadId: string) { return this.active.has(threadId); }
+    hasActiveRuns() { return this.active.size>0; }
     cancelTurn(threadId: string, runToken?: string) {
         const controller = this.active.get(threadId);
         if (!controller || runToken && controller.runToken !== runToken) return false;
@@ -136,7 +137,7 @@ export class AgentRuntime {
     }
     private answerMessage(run: RunState): import('./types.js').StoredMessage {
         const id = run.context.assistantMessageId ?? `${run.id}-assistant`;
-        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage, timing:stopTiming(run.timing), statistics:run.statistics } };
+        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage, timing:run.status==='running' ? run.timing : stopTiming(run.timing), statistics:run.statistics } };
     }
     private async persist(run: RunState) {
         const message = this.answerMessage(run);
@@ -274,6 +275,13 @@ export class AgentRuntime {
                 const streamOnce = async function* (runtime: AgentRuntime): AsyncGenerator<AgentEvent> {
                     const hydrated = runtime.config.hydrate ? await runtime.config.hydrate(context) : context;
                     let reasoningStarted = false, textPart: any, reasoningPart: any;
+                    let snapshotAt=-Infinity;
+                    const checkpoint=async()=>{
+                        const now=performance.now();
+                        if(now-snapshotAt<500)return;
+                        await runtime.config.store.saveTurn(run,runtime.answerMessage(run));
+                        snapshotAt=now;
+                    };
                     const requestStarted=performance.now();
                     const statistics=run.statistics ??= {};
                     statistics.modelSteps=(statistics.modelSteps ?? 0)+1;
@@ -286,6 +294,7 @@ export class AgentRuntime {
                                     run.parts.push(textPart);
                                 }
                                 textPart.text += item.text;
+                                await checkpoint();
                                 yield event('text-delta', { text: item.text });
                             }
                             else if (item.type === 'reasoning') {
@@ -298,6 +307,7 @@ export class AgentRuntime {
                                     run.parts.push(reasoningPart);
                                 }
                                 reasoningPart.text += item.text;
+                                await checkpoint();
                                 yield event('reasoning-delta', { text: item.text });
                             }
                             else if (item.type === 'complete') {

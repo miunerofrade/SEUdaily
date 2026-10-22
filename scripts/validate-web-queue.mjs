@@ -17,8 +17,8 @@ const {app}=await import(source+'/src/server/app.ts');
 const {agentRuntime}=await import(source+'/src/runtime/application.ts');
 const {agentStore}=await import(source+'/src/runtime/storage.ts');
 const {stopMessageQueue}=await import(source+'/src/server/message-queue.ts');
-let releaseTool;let toolStarted=false;
-agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable',data:{reason:'fixture upstream detail',attempt:2}})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
+let releaseTool;let toolStarted=false,toolExecutions=0;
+agentRuntime.config.tools=async()=>({wait:{id:'wait',description:'fixture',inputSchema:z.object({}),execute:async()=>{toolStarted=true;toolExecutions++;await new Promise(resolve=>{releaseTool=resolve;});return {status:'completed',summary:'等待操作完成'};}},fail:{id:'fail',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'failed',summary:'fixture service unavailable',data:{reason:'fixture upstream detail',attempt:2}})},recover:{id:'recover',description:'fixture',inputSchema:z.object({}),execute:async()=>({status:'completed',summary:'备用操作完成'})}});agentRuntime.config.instructions=async()=>'';
 agentRuntime.config.provider={async *stream(messages,_tools,signal){const text=messages.filter(m=>m.role==='user').at(-1).content;if(text==='hold'){yield {type:'text',text:'正在等待取消'};await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));}
  if(text==='steer hold' && !messages.some(m=>m.role==='tool')){yield {type:'reasoning',text:'先执行等待工具'};yield {type:'complete',message:{role:'assistant',content:null,tool_calls:[{id:'wait-call',type:'function',function:{name:'wait',arguments:'{}'}}]},finishReason:'tool_calls'};return;}
  if(text==='tool retry' && !messages.slice(messages.findLastIndex(m=>m.role==='user')+1).some(m=>m.role==='tool')){yield {type:'complete',message:{role:'assistant',content:null,tool_calls:['fail','recover'].map(name=>({id:name+'-call',type:'function',function:{name,arguments:'{}'}}))},finishReason:'tool_calls'};return;}
@@ -44,6 +44,13 @@ try{
  await page.getByRole('button',{name:'思考强度：高',exact:true}).waitFor();
  const input=page.getByPlaceholder('问问 SEUdaily，或粘贴图片');await input.fill('hold');await input.press('Enter');
  await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
+ await page.getByText('正在等待取消',{exact:true}).waitFor();
+ const liveToken=agentRuntime.activeRunToken((await agentStore.listConversations(1))[0].id);
+ await page.reload();await page.getByText('正在等待取消',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'停止回答',exact:true}).waitFor();
+ assert.equal(agentRuntime.hasActiveRuns(),true);
+ assert.equal(await page.locator('.message-stopped').count(),0);
+ assert.equal(agentRuntime.activeRunToken((await agentStore.listConversations(1))[0].id),liveToken);
  assert.equal(await page.getByRole('button',{name:'思考强度：高',exact:true}).isDisabled(),true);
  const recent=page.getByRole('button',{name:'最近',exact:true});
  await page.locator('#recent-conversations .conversation-row').first().waitFor();
@@ -90,12 +97,15 @@ try{
  await input.fill('steer hold');await input.press('Enter');
  await page.getByText('正在执行wait',{exact:true}).first().waitFor();
  assert.ok(toolStarted);
+ await page.reload();await page.getByText('正在执行wait',{exact:true}).first().waitFor();
+ assert.equal(toolExecutions,1);
  await input.fill('updated requirement');await input.press('Control+Enter');
  await page.getByText('待补充到当前任务',{exact:true}).waitFor();
  await page.locator('.tool-activity-item .elapsed-time').filter({hasText:/[1-9]\d* 秒/}).first().waitFor();
  assert.ok(releaseTool);releaseTool();
  await page.getByText('补充要求已采纳',{exact:true}).waitFor();
  await page.getByRole('button',{name:'发送消息',exact:true}).waitFor();
+ assert.equal(toolExecutions,1);
  const frozen=await page.locator('.thought-duration').last().innerText();
  await page.waitForTimeout(1100);assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
  const separator=page.getByRole('separator',{name:'调整导航栏宽度'});await separator.focus();await separator.press('Home');
@@ -153,7 +163,7 @@ try{
  await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
  await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({webQueue:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
+ console.log(JSON.stringify({webQueue:true,refreshDuringModel:true,refreshDuringTool:true,noToolReplay:true,arrowQueues:true,edit:true,delete:true,cancel:true,plainStop:true,toolInformation:true,neutralToolErrors:true,resume:true,steering:true,timing:true,history:true,resize:true,mobile:true,pageErrors:errors}));
 }finally{
  releaseTool?.();await browser?.close();const stopped=stopMessageQueue();await agentRuntime.shutdown();await stopped;await new Promise(resolve=>server.close(resolve));agentStore.close();await rm(root,{recursive:true,force:true});
 }

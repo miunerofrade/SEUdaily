@@ -104,8 +104,9 @@ export function installMessageQueue(app: Hono, normalize: (input: unknown) => Pr
     app.get(path, async (c) => {
         await agentStore.ready;
         const threadId = c.req.param('id'), resourceId = id.parse(c.req.query('resourceId'));
+        const thread=await agentStore.getThreadById({threadId,resourceId});
         const rows = await agentStore.client.execute({ sql: 'SELECT * FROM message_queue WHERE threadId=? AND resourceId=? ORDER BY sequence', args: [threadId, resourceId] });
-        return c.json({ active: agentRuntime.isActive(threadId), runToken: agentRuntime.activeRunToken(threadId), progress: progress.get(threadId), items: rows.rows.map(row => ({ id: row.id, state: row.state, error: row.error, ...JSON.parse(String(row.payload)) })) });
+        return c.json({ active: !!thread && agentRuntime.isActive(threadId), runToken: thread ? agentRuntime.activeRunToken(threadId) : undefined, revision:thread?.updatedAt,activeLeaf:thread?.metadata.activeLeaf, progress: thread ? progress.get(threadId) : undefined, items: rows.rows.map(row => ({ id: row.id, state: row.state, error: row.error, ...JSON.parse(String(row.payload)) })) });
     });
     app.post(path, async (c) => {
         const body = await c.req.json();

@@ -47,7 +47,10 @@ function loadConversations(): Conversation[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = stored ? (JSON.parse(stored) as Conversation[]) : [];
-    return Array.isArray(parsed) && parsed.length ? parsed : [createConversation()];
+    return Array.isArray(parsed) && parsed.length ? parsed.map(conversation=>({...conversation,
+      messagesLoaded:conversation.messages.some(message=>message.streaming) ? false : conversation.messagesLoaded,
+      messages:conversation.messages.map(message=>({...message,streaming:false})),
+    })) : [createConversation()];
   } catch {
     return [createConversation()];
   }
@@ -90,6 +93,15 @@ function updateTool(tools: ToolRun[] = [], next: ToolRun) {
 
 export default function App() {
   const ime = useImeComposition();
+  const pageDetachedRef = useRef(false);
+  useEffect(() => {
+    const detach=()=>{pageDetachedRef.current=true;};
+    const restore=()=>{pageDetachedRef.current=false;};
+    window.addEventListener('pagehide',detach);
+    window.addEventListener('beforeunload',detach);
+    window.addEventListener('pageshow',restore);
+    return ()=>{window.removeEventListener('pagehide',detach);window.removeEventListener('beforeunload',detach);window.removeEventListener('pageshow',restore);};
+  }, []);
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
   const [focusConversations, setFocusConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState(() => conversations[0].id);
@@ -236,6 +248,7 @@ export default function App() {
 
   const historySyncRef = useRef(0);
   const syncServerHistory = useCallback(async () => {
+    if(pageDetachedRef.current)return;
     const request = ++historySyncRef.current;
     const [remoteResult, focusResult] = await Promise.allSettled([loadServerConversations(), loadFocusConversations()]);
     if (request !== historySyncRef.current) return;
@@ -353,7 +366,7 @@ export default function App() {
   }
 
   function newChat() {
-    if (sending) abortRef.current?.abort();
+    if (sending) abortRef.current?.abort('view-detached');
     setView("chat");
     setRightOpen(false);
     resetComposerAttachments();
@@ -605,17 +618,23 @@ export default function App() {
       });
     } catch (error) {
       const aborted = controller.signal.aborted;
+      let stillRunning=false;
+      if(!pageDetachedRef.current && controller.signal.reason!=='user-stopped') {
+        try {
+          const response=await fetch(`/api/memory/threads/${encodeURIComponent(conversationId)}/run?resourceId=${encodeURIComponent(active.resourceId || RESOURCE_ID)}`,{signal:AbortSignal.timeout(3000)});
+          if(response.ok)stillRunning=(await response.json()).active===true;
+        } catch { /* Preserve the connection error if task status cannot be confirmed. */ }
+      }
       mutateMessage(conversationId, assistantId, (message) => ({
         ...message,
         streaming: false,
         reasoningActive: false,
         timing:stopTiming(message.timing),
-        error: aborted ? "已停止本次回答。" : error instanceof Error ? error.message : "请求失败，请稍后重试。",
-        tools: message.tools?.map((tool) => tool.state === "running" ? { ...tool, finishedAt:Date.now(), state: "failed" as const } : tool),
+        error: aborted && controller.signal.reason==='user-stopped' ? "已停止本次回答。" : stillRunning || aborted && controller.signal.reason==='view-detached' ? undefined : error instanceof Error ? error.message : "连接中断，请重新打开会话查看任务状态。",
+        tools: message.tools,
       }));
     } finally {
-      if (abortRef.current === controller) { abortRef.current = null; activeStreamRef.current = null; }
-      setSending(false);
+      if (abortRef.current === controller) { abortRef.current = null; activeStreamRef.current = null; setSending(false); }
     }
     return assistantText;
   }
@@ -651,14 +670,20 @@ export default function App() {
     return result;
   }
   useEffect(() => {
-    let disposed = false, polling = false;
+    let disposed = false, polling = false,lastRevision:string|undefined;
     setQueueState({active:false,items:[]});
     const poll = async () => {
-      if (polling) return; polling = true;
+      if (polling || pageDetachedRef.current) return; polling = true;
       try {
         const state = await queueRequest(queuePath);
         if (disposed) return;
         const previous = queueStateRef.current;
+        if(!sending && (state.active || previous.active) && (state.revision!==lastRevision || state.active!==previous.active)) {
+          const loaded=await loadConversationMessages({...active,activeLeaf:state.activeLeaf ?? active.activeLeaf});
+          if(disposed)return;
+          if(loaded)setConversations(current=>current.map(item=>item.id===loaded.id ? {...loaded,title:item.title,updatedAt:Date.parse(state.revision) || loaded.updatedAt} : item));
+          lastRevision=state.revision;
+        }
         if (!sending && ((previous.active && !state.active) || previous.items.some(item => !state.items.some((next:any) => next.id === item.id) || item.state === 'running' && state.items.some((next:any) => next.id === item.id && next.state !== 'running')))) {
           void syncServerHistory(); setHistoryReload(value => value + 1);
         }
@@ -684,7 +709,7 @@ export default function App() {
       const target = activeStreamRef.current?.threadId === active.id ? activeStreamRef.current : {threadId:active.id,resourceId:active.resourceId || RESOURCE_ID,runToken:queueState.runToken};
       const result = await queueRequest(`/api/memory/threads/${encodeURIComponent(target.threadId)}/cancel?resourceId=${encodeURIComponent(target.resourceId)}`, 'POST', {runToken:target.runToken});
       if (result.active) throw new Error('任务仍在停止，请稍候；后端尚未确认结束');
-      if (activeStreamRef.current?.threadId === active.id) abortRef.current?.abort();
+      if (activeStreamRef.current?.threadId === active.id) abortRef.current?.abort('user-stopped');
       setHistoryReload(value => value + 1);
     } catch(error) { setConversationError((error as Error).message); }
     finally { setStopping(false); }
@@ -1031,7 +1056,7 @@ export default function App() {
           ) : (
             <div className="message-list">
               {conversationError && <div className="page-state error">{conversationError}</div>}
-              {active.messages.map((message) => <div key={message.id}><Message message={message} onSources={openSources} sourcesOpen={sourceMessage?.id === message.id} versionControls={versionPicker(message)} disabled={sending} canRegenerate={true} onBranch={message=>void branchConversation(message)} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} /></div>)}
+              {active.messages.map((message) => <div key={message.id}><Message message={message} onSources={openSources} sourcesOpen={sourceMessage?.id === message.id} versionControls={versionPicker(message)} disabled={sending || queueState.active} canRegenerate={true} onBranch={message=>void branchConversation(message)} onEdit={editPrompt} onRegenerate={regenerate} onPreviewImage={setPreviewImage} onApproval={(tool, approved) => void respondToApproval(message.id, tool, approved)} onActionRequest={handleAgentActionRequest} onAuthRequest={handleAgentAuthRequest} /></div>)}
               <div ref={messageEndRef} />
             </div>
           )}

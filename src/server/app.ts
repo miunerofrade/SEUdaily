@@ -7,7 +7,7 @@ import { Hono } from 'hono';
 import { getReasoningEffort } from '../agent/provider.js';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
-import { streamSSE } from 'hono/streaming';
+import {agentEventStream} from './agent-stream.js';
 import { z } from 'zod';
 import { agentRuntime, contextWindowTokens } from '../runtime/application.js';
 import { agentStore } from '../runtime/storage.js';
@@ -39,7 +39,11 @@ app.get('/app/skills', async c => c.json({ skills: await skillCatalog.list() }))
 for (const route of appRoutes)
     app.on(route.method, route.path, route.handler);
 app.get('/api/memory/threads', async (c) => c.json({ threads: await agentStore.listThreads(c.req.query('resourceId') ?? '', Math.min(100, Math.max(1, Number(c.req.query('perPage')) || 100)), Math.max(0, Number(c.req.query('page')) || 0)) }));
-app.get('/api/memory/threads/:id/messages', async (c) => c.json(await agentStore.listMessages({ threadId: c.req.param('id'), resourceId: c.req.query('resourceId'), perPage: Math.min(1000, Math.max(1, Number(c.req.query('perPage')) || 100)), page: Math.max(0, Number(c.req.query('page')) || 0), selectedPath: c.req.query('selectedPath') === 'true' })));
+app.get('/api/memory/threads/:id/messages', async (c) => {
+    const result=await agentStore.listMessages({ threadId: c.req.param('id'), resourceId: c.req.query('resourceId'), perPage: Math.min(1000, Math.max(1, Number(c.req.query('perPage')) || 100)), page: Math.max(0, Number(c.req.query('page')) || 0), selectedPath: c.req.query('selectedPath') === 'true' });
+    const token=agentRuntime.activeRunToken(c.req.param('id'));
+    return c.json({...result,...(token && result.messages.some(message=>message.content.runToken===token) ? {activeRunToken:token} : {})});
+});
 app.get('/api/memory/threads/:id/run', async c => {
     const resourceId = identifier.parse(c.req.query('resourceId'));
     const thread = await agentStore.getThreadById({ threadId: c.req.param('id'), resourceId });
@@ -114,52 +118,14 @@ app.post('/api/agents/seudaily-agent/stream', async (c) => {
     for (const name of context.skills ?? []) if (!catalog.some(skill => skill.name === name)) return c.json({ error: `Skill 不存在：${name}` }, 400);
     const text = typeof body.messages === 'string' ? body.messages : '';
     context.namespaces = [...new Set([...context.namespaces ?? [], ...inferToolNamespaces(text), ...catalog.filter(skill => context.skills?.includes(skill.name)).flatMap(skill => skill.namespaces)])];
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    c.req.raw.signal.addEventListener('abort', abort, { once: true });
-    if (c.req.raw.signal.aborted)
-        controller.abort();
-    let events: AsyncIterable<any>;
-    try {
-        const approval = Array.isArray(body.messages) && body.messages.length === 1 && body.messages[0].role === 'tool' ? body.messages[0].content?.[0] : undefined;
-        if (approval) {
-            const parsed = z.object({ type: z.literal('tool-approval-response'), approvalId: identifier, approved: z.boolean(), reason: z.string().optional() }).parse(approval);
-            events = await agentRuntime.resumeApproval(parsed, context, controller.signal);
-        }
-        else
-            events = await agentRuntime.runTurn(context.regenerateFrom ? [] : await normalizeInput(body.messages), context, controller.signal);
-    }
-    catch (error) {
-        c.req.raw.signal.removeEventListener('abort', abort);
-        throw error;
-    }
-    return streamSSE(c, async (stream) => {
-        stream.onAbort(abort);
-        const iterator = events[Symbol.asyncIterator]();
-        const keepAlive = setInterval(() => { if (!stream.aborted)
-            void stream.write(': keep-alive\n\n').catch(abort); }, 15000);
-        try {
-            while (true) {
-                const next = await iterator.next();
-                if (next.done)
-                    break;
-                if (stream.aborted) {
-                    abort();
-                    break;
-                }
-                await stream.writeSSE({ data: JSON.stringify(next.value) });
-            }
-            if (!stream.aborted)
-                await stream.writeSSE({ data: '[DONE]' });
-        }
-        finally {
-            clearInterval(keepAlive);
-            abort();
-            await iterator.return?.();
-            await agentRuntime.discardUnstartedTurn(context);
-            c.req.raw.signal.removeEventListener('abort', abort);
-        }
-    });
+    const approval = Array.isArray(body.messages) && body.messages.length === 1 && body.messages[0].role === 'tool' ? body.messages[0].content?.[0] : undefined;
+    const events = approval
+        ? await agentRuntime.resumeApproval(z.object({ type: z.literal('tool-approval-response'), approvalId: identifier, approved: z.boolean(), reason: z.string().optional() }).parse(approval), context)
+        : await agentRuntime.runTurn(context.regenerateFrom ? [] : await normalizeInput(body.messages), context);
+    c.header('Content-Type','text/event-stream');
+    c.header('Cache-Control','no-cache');
+    c.header('Connection','keep-alive');
+    return c.newResponse(agentEventStream(events,c.req.raw.signal));
 });
 
 installMessageQueue(app, normalizeInput);

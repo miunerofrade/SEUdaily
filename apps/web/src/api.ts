@@ -208,7 +208,7 @@ type StoredMessage = {
   };
 };
 
-function storedTools(parts: Array<Record<string, unknown>> = []): ToolRun[] {
+function storedTools(parts: Array<Record<string, unknown>> = [],active=false): ToolRun[] {
   return parts.flatMap((part) => {
     if (part.type !== "tool-invocation" || !part.toolInvocation || typeof part.toolInvocation !== "object") return [];
     const invocation = part.toolInvocation as Record<string, unknown>;
@@ -217,7 +217,7 @@ function storedTools(parts: Array<Record<string, unknown>> = []): ToolRun[] {
       id: String(invocation.toolCallId ?? crypto.randomUUID()),
       name: String(invocation.toolName ?? "工具调用"),
       approvalId: typeof invocation.approvalId === "string" ? invocation.approvalId : undefined,
-      state: invocation.state !== "result" && typeof invocation.approvalId === "string" ? "approval-requested" : invocation.state === "result" ? (result?.status === "failed" ? "failed" : "completed") : "completed",
+      state: active && invocation.state==='running' ? 'running' : invocation.state !== "result" && typeof invocation.approvalId === "string" ? "approval-requested" : invocation.state === "result" ? (result?.status === "failed" ? "failed" : "completed") : "completed",
       args: invocation.args as Record<string, unknown> | undefined,
       result,
       startedAt: typeof invocation.startedAt === 'number' ? invocation.startedAt : undefined,
@@ -351,11 +351,13 @@ async function fetchHistoryPage(url: string): Promise<Response> {
 
 async function fetchThreadMessages(thread: StoredThread): Promise<Conversation | null> {
   const records: StoredMessage[] = [];
+  let activeRunToken:string|undefined;
   for (let page = 0; ; page++) {
     const query = new URLSearchParams({ resourceId: thread.resourceId, perPage: "1000", page: String(page) });
     const response = await fetchHistoryPage(`/api/memory/threads/${encodeURIComponent(thread.id)}/messages?${query}`);
     if (!response.ok) throw new Error(`加载会话历史失败（${response.status}）`);
-    const data = await response.json() as { messages?: StoredMessage[]; hasMore?: boolean };
+    const data = await response.json() as { messages?: StoredMessage[]; hasMore?: boolean;activeRunToken?:string };
+    if(data.activeRunToken)activeRunToken=data.activeRunToken;
     if (!Array.isArray(data.messages)) throw new Error("无效会话历史响应");
     records.unshift(...data.messages);
     if (!data.hasMore) break;
@@ -383,10 +385,11 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       attachments,
       documents,
       brokerRunToken: item.content?.runToken,
+      streaming:item.role==='assistant' && Boolean(activeRunToken && item.content?.runToken===activeRunToken),
       usage: normalizedUsage(item.content?.usage),
       timing: item.content?.timing,
       statistics: item.content?.statistics ?? (item.content?.modelMessages ? {modelSteps:item.content.modelMessages.filter(message=>message.role==='assistant').length} : undefined),
-      tools: item.role === "assistant" ? storedTools(parts) : undefined,
+      tools: item.role === "assistant" ? storedTools(parts,item.content?.runToken===activeRunToken) : undefined,
       process: item.role === "assistant" ? storedProcess(parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),
       error: item.role === "assistant" ? storedAssistantError(parts) || undefined : undefined,
