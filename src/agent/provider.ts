@@ -9,6 +9,7 @@ export type ProviderEvent = {
     message: ModelMessage;
     finishReason: string;
     usage?: Record<string, number>;
+    metrics?: {ttftMs?:number;generationMs?:number;generatedTokens?:number};
 };
 export interface ModelProvider {
     stream(messages: ModelMessage[], tools: any[], signal?: AbortSignal): AsyncIterable<ProviderEvent>;
@@ -85,12 +86,14 @@ export class DeepSeekProvider implements ModelProvider {
         return response;
     }
     async *stream(messages: ModelMessage[], tools: any[], signal?: AbortSignal): AsyncGenerator<ProviderEvent> {
+        const started=performance.now();
         const response = await this.request(messages, tools, true, signal);
         if (!response.body)
             throw new Error('模型未返回流式响应');
         let text = '', reasoning = '', finishReason = '';
         let usage: Record<string, number> | undefined;
         const calls = new Map<number, ToolCall>();
+        let firstToken:number|undefined,lastToken:number|undefined;
         for await (const chunk of parseSse(response.body)) {
             if (chunk.error)
                 throw new Error('模型流返回错误');
@@ -100,6 +103,11 @@ export class DeepSeekProvider implements ModelProvider {
             if (!choice)
                 continue;
             const delta = choice.delta ?? {};
+            if(delta.content || delta.reasoning_content || delta.tool_calls?.some((part:any)=>part.function?.name || part.function?.arguments)) {
+                const received=performance.now();
+                firstToken ??= received;
+                lastToken=received;
+            }
             if (delta.content) {
                 text += delta.content;
                 yield { type: 'text', text: delta.content };
@@ -128,7 +136,9 @@ export class DeepSeekProvider implements ModelProvider {
         const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
         if (toolCalls.some(call => !call.id || !call.function.name))
             throw new Error('模型返回了不完整的工具调用');
-        yield { type: 'complete', message: { role: 'assistant', content: text || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finishReason, usage };
+        yield { type: 'complete', message: { role: 'assistant', content: text || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, finishReason, usage,
+            metrics:{...(firstToken!==undefined ? {ttftMs:Math.max(0,firstToken-started)} : {}),
+                ...(firstToken!==undefined && lastToken!==undefined && lastToken>firstToken && usage?.completion_tokens!==undefined ? {generationMs:lastToken-firstToken,generatedTokens:Math.max(0,usage.completion_tokens-1)} : {})} };
     }
     async summarize(messages: ModelMessage[], signal?: AbortSignal): Promise<string> {
         const response = await this.request(messages, [], false, signal);

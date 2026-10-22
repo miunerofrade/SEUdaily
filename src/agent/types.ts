@@ -1,4 +1,5 @@
 import type { RunTiming } from '../shared/timing.js';
+import type { RunStatistics } from '../shared/session-statistics.js';
 
 export type ContentPart = {
     type: string;
@@ -26,9 +27,10 @@ export type AgentEvent = (
     | { type: 'tool-approval-request'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; approvalId: string } }
     | { type: 'tool-result'; payload: { toolCallId: string; toolName: string; args?: Record<string, unknown>; result: any; startedAt?: number; finishedAt?: number } }
     | { type: 'finish'; payload: { usage?: Record<string, number> } }
+    | { type: 'statistics-update'; payload: Record<string, never> }
     | { type: 'input-added'; payload: { id: string; text: string } }
     | { type: 'error'; payload: { error: { message: string } } }
-) & { timestamp?: number; timing?: RunTiming };
+) & { timestamp?: number; timing?: RunTiming; statistics?:RunStatistics };
 export type TurnContext = {
     threadId: string;
     resourceId: string;
@@ -58,6 +60,7 @@ export type StoredMessage = {
         runToken?: string;
         usage?: Record<string, number>;
         timing?: RunTiming;
+        statistics?:RunStatistics;
     };
     sequence?: number;
 };
@@ -88,4 +91,5 @@ export type RunState = {
     inputMessageIds?: string[];
     usage?: Record<string, number>;
     timing?: RunTiming;
+    statistics?:RunStatistics;
 };

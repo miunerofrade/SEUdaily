@@ -1,4 +1,5 @@
-import {UsagePopover} from './chat/usage-popover';
+import {SessionStatistics} from './chat/session-statistics';
+import {modelDisplayName} from '../../../src/shared/session-statistics';
 import {EffortSelect} from './effort-select';
 import { Message } from "./chat/message";
 import {useSidebarResize} from './sidebar-resize';
@@ -95,7 +96,7 @@ export default function App() {
   const [selectedFocusId, setSelectedFocusId] = useState("");
   const [view, setView] = useState<AppView>("chat");
   const [draft, setDraft] = useState("");
-  const [agentInfo, setAgentInfo] = useState({ model: "—", effort: "—" });
+  const [agentInfo, setAgentInfo] = useState<{model:string;effort:string;contextWindowTokens?:number}>({ model: "—", effort: "—" });
   useEffect(() => {
     if (view !== "chat") return;
     const controller = new AbortController();
@@ -106,6 +107,7 @@ export default function App() {
         if (!controller.signal.aborted) setAgentInfo({
           model: typeof info.model === "string" ? info.model : "—",
           effort: typeof info.effort === "string" ? info.effort : "—",
+          contextWindowTokens:typeof info.contextWindowTokens==='number' ? info.contextWindowTokens : undefined,
         });
       }).catch(() => undefined);
     return () => controller.abort();
@@ -390,6 +392,7 @@ export default function App() {
 
   function handleStreamEvent(conversationId: string, messageId: string, event: StreamEvent) {
     const payload = event.payload ?? {};
+    if (event.statistics) mutateMessage(conversationId,messageId,message=>({...message,statistics:event.statistics}));
     if (event.timing) mutateMessage(conversationId,messageId,message=>({...message,timing:event.timing}));
     if (event.type==='input-added') mutateMessage(conversationId,messageId,message=>({...message,process:[...(message.process ?? []),{id:String(payload.id),type:'user-input',text:String(payload.text)}]}));
     if (event.type === "finish") {
@@ -936,7 +939,7 @@ export default function App() {
         <button type="submit" className="send-button" disabled={activeRaw.messagesLoaded === false || uploadingAttachments || (!draft.trim() && !pendingImages.length && !pendingDocuments.length)} aria-label={sending || queueState.active || queueState.items.length ? '加入队列' : '发送消息'} title={sending || queueState.active || queueState.items.length ? '加入队列 · Enter（Ctrl+Enter 补充当前任务）' : '发送消息 · Enter'}><ArrowUp size={20} /></button>}
       </div>
       {slashCommandHint(draft) && <div className="slash-command-hint" role="status">{slashCommandHint(draft)}</div>}
-      {!!active.messages.length && <div className="composer-telemetry" aria-label="会话用量"><span>{agentInfo.model}</span><UsagePopover usage={activeUsage} cumulative /></div>}
+      {!!active.messages.length && <div className="composer-telemetry" aria-label="会话用量"><span title={agentInfo.model}>{modelDisplayName(agentInfo.model)}</span><SessionStatistics messages={active.messages} contextWindowTokens={agentInfo.contextWindowTokens} usage={activeUsage} /></div>}
       <div className="composer-hint"><span>{sending || queueState.active ? "↑ / Enter 加入队列 · Ctrl+Enter 补充当前任务" : "Enter 发送"} · Shift + Enter 换行</span><span>AI 可能出错，请核对重要信息</span></div>
     </form>
   );

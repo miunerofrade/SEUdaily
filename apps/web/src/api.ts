@@ -203,6 +203,8 @@ type StoredMessage = {
     runToken?: string;
     usage?: Record<string, number>;
     timing?: ChatMessage['timing'];
+    statistics?:ChatMessage['statistics'];
+    modelMessages?:{role:string}[];
   };
 };
 
@@ -383,6 +385,7 @@ async function fetchThreadMessages(thread: StoredThread): Promise<Conversation |
       brokerRunToken: item.content?.runToken,
       usage: normalizedUsage(item.content?.usage),
       timing: item.content?.timing,
+      statistics: item.content?.statistics ?? (item.content?.modelMessages ? {modelSteps:item.content.modelMessages.filter(message=>message.role==='assistant').length} : undefined),
       tools: item.role === "assistant" ? storedTools(parts) : undefined,
       process: item.role === "assistant" ? storedProcess(parts) : undefined,
       reasoningDone: item.role === "assistant" && Boolean(parts.some((part) => part.type === "reasoning")),

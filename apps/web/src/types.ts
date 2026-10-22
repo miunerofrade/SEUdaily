@@ -68,6 +68,7 @@ export type ChatMessage = {
   streaming?: boolean;
   brokerRunToken?: string;
   usage?: Record<string, number>;
+  statistics?:import('../../../src/shared/session-statistics').RunStatistics;
   timing?: import('../../../src/shared/timing').RunTiming;
   error?: string;
 };
@@ -104,6 +105,7 @@ export type Conversation = {
 };
 
 export type StreamEvent = {
+  statistics?:import('../../../src/shared/session-statistics').RunStatistics;
   timestamp?: number;
   timing?: import('../../../src/shared/timing').RunTiming;
   type: string;

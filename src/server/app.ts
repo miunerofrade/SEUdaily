@@ -9,7 +9,7 @@ import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { agentRuntime } from '../runtime/application.js';
+import { agentRuntime, contextWindowTokens } from '../runtime/application.js';
 import { agentStore } from '../runtime/storage.js';
 import { appRoutes } from '../runtime/app-routes.js';
 import { guardLocalRequests, localOrigins } from '../runtime/local-request-guard.js';
@@ -31,7 +31,7 @@ installWeChatRoutes(app);
 installKnowledgeRoutes(app);
 app.get('/api/agents', async (c) => { await agentStore.ready; return c.json({ 'seudaily-agent': { id: 'seudaily-agent', name: 'SEUdaily' } }); });
 app.get('/app/health', async (c) => { await agentStore.ready; await agentStore.client.execute('SELECT 1'); return c.json({ status: 'ready' }); });
-app.get('/app/agent-info', c => c.json({ model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash', effort: getReasoningEffort() }));
+app.get('/app/agent-info', c => c.json({ model: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-flash', effort: getReasoningEffort(), contextWindowTokens }));
 app.get('/app/conversations', async c => c.json({threads:await agentStore.listConversations(
     Math.min(100,Math.max(1,Number(c.req.query('perPage')) || 100)),
     Math.max(0,Number(c.req.query('page')) || 0))}));

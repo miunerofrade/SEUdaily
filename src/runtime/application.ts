@@ -12,12 +12,13 @@ import { resolveFocusPermission } from './focus-permission.js';
 import { envValue } from './runtime-paths.js';
 import { listSkillsTool, readSkillTool } from './skills.js';
 export function closeApplicationWorkspace() { closeBrokerWorkspace(); }
+export const contextWindowTokens=Number(envValue('SEUDAILY_CONTEXT_WINDOW_TOKENS')) || 512000;
 export const agentRuntime = new AgentRuntime({
     store: agentStore, provider: new DeepSeekProvider(), instructions: agentInstructions, initialContext: turnInstructions, hydrate: hydrateImages, resolveDocuments: resolveDocumentContexts,
     onCompleted: run => {
         return ensureConversationTitle({threadId:run.context.threadId,resourceId:run.context.resourceId});
     },
-    memory: { windowTokens: Number(envValue('SEUDAILY_CONTEXT_WINDOW_TOKENS')) || 512000, ratio: Number(envValue('SEUDAILY_OBSERVATION_COMPRESSION_RATIO')) || .8, lastMessages: Number(envValue('SEUDAILY_MEMORY_LAST_MESSAGES')) || 200 },
+    memory: { windowTokens: contextWindowTokens, ratio: Number(envValue('SEUDAILY_OBSERVATION_COMPRESSION_RATIO')) || .8, lastMessages: Number(envValue('SEUDAILY_MEMORY_LAST_MESSAGES')) || 200 },
     tools: async (context) => {
         context.focus = await resolveFocusPermission(context);
         return { getCurrentDateTool, readTaskResultTool, listSkillsTool, readSkillTool, searchCapabilitiesTool, invokeCapabilityTool };

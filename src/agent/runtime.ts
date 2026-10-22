@@ -136,7 +136,7 @@ export class AgentRuntime {
     }
     private answerMessage(run: RunState): import('./types.js').StoredMessage {
         const id = run.context.assistantMessageId ?? `${run.id}-assistant`;
-        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage, timing:stopTiming(run.timing) } };
+        return { id, threadId: run.context.threadId, resourceId: run.context.resourceId, role: 'assistant', createdAt: run.startedAt, content: { parentId: run.context.parentMessageId ?? null, parts: run.parts, modelMessages: run.messages, runToken: run.context.runToken, usage: run.usage, timing:stopTiming(run.timing), statistics:run.statistics } };
     }
     private async persist(run: RunState) {
         const message = this.answerMessage(run);
@@ -149,7 +149,8 @@ export class AgentRuntime {
     }): AsyncGenerator<AgentEvent> {
         this.unstarted.delete(run.context.threadId);
         let inputChanged=false;
-        const event = (type: string, payload: Record<string, any> = {}): AgentEvent => ({ type, payload, timestamp:Date.now(), timing:run.timing ? {...run.timing} : undefined }) as AgentEvent;
+        const event = (type: string, payload: Record<string, any> = {}): AgentEvent => ({ type, payload, timestamp:Date.now(), timing:run.timing ? {...run.timing} : undefined,
+            ...(['statistics-update','finish','error','tool-approval-request'].includes(type) && run.statistics ? {statistics:{...run.statistics}} : {}) }) as AgentEvent;
         const takeInput = async () => {
             const before = run.parts.length;
             await this.config.store.consumeInput(run,this.answerMessage(run));
@@ -273,38 +274,55 @@ export class AgentRuntime {
                 const streamOnce = async function* (runtime: AgentRuntime): AsyncGenerator<AgentEvent> {
                     const hydrated = runtime.config.hydrate ? await runtime.config.hydrate(context) : context;
                     let reasoningStarted = false, textPart: any, reasoningPart: any;
-                    for await (const item of runtime.config.provider.stream(hydrated, definitions, signal)) {
-                        run.timing=startTiming(run.timing);
-                        if (item.type === 'text') {
-                            if (!textPart) {
-                                textPart = { type: 'text', text: '' };
-                                run.parts.push(textPart);
+                    const requestStarted=performance.now();
+                    const statistics=run.statistics ??= {};
+                    statistics.modelSteps=(statistics.modelSteps ?? 0)+1;
+                    try {
+                        for await (const item of runtime.config.provider.stream(hydrated, definitions, signal)) {
+                            run.timing=startTiming(run.timing);
+                            if (item.type === 'text') {
+                                if (!textPart) {
+                                    textPart = { type: 'text', text: '' };
+                                    run.parts.push(textPart);
+                                }
+                                textPart.text += item.text;
+                                yield event('text-delta', { text: item.text });
                             }
-                            textPart.text += item.text;
-                            yield event('text-delta', { text: item.text });
+                            else if (item.type === 'reasoning') {
+                                if (!reasoningStarted) {
+                                    reasoningStarted = true;
+                                    yield event('reasoning-start');
+                                }
+                                if (!reasoningPart) {
+                                    reasoningPart = { type: 'reasoning', text: '' };
+                                    run.parts.push(reasoningPart);
+                                }
+                                reasoningPart.text += item.text;
+                                yield event('reasoning-delta', { text: item.text });
+                            }
+                            else if (item.type === 'complete') {
+                                message = item.message;
+                                if (item.usage) {
+                                    if(Number.isFinite(item.usage.prompt_tokens)&&item.usage.prompt_tokens>=0)statistics.lastPromptTokens=item.usage.prompt_tokens;
+                                    run.usage ??= {};
+                                    for (const [name, value] of Object.entries(item.usage))
+                                        if (typeof value === 'number' && Number.isFinite(value)) run.usage[name] = (run.usage[name] ?? 0) + value;
+                                }
+                                if(item.metrics?.ttftMs!==undefined) {
+                                    statistics.ttftTotalMs=(statistics.ttftTotalMs ?? 0)+item.metrics.ttftMs;
+                                    statistics.ttftSamples=(statistics.ttftSamples ?? 0)+1;
+                                }
+                                if(item.metrics?.generationMs!==undefined && item.metrics.generatedTokens!==undefined) {
+                                    statistics.generationMs=(statistics.generationMs ?? 0)+item.metrics.generationMs;
+                                    statistics.generatedTokens=(statistics.generatedTokens ?? 0)+item.metrics.generatedTokens;
+                                }
+                                completed = true;
+                            }
                         }
-                        else if (item.type === 'reasoning') {
-                            if (!reasoningStarted) {
-                                reasoningStarted = true;
-                                yield event('reasoning-start');
-                            }
-                            if (!reasoningPart) {
-                                reasoningPart = { type: 'reasoning', text: '' };
-                                run.parts.push(reasoningPart);
-                            }
-                            reasoningPart.text += item.text;
-                            yield event('reasoning-delta', { text: item.text });
-                        }
-                        else if (item.type === 'complete') {
-                            message = item.message;
-                            if (item.usage) {
-                                run.usage ??= {};
-                                for (const [name, value] of Object.entries(item.usage))
-                                    if (typeof value === 'number' && Number.isFinite(value)) run.usage[name] = (run.usage[name] ?? 0) + value;
-                            }
-                            completed = true;
-                        }
+                    } finally {
+                        statistics.modelMs=(statistics.modelMs ?? 0)+Math.max(0,performance.now()-requestStarted);
                     }
+                    yield event('statistics-update');
                     if (reasoningStarted)
                         yield event('reasoning-end');
                 };
