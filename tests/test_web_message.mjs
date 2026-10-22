@@ -55,3 +55,8 @@ test('tool results start collapsed while keeping status and timing together',()=
  assert.match(html,/class="tool-activity-heading"[^>]*aria-expanded="false"[^>]*><strong>已找到可用能力<\/strong><span class="elapsed-time">2 秒<\/span>/);
  assert.doesNotMatch(html,/tool-result-feedback|search-knowledge|read-web-page|secret-ticket/);
 });
+
+test('each recorded reply has its own compact usage button, with details initially hidden',()=>{
+ const html=render(Message,{message:{id:'usage',role:'assistant',createdAt:Date.now(),content:'回答',usage:{prompt_tokens:1000,completion_tokens:100,prompt_cache_hit_tokens:750}}});
+ assert.match(html,/aria-label="本轮用量" aria-expanded="false"/);assert.match(html,/用量 1.1k tok/);assert.doesNotMatch(html,/class="usage-panel"/);
+});

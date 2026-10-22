@@ -208,7 +208,7 @@ button { color: inherit; }
 .copy-button.icon-only { width: 28px; min-width: 28px; padding: 0; justify-content: center; }
 .code-toolbar .copy-button { color: #656d76; }
 .code-toolbar .copy-button:hover { background: rgba(0,0,0,.06); color: #111; }
-.message-meta { min-height: 30px; display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.message-meta { min-height: 30px; display: flex; flex-wrap:wrap; align-items: center; gap: 8px; margin-top: 7px; }
 .message-meta time, .message-meta .copy-button, .message-meta .message-action { opacity: .35; transition: opacity .15s; }
 .assistant-message:hover .message-meta time, .assistant-message:hover .message-meta .copy-button, .assistant-message:hover .message-meta .message-action, .message-meta button:focus-visible { opacity: 1; }
 .message-action { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: #777; cursor: pointer; }
@@ -613,3 +613,16 @@ a.source-entry:hover { background:#f5f5f5; }
 .effort-menu button { width:100%; display:flex; align-items:center; justify-content:space-between; padding:9px 10px; border:0; border-radius:8px; background:transparent; font-size:14px; cursor:pointer; }
 .effort-menu button:hover, .effort-menu button:focus-visible { background:#f3f3f3; }
 .effort-menu p { margin:5px; font-size:12px; color:#a33; }
+
+.usage-popover { display:inline-flex; min-width:0; }
+.usage-trigger { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:0; border-radius:7px; background:#f3f4f5; color:#858a92; font:inherit; font-size:12px; line-height:20px; white-space:nowrap; cursor:pointer; }
+.usage-trigger:hover, .usage-trigger[aria-expanded="true"] { background:#e9eaec; color:#555b63; }
+.usage-trigger svg { flex-shrink:0; }
+.usage-panel { position:fixed; z-index:80; overflow:auto; padding:16px; border:1px solid #e9eaec; border-radius:16px; background:#fafafb; box-shadow:0 6px 28px #00000012; color:#7c828c; font-size:13px; line-height:1.6; font-variant-numeric:tabular-nums; }
+.usage-panel header { display:flex; align-items:center; gap:8px; padding-bottom:12px; border-bottom:1px solid #e0e2e5; color:#202329; }
+.usage-panel header strong { font-weight:550; }
+.usage-panel header b { margin-left:auto; font-weight:500; }
+.usage-panel header .icon-button { width:22px; height:22px; padding:0; }
+.usage-panel dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:10px 16px; margin:14px 0 0; }
+.usage-panel dt, .usage-panel dd { margin:0; }
+.usage-panel dd { text-align:right; color:#626973; overflow-wrap:anywhere; }

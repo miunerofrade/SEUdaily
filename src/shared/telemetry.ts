@@ -45,7 +45,3 @@ export function cacheHitLabel(usage: Usage): string {
   return prompt!==undefined && hit!==undefined && prompt>0
     ? ((100*hit)/prompt).toFixed(1)+'%' : '—';
 }
-
-export function latestTurnLabel(usage: Usage): string {
-  return `最近一轮（in ${usage.prompt_tokens?.toLocaleString('en-US') ?? '—'} / out ${usage.completion_tokens?.toLocaleString('en-US') ?? '—'}） · 缓存 ${cacheHitLabel(usage)}`;
-}

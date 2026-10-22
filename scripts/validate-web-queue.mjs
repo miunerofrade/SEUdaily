@@ -107,11 +107,20 @@ try{
  assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).getAttribute('aria-valuenow'),'340');
  assert.equal(await page.locator('.thought-duration').last().innerText(),frozen);
  await input.fill('tool retry');await input.press('Enter');await page.getByText('已恢复并完成回答',{exact:true}).waitFor();
- await page.getByText('最近一轮（in 1,000 / out 100）',{exact:true}).waitFor();
  const telemetry=page.locator('.composer-telemetry');assert.equal(await telemetry.count(),1);
- assert.match(await telemetry.innerText(),/累计缓存/);assert.match(await telemetry.innerText(),/缓存 75.0%/);
- assert.ok((await telemetry.boundingBox()).height<=18,'desktop telemetry stays on one line');
+ const cumulative=telemetry.getByRole('button',{name:'会话累计用量',exact:true});
+ assert.match(await cumulative.innerText(),/缓存命中 75.0%/);
+ await cumulative.click();await page.getByRole('region',{name:'会话累计用量',exact:true}).waitFor();
+ await page.keyboard.press('Escape');assert.equal(await cumulative.getAttribute('aria-expanded'),'false');
  const reply=page.locator('.assistant-message').last();
+ const turnUsage=reply.getByRole('button',{name:'本轮用量',exact:true});assert.equal(await turnUsage.getAttribute('aria-expanded'),'false');
+ await turnUsage.click();
+ const usagePanel=page.getByRole('region',{name:'本轮用量',exact:true});
+ await usagePanel.getByText('1,100 tok',{exact:true}).waitFor();
+ await usagePanel.getByText('750 tok',{exact:true}).waitFor();await usagePanel.getByText('250 tok',{exact:true}).waitFor();
+ assert.equal(await usagePanel.getByText('缓存写入',{exact:true}).count(),0);
+ await page.keyboard.press('Escape');assert.equal(await turnUsage.getAttribute('aria-expanded'),'false');
+
  const thought=reply.locator('.tool-activity-toggle');assert.doesNotMatch(await thought.innerText(),/失败/);
  await thought.click();await reply.getByText('fixture service unavailable',{exact:true}).waitFor();assert.equal(await reply.locator('.error-icon').count(),0);
  const toolRows=reply.locator('.tool-activity-heading');
@@ -131,6 +140,8 @@ try{
  await page.keyboard.press('Escape');assert.equal(await information.getAttribute('aria-expanded'),'false');
  await information.click();await page.locator('.topbar').click({position:{x:200,y:20}});assert.equal(await information.getAttribute('aria-expanded'),'false');
  await page.setViewportSize({width:390,height:844});assert.equal(await page.getByRole('separator',{name:'调整导航栏宽度'}).isVisible(),false);
+ await turnUsage.click();const usageBounds=await usagePanel.boundingBox();assert.ok(usageBounds.x>=0 && usageBounds.x+usageBounds.width<=390 && usageBounds.y>=0 && usageBounds.y+usageBounds.height<=844);
+ await page.getByRole('button',{name:'关闭本轮用量',exact:true}).click();
  await information.click();const infoBox=await page.getByRole('region',{name:'工具调用信息',exact:true}).boundingBox();assert.ok(infoBox.x>=0 && infoBox.x+infoBox.width<=390 && infoBox.y>=0 && infoBox.y+infoBox.height<=844);
  await page.getByRole('button',{name:'关闭工具调用信息',exact:true}).click();
  assert.deepEqual(errors,[]);
