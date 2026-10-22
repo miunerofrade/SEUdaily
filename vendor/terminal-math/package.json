@@ -1,0 +1,16 @@
+{
+  "name": "terminal-math-typesetter",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "main": "index.mjs",
+  "types": "index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "import": "./index.mjs"
+    }
+  },
+  "repository": "https://github.com/reyabsaluja/terminal-math",
+  "upstreamCommit": "be328dfe709eb9932a7bb1aa74c80a1d057a0be8"
+}

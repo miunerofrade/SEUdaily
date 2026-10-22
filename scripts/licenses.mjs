@@ -3,7 +3,7 @@ import { dirname, resolve, sep } from 'node:path';
 export async function thirdPartyNotices(inputs) {
   const packages = new Map();
   for (const input of inputs) {
-    if (!input.includes(`${sep}node_modules${sep}`) && !input.includes('node_modules/')) continue;
+    if (!input.includes(`${sep}node_modules${sep}`) && !input.includes('node_modules/') && !input.replaceAll('\\', '/').includes('vendor/terminal-math/')) continue;
     let directory = dirname(resolve(input.split('?')[0]));
     while (directory !== dirname(directory)) {
       const path = resolve(directory, 'package.json');

@@ -1,6 +1,7 @@
 import stringWidth from "string-width";
 import { readTable, renderTable, inlineSpans } from "./markdown-table.js";
 import { clean } from "./client.js";
+import { terminalMath } from './math.js';
 export interface Span {
   text: string;
   bold?: boolean;
@@ -52,8 +53,15 @@ export function messageLines(
   };
   if (!["你", "SEUdaily", "系统", "错误"].includes(message.role))
     append([{ text: message.role, role: message.role, bold: true }]);
-  const source = clean(message.text).split("\n");
+  const originalText = clean(message.text);
+  const math = message.role === 'SEUdaily' ? terminalMath(originalText, width) : {text:originalText, blocks:new Map<string,string[]>()};
+  const source = math.text.split("\n");
   for (let index = 0; index < source.length; index++) {
+    const formula = math.blocks.get(source[index]);
+    if (formula) {
+      for (const row of formula) append([{text:row}]);
+      continue;
+    }
     const original = source[index],
       marker = original.trim().match(/^(`{3,}|~{3,})/);
     if (

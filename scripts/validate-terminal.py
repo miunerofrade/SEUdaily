@@ -141,6 +141,8 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             send(b'\r', .35)
             assert records()[-1]['messages'] == '中文输入'
             wait_for_output('回答完成')
+            wait_for_output('x²')
+            wait_for_output('───')
             send('LF 提交'); send(b'\n', .35)
             assert records()[-1]['messages'] == 'LF 提交'
             send('连续 Enter'); send(b'\r\r', .35)
@@ -187,7 +189,7 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             assert final_flags & mask == initial_flags & mask, 'raw mode must be restored'
             return dict(first_screen_ms=round(first_screen, 2), rss_bytes=rss,
                         checks=dict(chineseCommit=True, imagePaste=True, backspace=True, stream=True,
-                                    resize=True, cancel=True, exit=exit_method, terminalRestored=True))
+                                    resize=True, cancel=True, math=True, exit=exit_method, terminalRestored=True))
         finally:
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGKILL); proc.wait(timeout=5)
