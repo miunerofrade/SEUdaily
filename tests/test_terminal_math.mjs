@@ -13,23 +13,14 @@ test('terminal renders inline scripts and Greek symbols with both delimiter styl
     assert.match(answer('公式 '+formula+'，继续。'), /公式 x₁² \+ α，继续。/);
 });
 
-test('Fibonacci scripts occupy actual lower rows and keep fractions aligned',()=>{
-  const recurrence=rows({role:'SEUdaily',text:String.raw`前文 $F_1=1,F_2=1,F_n=F_{n-1}+F_{n-2}$ 后文。`},160);
-  const base=recurrence.findIndex(line=>line.includes('F') && line.includes('+'));
-  assert.ok(base>=0);
-  const positions=[...recurrence[base].matchAll(/F/g)].map(match=>match.index);
-  assert.equal(positions.length,5);
-  for(const [index,label] of ['1','2','n','n - 1','n - 2'].entries())
-    assert.equal(recurrence[base+1].slice(positions[index]+1,positions[index]+1+label.length),label);
-  assert.ok(recurrence.some(line=>line.includes('前文')));assert.ok(recurrence.some(line=>line.includes('后文')));
+test('Fibonacci letter subscripts use portable labels before fraction layout',()=>{
+  const recurrence=answer(String.raw`关于斐波那契数列，$F_1=1, F_2=1, F_n=F_{n-1}+F_{n-2}$。`);
+  assert.match(recurrence,/F₁ = 1/);assert.match(recurrence,/F_n = F_\(n - 1\) \+ F_\(n - 2\)/);
   const source=String.raw`\[F_n=\frac{\varphi^n-\psi^n}{\sqrt5},\quad\varphi=\frac{1+\sqrt5}{2},\quad\psi=\frac{1-\sqrt5}{2}\]`;
-  const display=rows({role:'SEUdaily',text:source},160);
-  const baseline=display.findIndex(line=>/F\s+= ─+/.test(line));
-  assert.ok(baseline>0);assert.equal(display[baseline+1][display[baseline].indexOf('F')+1],'n');
-  assert.match(display[baseline+1],/√\(5\)/);
-  assert.ok(display.slice(0,baseline).some(line=>line.includes('φ') && line.includes('ψ')));
-  const all=[...recurrence,...display,...rows({role:'SEUdaily',text:'$a_i+x_n^2+F_{123}$'})].join('\n');
-  assert.doesNotMatch(all,/_[n(]|[\u2090-\u209c\u1d62-\u1d65\u2c7c\ufffd]/);
+  const display=answer(source,160);
+  assert.match(display,/F_n = ─+/);assert.match(display,/φⁿ - ψⁿ/);assert.match(display,/√\(5\)/);
+  assert.match(answer('$a_i+x_n^2+F_{123}$'),/a_i \+ x_n² \+ F₁₂₃/);
+  assert.doesNotMatch(recurrence+display+answer('$a_{ij}+x_{n_i}$'),/[\u2090-\u209c\u1d62-\u1d65\u2c7c\ufffd]/);
   assert.equal(terminalMath(source,6).text,source);
 });
 

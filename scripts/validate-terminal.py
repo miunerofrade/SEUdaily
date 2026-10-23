@@ -142,9 +142,8 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             assert records()[-1]['messages'] == '中文输入'
             wait_for_output('回答完成')
             wait_for_output('x²')
-            wait_for_output('n - 1')
-            wait_for_output('n - 2')
-            assert 'F_n' not in output.decode(), 'subscripts must be positioned instead of replaced with underscores'
+            wait_for_output('F_n')
+            wait_for_output('F_(n - 1)')
             assert 'ₙ' not in output.decode(), 'letter subscripts must not require font-specific glyphs'
             wait_for_output('───')
             send('LF 提交'); send(b'\n', .35)
