@@ -14,6 +14,7 @@ export async function run() {
   const session = new Session({ command: 'chat' }, root);
   session.on('change', () => session.busy || session.queueActive ? writeFileSync(join(root, 'session-busy'), '') : rmSync(join(root, 'session-busy'), {force:true}));
   let queue: any[] = [];
+  let effort="high";
   let threads = [{id:session.threadId,resourceId:session.resource,title:'删除测试会话',updatedAt:'2026-10-05T00:00:00Z'}];
   session.client.json = async (path: string, _method?: string, body?: any) => {
     if (path === '/app/runtime/preparation') return {python:{state:'ready'},events:[
@@ -30,7 +31,7 @@ export async function run() {
     }
     if (path.includes('/cancel?')) { queue = queue.map(item=>({...item,state:'paused'})); return {cancelled:true,active:false}; }
     if (path === '/app/vpn') { record({ vpn: body, method: _method }); return { state: 'connected', message: 'fixture VPN 已连接' }; }
-    if (path === '/app/agent-info') return { model: 'fixture-model', effort: 'high' };
+    if (path === '/app/agent-info') {if(body?.effort){effort=body.effort;record({effort});}return {model:'fixture-model',effort,contextWindowTokens:512000};}
     if (path === '/app/skills') return { skills: [] };
     if (path === '/app/images') { record({ image: body.name, uploaded: true }); return { ref: 'fixture.png', name: '截图.png', mediaType: 'image/png' }; }
     if (path.includes('/messages?')) return { messages: [] };
@@ -46,7 +47,10 @@ export async function run() {
       yield { type: 'text-delta', payload: { text: '流式中文' } };
       await new Promise(resolve => setTimeout(resolve, 100));
       yield { type: 'text-delta', payload: { text: '回答完成\n$$\\frac{1}{2}$$\n公式 $x^2$ 和 $F_n=F_{n-1}+F_{n-2}$' } };
-      yield { type: 'finish', payload: {} };
+      yield {type:'tool-call',payload:{toolName:'fixture',toolCallId:'feedback',startedAt:Date.now()-1000}};
+      yield {type:'tool-result',payload:{toolCallId:'feedback',finishedAt:Date.now(),result:{status:'completed',summary:'fixture 工具完成',data:{detail:'工具完整反馈'}}}};
+      yield {type:'statistics-update',statistics:{modelSteps:1,modelMs:100,ttftTotalMs:20,ttftSamples:1,generationMs:100,generatedTokens:20,lastPromptTokens:1000},timing:{elapsedMs:1000},payload:{}};
+      yield { type: 'finish', payload: {usage:{prompt_tokens:1000,completion_tokens:20,prompt_cache_hit_tokens:800}} };
     }
   };
   await session.initialize();

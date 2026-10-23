@@ -1,3 +1,4 @@
+import {chatFeatureCommand,chatFeatureNames} from './chat-features.js';
 import type { Session } from "./session.js";
 import { commands, aliases, flags, words } from "./command-parser.js";
 import { RESOURCE } from "./client.js";
@@ -23,6 +24,7 @@ export async function executeCommand(
   let [name, ...args] = words(text.slice(1));
   name = name.toLowerCase();
   name = aliases[name] ?? name;
+  if(chatFeatureNames.has(name) && await chatFeatureCommand(session,name,args))return;
   if (
     !["schedule", "programs", "approve", "reject", "mode", "apply"].includes(
       name,

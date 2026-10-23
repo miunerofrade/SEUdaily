@@ -59,7 +59,7 @@ export class Client {
   async *stream(
     body: unknown,
     signal: AbortSignal,
-  ): AsyncGenerator<{ type: string; payload: any }> {
+  ): AsyncGenerator<{ type: string; payload: any;timestamp?:number;timing?:import('../shared/timing.js').RunTiming;statistics?:import('../shared/session-statistics.js').RunStatistics }> {
     const response = await this.request(
       "/api/agents/seudaily-agent/stream",
       {

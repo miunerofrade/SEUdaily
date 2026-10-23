@@ -427,6 +427,9 @@ export function createAppInputHandler({
         changePage("chat");
         return;
       }
+      if(key.ctrl && (session.busy || session.queueActive) && (session.images.length || session.documents.length || session.skills.length)) {
+        session.show('补充当前任务仅接受文字；附件和 Skill 请按 Enter 排队');return;
+      }
       editor.current.clearAfterSubmit();
       setInput("");
       setCaret(0);
@@ -434,7 +437,7 @@ export function createAppInputHandler({
       setOffset(null);
       setModal(null);
       setDetail(null);
-      void run(text);
+      void run(key.ctrl && (session.busy || session.queueActive) && !text.startsWith('/') ? `/steer ${text}` : text);
       return;
     }
     if (

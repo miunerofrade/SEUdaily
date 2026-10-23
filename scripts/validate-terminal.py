@@ -146,6 +146,12 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             wait_for_output('F_(n - 1)')
             assert 'ₙ' not in output.decode(), 'letter subscripts must not require font-specific glyphs'
             wait_for_output('───')
+            send('/stats'); send(b'\r', .35); wait_for_output('最近已统计输入')
+            send('/tools open'); send(b'\r', .35)
+            send('/tools 1'); send(b'\r', .35); wait_for_output('工具完整反馈')
+            send('/tools close'); send(b'\r', .35)
+            send('/effort low'); send(b'\r', .35)
+            assert any(r.get('effort') == 'low' for r in records()), 'effort command must reach shared settings endpoint'
             send('LF 提交'); send(b'\n', .35)
             assert records()[-1]['messages'] == 'LF 提交'
             send('连续 Enter'); send(b'\r\r', .35)
@@ -163,6 +169,9 @@ def terminal(exit_method='ctrl-d', installation: Path | None = None):
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 70, 0, 0))
             os.killpg(proc.pid, signal.SIGWINCH); pump(.2)
             send('cancel-fixture'); send(b'\r', .2)
+            send('/steer 新的补充'); send(b'\r', .2)
+            assert any(r.get('queued', {}).get('delivery') == 'steer' and r['queued']['text'] == '新的补充' for r in records()), 'steering must target current run'
+
             send(paste, .3); send('排队消息'); send(b'\r', .2)
             queued = [r['queued'] for r in records() if 'queued' in r][-1]
             assert queued['text'] == '排队消息' and queued['images'][0]['ref'] == 'fixture.png'

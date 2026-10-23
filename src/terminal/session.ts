@@ -1,3 +1,5 @@
+import type {RunTiming} from '../shared/timing.js';
+import type {RunStatistics} from '../shared/session-statistics.js';
 import { MAX_ATTACHMENTS } from "../shared/attachment-limits.js";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
@@ -42,12 +44,20 @@ import { executeCommand } from "./commands.js";
 export interface TerminalMessage {
   role: string;
   text: string;
+  id?:string;
+  brokerRunToken?:string;
+  timing?:RunTiming;
+  statistics?:RunStatistics;
+  usage?:Usage;
   reasoning?: string;
   process?: Array<{
-    type: "reasoning" | "text" | "tool";
+    type: "reasoning" | "text" | "tool" | "tool-group";
     text: string;
     id?: string;
     expanded?: boolean;
+    result?:unknown;
+    startedAt?:number;
+    finishedAt?:number;
   }>;
   streaming?: boolean;
   welcome?: boolean;
@@ -59,6 +69,8 @@ export class Session extends EventEmitter {
   runToken = "";
   model = "—";
   effort = "high";
+  contextWindowTokens=512000;
+  private queueRevision:string|undefined;
   usage: Usage = {};
   usageByRun = new Map<string, Usage>();
   pending: any = null;
@@ -178,6 +190,9 @@ export class Session extends EventEmitter {
         AbortSignal.timeout(4000),
       );
       if (thread !== this.threadId || resource !== this.resource) return;
+      const previousActive=this.queueActive;
+      const revisionChanged=this.queueRevision!==state.revision;
+      this.queueRevision=state.revision;
       const finished = this.queueItems.some(
         (item) =>
           !state.items?.some((next: any) => next.id === item.id) ||
@@ -190,7 +205,7 @@ export class Session extends EventEmitter {
       this.queueActive = state.active ?? false;
       this.queueProgress = state.progress?.text ?? "";
       this.queueRunToken = state.runToken ?? "";
-      if (finished && !this.busy) {
+      if ((finished || previousActive!==this.queueActive || this.queueActive && revisionChanged) && !this.busy) {
         const notices = this.messages.filter(
           (message) =>
             !message.welcome && !["你", "SEUdaily"].includes(message.role),
@@ -230,14 +245,14 @@ export class Session extends EventEmitter {
     await this.pollQueue();
     return draft.text as string;
   }
-  async enqueue(text: string) {
+  async enqueue(text: string, steer=false) {
     const images = [...this.images],
       documents = [...this.documents],
       skills = this.skills;
     await this.client.json(
       this.path("queue"),
       "POST",
-      { text, images, documents, skills, interface: "cli" },
+      { text, images, documents, skills, interface: "cli", ...(steer && (this.busy || this.queueActive) ? {delivery:"steer",runToken:this.controller?this.runToken:this.queueRunToken} : {}) },
       AbortSignal.timeout(5000),
     );
     this.images = this.images.filter(
@@ -400,6 +415,7 @@ export class Session extends EventEmitter {
     this.catalog = (await this.client.json("/app/skills")).skills;
     const info = await this.client.json("/app/agent-info").catch(() => ({}));
     this.model = typeof info.model === "string" ? clean(info.model) : "—";
+    this.contextWindowTokens=info.contextWindowTokens ?? 512000;
     this.effort = typeof info.effort === "string" ? clean(info.effort) : "high";
     for (const skill of this.skills)
       if (!this.catalog.some((s) => s.name === skill))
@@ -510,8 +526,9 @@ export class Session extends EventEmitter {
               .map((p: any) => p.text ?? p.reasoning ?? "")
               .join("\n")
           : "";
-      if (text || reasoning) {
+      if (text || reasoning || parts.some((p:any)=>p.type==='tool-invocation')) {
         this.messages.push({
+          id:m.id,brokerRunToken:m.content?.runToken,timing:m.content?.timing,statistics:m.content?.statistics ?? (m.content?.modelMessages ? {modelSteps:m.content.modelMessages.filter((m:any)=>m.role==='assistant').length}:undefined),usage:m.content?.usage,streaming:m.role==='assistant' && m.content?.runToken===result.activeRunToken,
           role: m.role === "user" ? "你" : "SEUdaily",
           text: clean(text ?? ""),
           reasoning: clean(reasoning),
@@ -530,7 +547,7 @@ export class Session extends EventEmitter {
                     return [
                       {
                         type: "tool",
-                        id: tool?.toolCallId,
+                        id: tool?.toolCallId,result:tool?.result,startedAt:tool?.startedAt,finishedAt:tool?.finishedAt,
                         text: clean(
                           tool?.result?.summary ??
                             `[${tool?.toolName ?? "工具"}] 完成`,
@@ -542,6 +559,8 @@ export class Session extends EventEmitter {
                 })
               : undefined,
         });
+        const restored=this.messages.at(-1)!;
+        if(restored.process?.some(p=>p.type==='tool'))restored.process.unshift({type:'tool-group',text:'工具调用',expanded:false});
         this.changed();
       }
       for (const p of parts)
@@ -683,7 +702,7 @@ export class Session extends EventEmitter {
         : text;
     this.reasoningExpanded = false;
     const message: TerminalMessage = {
-      role: "SEUdaily",
+      role: "SEUdaily",brokerRunToken:this.runToken,
       text: "",
       reasoning: "",
       process: [],
@@ -734,6 +753,8 @@ export class Session extends EventEmitter {
         controller.signal,
       )) {
         this.emit("event", event);
+        if(event.timing)message.timing=event.timing;
+        if(event.statistics)message.statistics=event.statistics;
         const p = event.payload ?? {};
         if (event.type === "text-delta") {
           message.text += clean(p.text ?? "");
@@ -757,10 +778,11 @@ export class Session extends EventEmitter {
         } else if (event.type === "tool-call") {
           this.status = "工具：" + p.toolName;
           this.thinking = false;
+          if (!this.options.quiet && !message.process!.some(p=>p.type==='tool-group'))message.process!.push({type:'tool-group',text:'工具调用',expanded:true});
           if (!this.options.quiet)
             message.process!.push({
               type: "tool",
-              id: p.toolCallId,
+              id: p.toolCallId,startedAt:p.startedAt ?? event.timestamp,
               text: `[${p.toolName}] 执行中`,
             });
         } else if (event.type === "tool-result") {
@@ -771,7 +793,7 @@ export class Session extends EventEmitter {
               .reverse()
               .find((part) => part.type === "tool" && part.id === p.toolCallId);
             const text = clean(p.result?.summary ?? `[${p.toolName}] 完成`);
-            if (tool) tool.text = text;
+            if (tool) {tool.text = text;tool.result=p.result;tool.finishedAt=p.finishedAt ?? event.timestamp ?? Date.now();}
             else
               message.process!.push({ type: "tool", id: p.toolCallId, text });
           }
@@ -781,7 +803,10 @@ export class Session extends EventEmitter {
         } else if (event.type === "error") {
           code = 1;
           this.show(p.error?.message ?? "模型错误", "错误");
+        } else if (event.type === "input-added") {
+          append("text",`补充要求：${p.text}\n`,true);
         } else if (event.type === "finish") {
+          message.usage=p.usage;
           this.recordUsage(this.runToken, p.usage);
           if (this.options.verbose)
             this.emit("diagnostic", JSON.stringify(p.usage ?? {}));
@@ -812,7 +837,7 @@ export class Session extends EventEmitter {
           )
           .catch(() => {});
       message.streaming = false;
-      for (const part of message.process ?? []) part.expanded = false;
+      for (const part of message.process ?? []) {part.expanded = false;if(part.type==='tool' && part.startedAt!==undefined && part.finishedAt===undefined)part.finishedAt=Date.now();}
       this.reasoningExpanded = false;
       if (this.controller === controller) this.controller = null;
       this.thinking = false;
@@ -1039,6 +1064,12 @@ export class Session extends EventEmitter {
   }
   async submit(text: string): Promise<number> {
     if (this.attachmentLoading) throw new Error("附件仍在上传，请稍候再发送");
+    const steering=/^\/steer(?:\s+([\s\S]*))?$/.exec(text);
+    if(steering) {
+      if(!steering[1]?.trim())throw Error('/steer 补充要求');
+      if(this.images.length || this.documents.length || this.skills.length)throw Error('补充当前任务仅接受文字，附件和 Skill 请用 Enter 排队');
+      await this.enqueue(steering[1],true);return 0;
+    }
     if (text === "/cancel") {
       await this.cancel();
       return 0;
@@ -1055,7 +1086,7 @@ export class Session extends EventEmitter {
       await this.command(text);
       return 0;
     }
-    if (text === "/thinking" || /^\/copy-on-select(?:\s|$)/.test(text)) {
+    if (/^\/(?:stats|tools|steer|effort)(?:\s|$)/.test(text) || text === "/thinking" || /^\/copy-on-select(?:\s|$)/.test(text)) {
       await this.command(text);
       return 0;
     }

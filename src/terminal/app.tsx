@@ -1,3 +1,5 @@
+import {durationLabel,elapsedTime} from '../shared/timing.js';
+import {compactMetrics,collapseToolChildren} from './chat-features.js';
 import { NoticesManager } from './notices.js';
 import { followSelection } from "./viewport.js";
 import React, { useState, useEffect, useMemo, useRef } from "react";
@@ -17,7 +19,6 @@ import { editorRows } from "./editor.js";
 import { processLines } from "./process.js";
 import { welcomeLines } from "./welcome.js";
 import { Composer } from "./composer.js";
-import { telemetryLabel } from "./telemetry.js";
 import {
   programDocument,
   currentWeek,
@@ -130,7 +131,7 @@ export function App({ session, copy = copySelection }: {
     !session.confirmation;
   const reasoningRef = useRef<DOMElement | null>(null);
   const transcriptRef = useRef<DOMElement | null>(null);
-  const lastReasoningTarget = useRef<{ text: string; expanded?: boolean } | null>(null);
+  const lastReasoningTarget = useRef<{ type?:string; text: string; expanded?: boolean } | null>(null);
   const [reasoningOffset, setReasoningOffset] = useState<number | null>(null);
   useEffect(() => { lastReasoningTarget.current = null; setReasoningOffset(null); }, [session.runToken, session.threadId]);
   const latestAnswer = [...messages].reverse().find(message => message.role === "SEUdaily");
@@ -143,9 +144,10 @@ export function App({ session, copy = copySelection }: {
   const showReasoning = page === "chat" && !session.pending &&
     !session.confirmation && session.busy && (showThinking || !!activeReasoning);
   const reasoningHeight = showReasoning ? 1 + (session.reasoningExpanded ? Math.min(reasoningCapacity, reasoningLines.length) : 0) : 0;
-  const toggleInlineReasoning = (part: { text: string; expanded?: boolean }, index: number) => {
+  const toggleInlineReasoning = (part: { type?:string; text: string; expanded?: boolean }, index: number) => {
     part.expanded = !part.expanded;
-    lastReasoningTarget.current = part;
+    collapseToolChildren(session,part);
+    if(part.type!=='tool' && part.type!=='tool-group')lastReasoningTarget.current = part;
     // Preserve the visible header when the block changes height instead of following the bottom.
     setOffset(Math.min(top, index));
     session.changed();
@@ -157,9 +159,9 @@ export function App({ session, copy = copySelection }: {
       session.changed();
       return;
     }
-    const visible = displayLines.slice(top, top + height).map(line => line[0]?.reasoningPart).filter(Boolean);
+    const visible = displayLines.slice(top, top + height).map(line => line[0]?.reasoningPart).filter(part=>part && part.type!=='tool' && part.type!=='tool-group');
     const target = lastReasoningTarget.current ?? visible.at(-1) ??
-      [...displayLines].reverse().find(line => line[0]?.reasoningPart)?.[0].reasoningPart;
+      [...displayLines].reverse().find(line => line[0]?.reasoningPart && !['tool','tool-group'].includes(line[0].reasoningPart.type ?? ''))?.[0].reasoningPart;
     if (target) toggleInlineReasoning(target, displayLines.findIndex(line => line[0]?.reasoningPart === target));
   };
   const inReasoning = (x?: number, y?: number) => {
@@ -235,7 +237,7 @@ export function App({ session, copy = copySelection }: {
     try {
       await session.submit(text);
     } catch (error) {
-      if (!editor.current.expanded() && !text.startsWith("/")) edit(text,text.length);
+      if (!editor.current.expanded() && (!text.startsWith('/') || text.startsWith('/steer '))) {const draft=text.startsWith('/steer ')?text.slice(7):text;edit(draft,draft.length);}
       session.page = "chat";
       session.status =
         "错误：" + (error instanceof Error ? error.message : String(error));
@@ -995,8 +997,8 @@ export function App({ session, copy = copySelection }: {
                 : "已选中 · Ctrl+C 复制 · Esc 取消")
             : session.queueItems.length
               ? `队列 ${session.queueItems.length} · ↑ 取回编辑 · /queue resume 继续${session.queueItems.some(item => item.state === 'failed' || item.state === 'paused') ? ' · 已暂停' : ''}`
-              : (session.busy || session.queueActive) ? `${session.status} · Enter 加入队列 · Ctrl+C 停止`
-              : telemetryLabel(session.model, session.effort, session.usage, width < 105))}
+              : (session.busy || session.queueActive) ? `${session.status}${[...session.messages].reverse().find(m=>m.role==='SEUdaily')?.timing ? ' · ◷ '+durationLabel(elapsedTime([...session.messages].reverse().find(m=>m.role==='SEUdaily')!.timing!)) : ''} · Enter 排队 · Ctrl+Enter 补充 · Ctrl+C 停止`
+              : compactMetrics(session))}
         </Text>
       </Box>
       {modal !== "resume" && <InputCursor position={nativeCursor} />}

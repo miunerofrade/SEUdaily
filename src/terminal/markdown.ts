@@ -11,7 +11,7 @@ export interface Span {
   user?: boolean;
   color?: string;
   backgroundColor?: string;
-  reasoningPart?: { text: string; expanded?: boolean };
+  reasoningPart?: { type?:string; text: string; expanded?: boolean };
 }
 const cache = new WeakMap<
   object,
