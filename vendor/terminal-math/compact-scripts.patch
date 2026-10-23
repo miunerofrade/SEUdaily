@@ -1,0 +1,31 @@
+diff --git a/vendor/terminal-math/index.mjs b/vendor/terminal-math/index.mjs
+index 4b9bd2f..5f1d485 100644
+--- a/vendor/terminal-math/index.mjs
++++ b/vendor/terminal-math/index.mjs
+@@ -1299,6 +1299,7 @@ function defaultCtx(opts) {
+   const unicode = opts.ascii ? false : opts.unicode !== false;
+   return {
+     unicode,
++    compactScripts: opts.compactScripts !== false,
+     ansi: !!opts.ansi,
+     display: !!opts.display,
+     fontStack: [],
+@@ -1494,15 +1495,15 @@ function renderSupsub(base, sup, sub, ctx) {
+   const baseBox = renderIn(base, ctx);
+   let compactSup;
+   let compactSub;
+-  if (ctx.unicode && sup !== void 0) {
++  if ((ctx.unicode && ctx.compactScripts) && sup !== void 0) {
+     const flat = flatScriptText(sup);
+     if (flat !== void 0) compactSup = toUnicodeSup(flat);
+   }
+-  if (ctx.unicode && sub !== void 0) {
++  if ((ctx.unicode && ctx.compactScripts) && sub !== void 0) {
+     const flat = flatScriptText(sub);
+     if (flat !== void 0) compactSub = toUnicodeSub(flat);
+   }
+-  if (ctx.unicode) {
++  if ((ctx.unicode && ctx.compactScripts)) {
+     if (sub !== void 0 && compactSub === void 0) {
+       const raw = flatScriptText(sub);
+       if (raw !== void 0 && isShortLabel(raw)) compactSub = `\u208D${raw}\u208E`;

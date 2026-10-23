@@ -15,16 +15,6 @@ function prepareNode(value: unknown, display: boolean): unknown {
   if (next.type === 'sqrt') next.body = {type:'paren', left:'(', right:')', body:next.body};
   if (next.type === 'supsub' && !['symbol','text','paren','opname','bigop'].includes((next.base as MathNode).type))
     next.base = {type:'paren', left:'(', right:')', body:next.base};
-  if (next.type === 'supsub' && next.sub) {
-    const sub = boxToString(renderNode(next.sub as MathNode, {display:false, unicode:true, ansi:false}), {ansi:false, trim:true}).trim();
-    // Letter subscripts such as U+2099 (ₙ) are missing in some terminal fonts.
-    // Expand before layout so fraction bars and alignment use the actual width.
-    if (sub && !sub.includes('\n') && !/^[0-9+\-=() ]+$/.test(sub)) {
-      const label = Array.from(sub).length === 1 ? `_${sub}` : `_(${sub})`;
-      const base = {type:'group', children:[next.base, {type:'text', value:label}]};
-      return next.sup ? {...next, base, sub:undefined} : base;
-    }
-  }
   if (next.type === 'frac') {
     if (display) next.variant = 'display';
     else {
@@ -33,6 +23,18 @@ function prepareNode(value: unknown, display: boolean): unknown {
     }
   }
   return next;
+}
+
+/** Letter subscripts use real rows, avoiding terminal-font-specific Unicode glyphs. */
+function needsSpatialScripts(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(needsSpatialScripts);
+  if (!value || typeof value !== 'object') return false;
+  const node=value as MathNode;
+  if (node.type==='supsub' && node.sub) {
+    const sub=boxToString(renderNode(node.sub as MathNode,{unicode:true,ansi:false,compactScripts:false}),{ansi:false,trim:true});
+    if (!/^[0-9+\-=() \n]+$/.test(sub)) return true;
+  }
+  return Object.values(node).some(needsSpatialScripts);
 }
 
 function renderFormula(formula: string, display: boolean, width: number): string | null {
@@ -55,10 +57,12 @@ function renderFormula(formula: string, display: boolean, width: number): string
     // The terminal parser is permissive. Validate completeness before layout.
     katex.renderToString(formula, {throwOnError:true, strict:'ignore', maxExpand:100, maxSize:20, output:'mathml'});
     const node = prepareNode(parseMath(formula), display) as MathNode;
-    const box = renderNode(node, {display, unicode:true, ansi:false});
+    const spatial=needsSpatialScripts(node);
+    const box = renderNode(node, {display, unicode:true, ansi:false, compactScripts:!spatial});
     const text = boxToString(box, {ansi:false, trim:true});
     const rows = text.split('\n');
-    if (text.trim() && rows.every(row => stringWidth(row) <= width) && (display || rows.length === 1)) rendered = text;
+    const availableWidth=width-(display || rows.length>1 ? 2 : 0);
+    if (text.trim() && rows.every(row => stringWidth(row) <= availableWidth) && (display || rows.length === 1 || spatial)) rendered = text;
   } catch { /* Preserve the exact source when syntax or layout cannot be represented. */ }
   if (cache.size >= 128) cache.delete(cache.keys().next().value!);
   cache.set(key, rendered);
@@ -112,10 +116,10 @@ export function terminalMath(source: string, width: number) {
     if (end < 0) { index = source.length; continue; }
     const formula = source.slice(bodyStart, end);
     if (!display && (formula.includes('\n') || !formula.trim() || (opener === '$' && (/^\s|\s$/.test(formula) || /\d/.test(source[end + 1] ?? ''))))) { index += opener.length; continue; }
-    const rendered = renderFormula(formula, display, Math.max(1, width - (display ? 2 : 0)));
+    const rendered = renderFormula(formula, display, Math.max(1, width));
     if (rendered !== null) {
       output.push(source.slice(start, index));
-      if (display) {
+      if (display || rendered.includes('\n')) {
         const id = `\0terminal-math-${blocks.size}\0`;
         blocks.set(id, rendered.split('\n').map(row => '  ' + row));
         output.push(`\n${id}\n`);
