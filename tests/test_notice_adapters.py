@@ -89,7 +89,7 @@ def test_third_webplus_source_works_without_site_specific_service(
 
     def fetch(request, *args):
         html = (
-            f'<a href="{url}">测试通知</a>'
+            f'<table class="wp_article_list_table"><tr><td><a href="{url}">测试通知</a></td></tr></table>'
             if request.endswith("list.htm")
             else '<h1 class="notice_title">测试通知</h1><div class="notice_body">通知正文<a href="/files/a.pdf">附件.pdf</a></div>'
         )

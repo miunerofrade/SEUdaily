@@ -25,6 +25,7 @@ from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_ope
 
 from .json_store import write_json_atomic
 from .web_download import read_chunks
+from .notice_html import PARSER_VERSION
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
 from .vpn import CampusProxyHandler, campus_proxy
 
@@ -96,6 +97,9 @@ class _NoticeOpener:
                 unescape(re.sub(r"<[^>]*>", " ", gate[1]))
             ):
                 raise PermissionError("该通知仅限校园网或校园 VPN 访问")
+            if re.search(r'<(?:!doctype|html|head|body)\b', text, re.I):
+                from .notice_html import validate_page
+                validate_page(text)
             return _NoticeResponse(response, prefix)
         except BaseException:
             response.close()
@@ -184,13 +188,22 @@ class WebplusNoticeAdapter:
     ) -> dict[str, Any]:
         selected = self._categories(categories, paths, allow_all=True)
         remote_by_url: dict[str, dict[str, Any]] = {}
+        warnings: list[str] = []
+        checked = 0
         for category in selected or [None]:
-            for item in self._search_remote(query, category):
-                if category is not None:
-                    item.setdefault("_sourceCategory", category)
-                remote_by_url.setdefault(item["url"], item)
+            try:
+                found = self._search_remote(query, category)
+                checked += 1
+                for item in found:
+                    if category is not None:
+                        item.setdefault("_sourceCategory", category)
+                    remote_by_url.setdefault(item["url"], item)
+            except Exception as exc:
+                warnings.append(f"{category or '全站'} 搜索失败: {exc}")
+        if not checked:
+            raise RuntimeError("所有通知栏目搜索失败：" + "；".join(warnings))
         state = self._load_index()
-        articles = {item["url"]: item for item in state["articles"]}
+        articles = {item["id"]: item for item in state["articles"]}
         chosen: list[dict[str, Any]] = []
         for item in list(remote_by_url.values())[:limit]:
             source_category = item.get("_sourceCategory")
@@ -198,7 +211,7 @@ class WebplusNoticeAdapter:
                 key: value for key, value in item.items() if not key.startswith("_")
             }
             article = articles.setdefault(
-                item["url"],
+                item["id"],
                 {"id": item["id"], "url": item["url"], "firstSeenAt": _iso_now()},
             )
             article.update(stored_item)
@@ -208,7 +221,6 @@ class WebplusNoticeAdapter:
             chosen.append(article)
         state["articles"] = list(articles.values())
         self._save_index(state)
-        warnings: list[str] = []
         queued_ids: list[str] = []
         if chosen:
             queued_ids = self._enqueue_details(chosen)
@@ -231,7 +243,7 @@ class WebplusNoticeAdapter:
             "freshness": "remote_search",
             "timeScope": "any",
             "recentDays": None,
-            "freshnessGuaranteed": True,
+            "freshnessGuaranteed": not warnings,
             "source": "site_search",
             "networkChecked": True,
             "refreshReasons": ["site_search_api"],
@@ -275,8 +287,8 @@ class WebplusNoticeAdapter:
         warnings: list[str] = []
         if freshness != "cache_only":
             try:
-                self._refresh_index(
-                    state, selected, pages=3 if freshness == "archive" else 1
+                warnings.extend(
+                    self._refresh_index(state, selected, pages=3 if freshness == "archive" else 1)
                 )
                 network_checked = True
             except Exception as exc:
@@ -300,7 +312,7 @@ class WebplusNoticeAdapter:
                 except Exception as exc:
                     warnings.append(f"后台详情同步启动失败: {exc}")
         return {
-            "status": "completed",
+            "status": "failed" if freshness != "cache_only" and not network_checked else "completed",
             "freshness": freshness,
             "timeScope": time_scope,
             "recentDays": recent_days if time_scope == "recent" else None,
@@ -562,6 +574,22 @@ class WebplusNoticeAdapter:
             with public_opener().open(
                 request, timeout=self.timeout_seconds
             ) as response:
+                final_url = response.geturl()
+                extension = Path(urlparse(final_url).path).suffix.lower()
+                if extension in {".pdf", ".doc", ".xls", ".ppt", ".docx", ".xlsx", ".pptx", ".zip"}:
+                    prefix = response.read(8)
+                    if extension in {".doc", ".xls", ".ppt"}:
+                        valid = prefix.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+                    else:
+                        valid = prefix.startswith(b"%PDF-" if extension == ".pdf" else b"PK")
+                    if not valid:
+                        raise ValueError("通知附件内容与文件扩展名不匹配；不会保存为正文")
+                    return {
+                        "notModified": False, "url": final_url, "html": "",
+                        "attachment": {"url": final_url, "name": Path(urlparse(final_url).path).name},
+                        "etag": response.headers.get("ETag"),
+                        "lastModified": response.headers.get("Last-Modified"),
+                    }
                 raw = read_chunks(
                     iter(lambda: response.read(65536), b""), max_bytes=5 * 1024 * 1024
                 )
@@ -580,60 +608,58 @@ class WebplusNoticeAdapter:
 
     def _refresh_index(
         self, state: dict[str, Any], categories: list[str], *, pages: int
-    ) -> None:
-        articles = {item["url"]: item for item in state["articles"]}
+    ) -> list[str]:
+        from .notice_html import list_items
+
+        articles = {item["id"]: item for item in state["articles"]}
+        successes = 0
+        failures = []
         for category in categories:
             label, path = self.config.categories[category]
             category_state = state["categories"].setdefault(category, {})
             for page in range(1, pages + 1):
-                page_path = (
-                    path if page == 1 else path.replace("list.htm", f"list{page}.htm")
-                )
+                page_path = path if page == 1 else path.replace("list.htm", f"list{page}.htm")
                 url = urljoin(self.base_url, page_path)
-                validator_key = f"page{page}"
-                validators = category_state.get("validators", {}).get(validator_key, {})
-                response = self._fetch(url, validators)
-                category_state.setdefault("validators", {})[validator_key] = {
-                    "etag": response.get("etag") or validators.get("etag"),
-                    "lastModified": response.get("lastModified")
-                    or validators.get("lastModified"),
-                }
-                if response["notModified"]:
-                    continue
-                parser = _PageParser(response["url"], self.config)
-                parser.feed(response["html"])
-                for link in parser.anchors:
-                    link_url = self._normalize_url(link["href"])
-                    match = _ARTICLE_PATH.search(urlparse(link_url).path)
-                    title = link["text"]
-                    if not match or not title:
-                        continue
-                    item = articles.setdefault(
-                        link_url,
-                        {
-                            "id": _article_id(link_url, self.config.id_prefix),
-                            "url": link_url,
-                            "firstSeenAt": _iso_now(),
-                        },
-                    )
-                    item.update(
-                        {
-                            "title": title,
-                            "publishedAt": f"{match.group(1)}-{match.group(2)}-{match.group(3)}",
-                            "category": category,
-                            "categoryLabel": label,
-                            "lastSeenAt": _iso_now(),
+                key = f"page{page}"
+                stored_validators = category_state.get("validators", {}).get(key, {})
+                validators = stored_validators if stored_validators.get("parserVersion") == PARSER_VERSION else {}
+                try:
+                    response = self._fetch(url, validators)
+                    if response["notModified"]:
+                        if not validators:
+                            raise ValueError("列表返回 304 但没有已验证的缓存")
+                    else:
+                        entries = list_items(response["html"], response["url"])
+                        for entry in entries:
+                            link = self._normalize_url(entry["url"])
+                            ident = _article_id(link, self.config.id_prefix)
+                            item = articles.setdefault(ident, {"id": ident, "firstSeenAt": _iso_now()})
+                            item.update({
+                                **entry, "url": link, "category": category,
+                                "categoryLabel": label, "lastSeenAt": _iso_now(),
+                            })
+                        # A new validator is trusted only after parsing succeeds.
+                        category_state.setdefault("validators", {})[key] = {
+                            "etag": response.get("etag"), "lastModified": response.get("lastModified"),
+                            "parserVersion": PARSER_VERSION,
                         }
-                    )
-            category_state["lastCheckedAt"] = _iso_now()
+                    successes += 1
+                    category_state["lastCheckedAt"] = _iso_now()
+                except Exception as exc:
+                    failures.append(f"{category} 第{page}页: {exc}")
         state["articles"] = list(articles.values())
+        if not successes:
+            raise RuntimeError("所有通知栏目刷新失败：" + "；".join(failures))
+        return failures
 
     def _apply_article_response(
         self, article: dict[str, Any], response: dict[str, Any]
     ) -> bool:
         parser = _PageParser(response["url"], self.config)
-        parser.feed(response["html"])
-        if not parser.content_seen and not parser.embedded_files:
+        direct_attachment = response.get("attachment")
+        if not direct_attachment:
+            parser.feed(response["html"])
+        if not direct_attachment and not parser.content_seen and not parser.embedded_files:
             raise ValueError("通知正文结构未识别，学校页面可能已变更；保留已有缓存")
         title = parser.title or article.get("title", "")
         content = parser.content
@@ -643,6 +669,9 @@ class WebplusNoticeAdapter:
             if link["inContent"] == "True"
             and link["href"].startswith(("http://", "https://"))
         ]
+        if direct_attachment:
+            extension = Path(urlparse(direct_attachment["url"]).path).suffix
+            attachments.append({"url": direct_attachment["url"], "name": title + extension})
         for embedded in parser.embedded_files:
             embedded_url = embedded["url"]
             filename = Path(urlparse(embedded_url).path).name
@@ -657,6 +686,8 @@ class WebplusNoticeAdapter:
                 }
             )
         attachments = list({item["url"]: item for item in attachments}.values())
+        if not content and not attachments:
+            raise ValueError("通知正文容器为空且没有图片或附件；保留已有缓存")
         digest_source = json.dumps(
             {"title": title, "content": content, "attachments": attachments},
             ensure_ascii=False,
@@ -674,6 +705,7 @@ class WebplusNoticeAdapter:
                 "validators": {
                     "etag": response.get("etag"),
                     "lastModified": response.get("lastModified"),
+                    "parserVersion": PARSER_VERSION,
                 },
             }
         )
@@ -684,7 +716,6 @@ class WebplusNoticeAdapter:
             + "\n".join(
                 f"- [{item['name']}]({item['url']})"
                 for item in attachments
-                if not item["url"].endswith(".gif")
             )
             if attachments
             else ""
@@ -707,9 +738,13 @@ class WebplusNoticeAdapter:
             for key in ("content", "attachments", "contentHash", "validators"):
                 if cached.get(key) is not None:
                     article[key] = cached[key]
-        response = self._fetch(article["url"], article.get("validators"))
-        article["lastCheckedAt"] = _iso_now()
+        stored_validators = article.get("validators") or {}
+        validators = stored_validators if stored_validators.get("parserVersion") == PARSER_VERSION else {}
+        response = self._fetch(article["url"], validators)
         if response["notModified"]:
+            if not validators or not article.get("contentHash"):
+                raise ValueError("正文返回 304 但没有已验证的正文缓存")
+            article["lastCheckedAt"] = _iso_now()
             return False
         changed = self._apply_article_response(article, response)
         self.articles_dir.mkdir(parents=True, exist_ok=True)
@@ -774,7 +809,11 @@ class WebplusNoticeAdapter:
         return fallback if fallback in selected else selected[0]
 
     def _normalize_url(self, url: str) -> str:
+        url = url.strip()
         parsed = urlparse(url)
+        if parsed.hostname == urlparse(self.base_url).hostname:
+            parsed = parsed._replace(path=re.sub(r"^/_t\d+(?=/)", "", parsed.path), fragment="")
+            url = parsed.geturl()
         base = urlparse(self.base_url)
         if (
             parsed.scheme == "http"

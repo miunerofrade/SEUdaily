@@ -20,7 +20,7 @@ from seudaily.jwc import JWC_CATEGORIES, CseService, JwcService, _article_id
 
 def _list_html(items: list[tuple[str, str]]) -> str:
     links = "".join(f'<a href="{url}">{title}</a>' for url, title in items)
-    return f"<html><body>{links}</body></html>"
+    return f'<html><body><table class="wp_article_list_table"><tr><td>{links}</td></tr></table></body></html>'
 
 
 def _detail_html(title: str, date: str, body: str) -> str:
