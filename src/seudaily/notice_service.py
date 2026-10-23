@@ -1,31 +1,22 @@
 from __future__ import annotations
 from . import webplus_search, notice_sync
 
-import base64
 import hashlib
 import json
 import os
 import re
 import shutil
-import subprocess
-import sys
-import tempfile
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 from .json_store import write_json_atomic
 from .web_download import read_chunks
-from .notice_html import PARSER_VERSION
+from .notice_sites import create_site
 from .document_parser import SUPPORTED_DOCUMENT_EXTENSIONS, parse_document
 from .vpn import CampusProxyHandler, campus_proxy
 
@@ -99,7 +90,7 @@ class _NoticeOpener:
                 raise PermissionError("该通知仅限校园网或校园 VPN 访问")
             if re.search(r'<(?:!doctype|html|head|body)\b', text, re.I):
                 from .notice_html import validate_page
-                validate_page(text)
+                validate_page(text, check_text=False)
             return _NoticeResponse(response, prefix)
         except BaseException:
             response.close()
@@ -124,23 +115,8 @@ def public_opener(*handlers):
     return _NoticeOpener(handlers)
 
 
-from .webplus_page import (
-    _ARTICLE_PATH,
-    _SPACE,
-    _VOID_TAGS,
-    _load_notice_sources,
-    _load_notice_categories,
-    _NOTICE_SOURCES,
-    _NOTICE_CATEGORIES,
-    JWC_CATEGORIES,
-    CSE_CATEGORIES,
-    WebplusSiteConfig,
-    JWC_CONFIG,
-    CSE_CONFIG,
-    _clean,
-    _article_id,
-    _PageParser,
-)
+from .notice_sources import WebplusSiteConfig, JWC_CONFIG, CSE_CONFIG
+from .webplus_page import _ARTICLE_PATH, _article_id, _PageParser
 
 
 def _now() -> datetime:
@@ -151,8 +127,8 @@ def _iso_now() -> str:
     return _now().isoformat()
 
 
-class WebplusNoticeAdapter:
-    """WebPlus list/search/detail adapter with shared local-first persistence."""
+class NoticeService:
+    """Shared notice synchronization and persistence, composed with a site policy."""
 
     def __init__(
         self,
@@ -167,6 +143,7 @@ class WebplusNoticeAdapter:
         self.timeout_seconds = timeout_seconds
         self.background_sync = background_sync
         self.config = config
+        self.site = create_site(config, base_url=self.base_url)
         self.index_file = self.cache_dir / "index.json"
         self.articles_dir = self.cache_dir / "articles"
         self.versions_dir = self.cache_dir / "versions"
@@ -509,7 +486,7 @@ class WebplusNoticeAdapter:
             return {"version": 1, "categories": {}, "articles": []}
         data = json.loads(self.index_file.read_text(encoding="utf-8"))
         if data.get("version") != 1:
-            raise ValueError("不支持的教务处缓存版本")
+            raise ValueError("不支持的通知缓存版本")
         data.setdefault("categories", {})
         data.setdefault("articles", [])
         normalized: dict[str, dict[str, Any]] = {}
@@ -609,8 +586,6 @@ class WebplusNoticeAdapter:
     def _refresh_index(
         self, state: dict[str, Any], categories: list[str], *, pages: int
     ) -> list[str]:
-        from .notice_html import list_items
-
         articles = {item["id"]: item for item in state["articles"]}
         successes = 0
         failures = []
@@ -622,14 +597,14 @@ class WebplusNoticeAdapter:
                 url = urljoin(self.base_url, page_path)
                 key = f"page{page}"
                 stored_validators = category_state.get("validators", {}).get(key, {})
-                validators = stored_validators if stored_validators.get("parserVersion") == PARSER_VERSION else {}
+                validators = stored_validators if stored_validators.get("parserVersion") == self.site.cache_version("list", category=category) else {}
                 try:
                     response = self._fetch(url, validators)
                     if response["notModified"]:
                         if not validators:
                             raise ValueError("列表返回 304 但没有已验证的缓存")
                     else:
-                        entries = list_items(response["html"], response["url"])
+                        entries = self.site.parse_list(response["html"], response["url"], category)
                         for entry in entries:
                             link = self._normalize_url(entry["url"])
                             ident = _article_id(link, self.config.id_prefix)
@@ -641,7 +616,7 @@ class WebplusNoticeAdapter:
                         # A new validator is trusted only after parsing succeeds.
                         category_state.setdefault("validators", {})[key] = {
                             "etag": response.get("etag"), "lastModified": response.get("lastModified"),
-                            "parserVersion": PARSER_VERSION,
+                            "parserVersion": self.site.cache_version("list", category=category),
                         }
                     successes += 1
                     category_state["lastCheckedAt"] = _iso_now()
@@ -658,7 +633,7 @@ class WebplusNoticeAdapter:
         parser = _PageParser(response["url"], self.config)
         direct_attachment = response.get("attachment")
         if not direct_attachment:
-            parser.feed(response["html"])
+            parser = self.site.parse_detail(response["html"], response["url"])
         if not direct_attachment and not parser.content_seen and not parser.embedded_files:
             raise ValueError("通知正文结构未识别，学校页面可能已变更；保留已有缓存")
         title = parser.title or article.get("title", "")
@@ -705,7 +680,7 @@ class WebplusNoticeAdapter:
                 "validators": {
                     "etag": response.get("etag"),
                     "lastModified": response.get("lastModified"),
-                    "parserVersion": PARSER_VERSION,
+                    "parserVersion": self.site.cache_version("detail", response["url"]),
                 },
             }
         )
@@ -739,7 +714,7 @@ class WebplusNoticeAdapter:
                 if cached.get(key) is not None:
                     article[key] = cached[key]
         stored_validators = article.get("validators") or {}
-        validators = stored_validators if stored_validators.get("parserVersion") == PARSER_VERSION else {}
+        validators = stored_validators if stored_validators.get("parserVersion") == self.site.cache_version("detail", article["url"]) else {}
         response = self._fetch(article["url"], validators)
         if response["notModified"]:
             if not validators or not article.get("contentHash"):
@@ -852,7 +827,7 @@ class WebplusNoticeAdapter:
         }
 
 
-class JwcService(WebplusNoticeAdapter):
+class JwcService(NoticeService):
     """Compatibility entry for existing teaching-affairs callers."""
 
 

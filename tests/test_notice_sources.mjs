@@ -76,3 +76,17 @@ test('focus proposals validate columns against their selected source',async()=>{
  assert.throws(()=>focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'cse',categories:['academic']}));
  assert.throws(()=>focusActionSchema.parse({kind:'notice',title:'通知',description:'关注通知',source:'unknown'}));
 });
+
+test('site layout configuration is shared without changing the native tool surface',()=>{
+ const selectors={list:['bulletins'],listItem:['bulletin'],listTitle:['headline'],listDate:['published'],content:['body_text']};
+ const registry=loadNoticeSources({...noticeSources,civil:{...additional,selectors,singlePageCategories:['announcements']}});
+ assert.deepEqual(registry.civil.selectors,selectors);
+ assert.deepEqual(registry.civil.singlePageCategories,['announcements']);
+ const tools=createNoticeTools(registry,async()=>({status:'completed'}));
+ assert.deepEqual(Object.keys(tools).sort(),['queryCampusNoticesTool','readCampusNoticeTool']);
+ const value=tools.queryCampusNoticesTool.inputSchema.parse({source:'civil',mode:'latest'});
+ assert.equal(value.source,'civil');
+ for(const invalid of [{selectors:{list:[]}},{selectors:{listTitle:['a[href]']}},{singlePageCategories:['missing']}]){
+  assert.throws(()=>loadNoticeSources({civil:{...additional,...invalid}}));
+ }
+});

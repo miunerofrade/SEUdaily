@@ -13,14 +13,19 @@ def isolated_web_originals(monkeypatch, tmp_path):
     import seudaily.saved_web_files as saved
     monkeypatch.setattr(saved, 'root', lambda: tmp_path / 'web-files')
 
-import seudaily.jwc as jwc_module
+import seudaily.notice_service as jwc_module
 from seudaily.document_parser import parse_document as real_parse_document
-from seudaily.jwc import JWC_CATEGORIES, CseService, JwcService, _article_id
+from seudaily.notice_service import CseService, JwcService, _article_id
+from seudaily.notice_sources import JWC_CATEGORIES
 
 
 def _list_html(items: list[tuple[str, str]]) -> str:
-    links = "".join(f'<a href="{url}">{title}</a>' for url, title in items)
-    return f'<html><body><table class="wp_article_list_table"><tr><td>{links}</td></tr></table></body></html>'
+    links = "".join(
+        f'<div class="news-list-item"><div class="news-item-title"><a href="{url}">{title}</a></div></div>'
+        for url, title in items
+    )
+    return f'<html><body><div class="news-list-wrap">{links}</div></body></html>'
+
 
 
 def _detail_html(title: str, date: str, body: str) -> str:

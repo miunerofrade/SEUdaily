@@ -8,9 +8,14 @@ from pathlib import Path
 
 import pytest
 
-import seudaily.jwc as jwc
-from seudaily.jwc import CseService, JwcService, _article_id
-from seudaily.notice_html import list_items
+import seudaily.notice_service as jwc
+from seudaily.notice_service import CseService, JwcService, _article_id
+from functools import partial
+from seudaily.notice_sites import create_site
+from seudaily.notice_sources import JWC_CONFIG, CSE_CONFIG
+from seudaily.notice_readers import read_page
+
+list_items = partial(create_site(JWC_CONFIG).parse_list, category='academic')
 from seudaily.webplus_page import _PageParser
 
 FIXTURES = Path(__file__).parent / 'fixtures' / 'notices'
@@ -51,12 +56,12 @@ def test_live_jwc_div_list_uses_display_date_and_ignores_navigation():
 
 
 def test_live_cse_list_and_true_empty_column():
-    items = list_items(fixture('cse-undergraduate.html'), 'https://cse.seu.edu.cn')
+    items = create_site(CSE_CONFIG).parse_list(fixture('cse-undergraduate.html'), 'https://cse.seu.edu.cn', 'undergraduate_notices')
     assert len(items) == 14
     assert items[0]['title'] == '关于公示计算机科学与工程学院、软件学院、人工智能学院课程选用教材审核结果的通知'
     assert items[0]['publishedAt'] == '2026-09-24'
     assert items[0]['url'] == 'https://cse.seu.edu.cn/2026/0924/c49469a584397/page.htm'
-    assert list_items(fixture('cse-empty.html'), 'https://cse.seu.edu.cn') == []
+    assert create_site(CSE_CONFIG).parse_list(fixture('cse-empty.html'), 'https://cse.seu.edu.cn', 'employment') == []
 
 
 @pytest.mark.parametrize('url', [
@@ -150,7 +155,7 @@ def test_empty_body_rejected_but_normal_maintenance_notice_allowed(tmp_path):
 
 
 def test_static_column_is_one_article_not_an_empty_list():
-    items = list_items(fixture('jwc-static.html'), BASE + '/xzzq/list.htm')
+    items = create_site(JWC_CONFIG).parse_list(fixture('jwc-static.html'), BASE + '/xzzq/list.htm', 'downloads')
     assert len(items) == 1 and items[0]['url'] == BASE + '/xzzq/list.htm'
     assert items[0]['publishedAt'] == ''
 
@@ -272,7 +277,6 @@ def test_direct_file_listing_is_validated_before_becoming_attachment(monkeypatch
 
 
 def test_parser_upgrade_revalidates_old_empty_cache_once(tmp_path, monkeypatch):
-    from seudaily.notice_html import PARSER_VERSION
     service = JwcService(cache_dir=str(tmp_path), background_sync=False)
     state = {'version': 1, 'categories': {'academic': {
         'validators': {'page1': {'etag': 'old-empty-page'}}}}, 'articles': []}
@@ -284,12 +288,11 @@ def test_parser_upgrade_revalidates_old_empty_cache_once(tmp_path, monkeypatch):
     service._refresh_index(state, ['academic'], pages=1)
     service._refresh_index(state, ['academic'], pages=1)
     assert requests[0] == {}
-    assert requests[1]['etag'] == 'fresh' and requests[1]['parserVersion'] == PARSER_VERSION
+    assert requests[1]['etag'] == 'fresh' and requests[1]['parserVersion'] == service.site.cache_version('list')
     assert len(state['articles']) == 1
 
 
 def test_upgrade_refetches_old_body_instead_of_trusting_old_validator(tmp_path, monkeypatch):
-    from seudaily.notice_html import PARSER_VERSION
     service = JwcService(cache_dir=str(tmp_path / 'cache'), background_sync=False)
     article = {'id': 'seu-jwc-1', 'url': OLD_URL, 'title': '通知', 'category': 'academic',
                'contentHash': 'old-hash', 'validators': {'etag': 'old-body'}}
@@ -301,7 +304,7 @@ def test_upgrade_refetches_old_body_instead_of_trusting_old_validator(tmp_path, 
     service._refresh_article(article)
     assert requests == [{}]
     assert article['content'] == '已重新验证的正文'
-    assert article['validators']['parserVersion'] == PARSER_VERSION
+    assert article['validators']['parserVersion'] == service.site.cache_version('detail', article['url'])
 
 
 def test_nested_inline_title_and_body_scope_after_void_tags():
@@ -315,10 +318,9 @@ def test_nested_inline_title_and_body_scope_after_void_tags():
 
 
 def test_wechat_public_body_uses_its_own_container_and_lazy_images():
-    parser = _PageParser('https://mp.weixin.qq.com/s/example')
-    parser.feed('<h1 id="activity-name">微信通知</h1><div id="js_content">'
+    parser = read_page('<h1 id="activity-name">微信通知</h1><div id="js_content">'
                 '<p>公众号正文</p><img data-src="https://mmbiz.qpic.cn/example.jpg"></div>'
-                '<div>推荐阅读</div>')
+                '<div>推荐阅读</div>', 'https://mp.weixin.qq.com/s/example', JWC_CONFIG)
     assert parser.title == '微信通知' and parser.content == '公众号正文'
     assert parser.embedded_files == [{'url': 'https://mmbiz.qpic.cn/example.jpg', 'name': ''}]
 

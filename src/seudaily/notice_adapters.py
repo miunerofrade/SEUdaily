@@ -24,9 +24,9 @@ def create_notice_adapter(
     # Only registered implementations are allowed, never arbitrary module imports.
     if registry[key]["adapter"] != "webplus":
         raise ValueError(f"不支持的通知 adapter：{key}")
-    from .jwc import WebplusNoticeAdapter
+    from .notice_service import NoticeService
 
-    return WebplusNoticeAdapter(
+    return NoticeService(
         config=config,
         base_url=payload.get("baseUrl", f"https://{config.host}"),
         cache_dir=payload.get("cacheDir", f".seudaily/{key}"),

@@ -91,7 +91,7 @@ def _start_worker(self) -> None:
         sys.executable,
         "-m",
         "seudaily.cli",
-        "jwc-worker",
+        "notice-worker",
         json.dumps(
             {
                 "site": self.config.key,

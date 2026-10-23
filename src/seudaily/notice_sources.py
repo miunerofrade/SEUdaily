@@ -8,6 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_SELECTORS = {
+    "title": ("Article_Title",),
+    "date": ("Article_PublishDate",),
+    "content": ("wp_articlecontent", "Article_Content"),
+    "list": ("col_news_list", "wp_article_list_table", "wp_article_list", "wp_news_list", "articlelist"),
+    "listItem": (),
+    "listTitle": ("news_title", "Article_Title"),
+    "listDate": ("news_meta", "Article_PublishDate", "pubdate"),
+}
+
+
 @dataclass(frozen=True)
 class WebplusSiteConfig:
     key: str
@@ -20,6 +31,19 @@ class WebplusSiteConfig:
     host: str = ""
     search_type: str = ""
     attachment_label: str = ""
+    list_classes: frozenset[str] = frozenset(DEFAULT_SELECTORS["list"])
+    list_item_classes: frozenset[str] = frozenset()
+    list_title_classes: frozenset[str] = frozenset(DEFAULT_SELECTORS["listTitle"])
+    list_date_classes: frozenset[str] = frozenset(DEFAULT_SELECTORS["listDate"])
+    single_page_categories: frozenset[str] = frozenset()
+
+
+DEFAULT_WEBPLUS_CONFIG = WebplusSiteConfig(
+    key="webplus", name="WebPlus", id_prefix="webplus", categories={},
+    title_classes=frozenset(DEFAULT_SELECTORS["title"]),
+    date_classes=frozenset(DEFAULT_SELECTORS["date"]),
+    content_classes=frozenset(DEFAULT_SELECTORS["content"]),
+)
 
 
 def _load_notice_sources(path: Path) -> dict:
@@ -67,19 +91,15 @@ def _load_notice_sources(path: Path) -> dict:
         if not isinstance(selectors, dict) or set(selectors) - {
             "title",
             "date",
-            "content",
+            "content", "list", "listItem", "listTitle", "listDate",
         }:
             raise ValueError("通知选择器配置无效")
-        defaults = {
-            "title": ["Article_Title"],
-            "date": ["Article_PublishDate"],
-            "content": ["wp_articlecontent", "Article_Content"],
-        }
+        defaults = {key: list(values) for key, values in DEFAULT_SELECTORS.items()}
         for key, default in defaults.items():
             values = selectors.get(key, default)
             if (
                 not isinstance(values, list)
-                or not values
+                or (not values and (key != "listItem" or key in selectors))
                 or any(
                     not isinstance(v, str)
                     or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", v)
@@ -113,6 +133,10 @@ def _load_notice_sources(path: Path) -> dict:
             ):
                 raise ValueError(f"无效通知栏目配置：{site}/{key}")
             normalized["categories"][key] = tuple(entry)
+        single_pages = source.get("singlePageCategories", [])
+        if not isinstance(single_pages, list) or any(not isinstance(key, str) or key not in categories for key in single_pages):
+            raise ValueError("通知单页栏目配置无效")
+        normalized["singlePageCategories"] = single_pages
         display = source.get("displayCategories")
         if display is not None and (
             not isinstance(display, list)
@@ -160,6 +184,11 @@ def source_config(key: str, sources: dict | None = None) -> WebplusSiteConfig:
         content_classes=frozenset(source["selectors"]["content"]),
         search_type=source["searchType"],
         attachment_label=source.get("attachmentLabel", source["name"]),
+        list_classes=frozenset(source["selectors"]["list"]),
+        list_item_classes=frozenset(source["selectors"]["listItem"]),
+        list_title_classes=frozenset(source["selectors"]["listTitle"]),
+        list_date_classes=frozenset(source["selectors"]["listDate"]),
+        single_page_categories=frozenset(source.get("singlePageCategories", [])),
     )
 
 

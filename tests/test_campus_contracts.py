@@ -88,7 +88,7 @@ def test_unparsed_original_is_reused_by_attachment_reader(tmp_path, monkeypatch)
 
 
 def test_changed_notice_template_does_not_erase_body(tmp_path):
-    from seudaily.jwc import JwcService
+    from seudaily.notice_service import JwcService
     service = JwcService(cache_dir=tmp_path/'jwc', background_sync=False)
     article = {'url': 'https://jwc.seu.edu.cn/2026/1007/c1a2/page.htm',
                'title': '原通知', 'content': '重要正文', 'contentHash': 'original'}

@@ -29,7 +29,7 @@ Node 负责常驻服务、Agent 编排、权限、界面和知识库编排。Pyt
 - `campus_endpoints.py` 集中现有逆向接口的地址、应用编号和数据集映射。学校改接口时先检查这里，再调整对应字段归一化模块。
 - `campus_api.py` 统一 eHall 数据集解包和错误分类：合法空列表与缺失字段分开；403、维护页不触发重新登录。课表和培养方案刷新失败保留旧缓存，并返回失败原因。
 - `training_plan_normalize.py` 处理培养方案字段与选课规则；`training_plan_evidence.py` 处理课表证据与学分计算；`training_plan.py` 保留认证、抓取和查询入口。
-- `webplus_page.py` 负责通知站点配置与页面解析；`jwc.py` 负责同步与缓存。未识别正文结构时拒绝覆盖缓存。
+- `notice_sources.py` 统一校验通知来源配置；`notice_sites/` 封装站点规则，`notice_readers.py` 按正文目标网址选择解析规则，复用 `webplus_page.py` 等公共组件；`notice_service.py` 负责同步与缓存。未识别正文结构时拒绝覆盖缓存。
 - `browser_auth.py` 统一浏览器登录字段选择器；`json_store.py` 统一 Python JSON 原子写入。Node 对应写入机制在 `runtime/atomic-file.ts`；调用方负责业务锁。
 - `web_download.py` 统一有上限、可取消的下载和文件签名校验；`web_attachments.py` 统一附件保存与解析。完整原件复用，解析失败重试读取本地原件，解析临时副本自动清理。校历继续使用自己的清单和缓存策略。
 

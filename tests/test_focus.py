@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import seudaily.focus as focus_module
 from seudaily.focus import FocusSemanticModel, FocusService
-from seudaily.jwc import WebplusNoticeAdapter as JwcService
+from seudaily.notice_service import NoticeService as JwcService
 from seudaily.schedule import ScheduleService
 from seudaily.service import CourseService
 

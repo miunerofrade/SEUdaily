@@ -1,7 +1,8 @@
 import json
 import pytest
 
-from seudaily.jwc import CSE_CATEGORIES, JWC_CATEGORIES, JWC_CONFIG, CSE_CONFIG, CseService, _load_notice_categories
+from seudaily.notice_service import CseService
+from seudaily.notice_sources import CSE_CATEGORIES, JWC_CATEGORIES, JWC_CONFIG, CSE_CONFIG, _load_notice_categories
 
 def source_config(categories):
     return {key:{'name':'教务处' if key=='jwc' else '计软智学院','host':key+'.seu.edu.cn','categories':value} for key,value in categories.items()}

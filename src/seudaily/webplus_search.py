@@ -28,34 +28,10 @@ def _search_remote(
     ) as response:
         encoding = response.headers.get_content_charset() or "utf-8"
         listing_html = response.read().decode(encoding, errors="replace")
-    doc = validate_page(listing_html)
-    nodes = list(doc.root.walk())
-    form = next((n for n in nodes if n.tag == "form" and "/search/new.rst?" in n.attrs.get("action", "")), None)
-    hidden = next((n.attrs.get("value") for n in nodes if n.attrs.get("id") == "securl"), None)
-    if form:
-        search_page = urljoin(list_url, form.attrs["action"].strip())
-    elif hidden:
-        search_page = urljoin(list_url, hidden.strip())
-    else:
-        # New templates omit the form but retain the public WebPlus context.
-        # Reuse the same search protocol, deriving IDs from this page, not config.
-        site = next((n.attrs["sudy-wp-siteid"] for n in nodes if "sudy-wp-siteid" in n.attrs), "")
-        template = re.search(r"/template(\d+)/", listing_html)
-        column = re.search(r"[?&]columnId=(\d+)", unescape(listing_html))
-        if not site.isdigit() or not template or (category is not None and not column):
-            raise RuntimeError(f"栏目没有可用的站内搜索入口: {list_url}")
-        context = f"as={site}&t={template[1]}&p=2&"
-        if category is not None:
-            context += f"f={column[1]}&m=SN&|bnnColumnVirtualName={column[1]}&"
-        else:
-            context += "m=SN&"
-        encoded_context = base64.b64encode(context.encode()).decode().replace("=", "_")
-        search_page = urljoin(self.base_url, "/_web/_search/api/search/new.rst") + "?" + urlencode({
-            "locale": "zh_CN", "request_locale": "zh_CN", "context": "", "_p": encoded_context,
-        })
+    search_page, post_keyword = self.site.discover_search(listing_html, list_url, category)
     form_request = Request(
         search_page,
-        data=urlencode({"keyword": query, "submit": ""}).encode() if form or not hidden else None,
+        data=urlencode({"keyword": query, "submit": ""}).encode() if post_keyword else None,
         headers={
             **headers,
             "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",

@@ -7,6 +7,7 @@ const sourceSchema = z.object({
   attachmentLabel: z.string().trim().min(1).optional(),
   host: z.string().regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*\.seu\.edu\.cn$/),
   adapter: z.literal("webplus").optional(),
+  singlePageCategories: z.array(z.string()).optional(),
   displayCategories: z.array(z.string()).min(1).optional(),
   idPrefix: z
     .string()
@@ -18,6 +19,10 @@ const sourceSchema = z.object({
       title: selectors.optional(),
       date: selectors.optional(),
       content: selectors.optional(),
+      list: selectors.optional(),
+      listItem: selectors.optional(),
+      listTitle: selectors.optional(),
+      listDate: selectors.optional(),
     })
     .strict()
     .optional(),
@@ -54,6 +59,8 @@ export function loadNoticeSources(
       )
     )
       throw new Error("通知展示栏目无效");
+    if (source.singlePageCategories?.some(category => !source.categories![category]))
+      throw new Error("通知单页栏目配置无效");
     const entries = Object.values(source.categories);
     if (!entries.length) throw new Error("通知栏目配置不能为空");
     if (new Set(entries.map((entry) => entry[1])).size !== entries.length)

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 import pytest
-from seudaily import jwc, saved_web_files, cli
+from seudaily import notice_service as jwc, saved_web_files, cli
 from seudaily.notice_sources import _load_notice_sources, source_config
 from seudaily.notice_adapters import create_notice_adapter
 
@@ -21,12 +21,14 @@ def test_existing_adapters_preserve_list_and_search_results(tmp_path, monkeypatc
         fixture = {
             "notModified": False,
             "url": article_url,
-            "html": f'<a href="{article_url}">通知</a>',
+            "html": (f'<div class="news-list-wrap"><div class="news-list-item"><div class="news-item-title"><a href="{article_url}">通知</a></div></div></div>'
+                     if key == 'jwc' else f'<div class="col_news_list"><li class="news"><span class="news_title"><a href="{article_url}">通知</a></span></li></div>'),
         }
         for service in [new, old]:
             monkeypatch.setattr(service, "_fetch", lambda *a, **k: fixture)
         listed = new.list_articles(categories=[category])
         assert listed == old.list_articles(categories=[category])
+        assert listed['status'] == 'completed' and len(listed['results']) == 1
         for service in [new, old]:
             monkeypatch.setattr(
                 service,
@@ -104,7 +106,7 @@ def test_third_webplus_source_works_without_site_specific_service(
         {"name": "附件.pdf", "url": "https://civil.seu.edu.cn/files/a.pdf"}
     ]
     assert (tmp_path / "civil/articles/seu-civil-9.json").exists()
-    monkeypatch.setattr(cli, "_jwc_service", lambda payload: adapter)
+    monkeypatch.setattr(cli, "_notice_service", lambda payload: adapter)
     assert (
         cli.dispatch(
             {

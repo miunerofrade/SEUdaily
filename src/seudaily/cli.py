@@ -19,7 +19,6 @@ from .service import (
 )
 from .schedule import ScheduleService
 from .focus import FocusService
-from .jwc import CseService, JwcService
 from .protocol import normalize_tool_result
 from .runtime_paths import env_value, runtime_root
 from .training_plan import TrainingPlanService
@@ -52,7 +51,7 @@ def _schedule_service(payload: dict[str, Any]) -> ScheduleService:
     )
 
 
-def _jwc_service(payload: dict[str, Any]):
+def _notice_service(payload: dict[str, Any]):
     from .notice_adapters import create_notice_adapter
 
     return create_notice_adapter(payload)
@@ -307,7 +306,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
         if action in {"list-cse", "search-cse"}:
             payload["site"] = "cse"
         if action in {"list-notices", "list-jwc", "list-cse"}:
-            return _jwc_service(payload).list_articles(
+            return _notice_service(payload).list_articles(
                 categories=payload.get("categories"),
                 paths=payload.get("paths"),
                 freshness=payload.get("freshness", "latest"),
@@ -315,7 +314,7 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
                 recent_days=payload.get("recentDays", 7),
                 limit=payload.get("limit", 5),
             )
-        return _jwc_service(payload).search(
+        return _notice_service(payload).search(
             payload["query"],
             categories=payload.get("categories"),
             paths=payload.get("paths"),
@@ -327,12 +326,12 @@ def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
     if action in {"get-notice", "get-jwc-article", "get-cse-article"}:
         if action == "get-cse-article":
             payload["site"] = "cse"
-        return _jwc_service(payload).get_article(
+        return _notice_service(payload).get_article(
             payload["articleId"], refresh=payload.get("refresh", True)
         )
     if action == "sync-notice-pdf":
         payload["site"] = payload.get("site", "jwc")
-        return _jwc_service(payload).read_attachment(
+        return _notice_service(payload).read_attachment(
             payload["articleId"],
             attachment_number=payload["attachmentNumber"],
             refresh=False,
@@ -475,10 +474,10 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8")
     try:
         runtime_root(env_value("SEUDAILY_PROJECT_ROOT") or os.getcwd())
-        if len(sys.argv) >= 3 and sys.argv[1] == "jwc-worker":
+        if len(sys.argv) >= 3 and sys.argv[1] == "notice-worker":
             payload = json.loads(sys.argv[2])
             payload["backgroundSync"] = False
-            _jwc_service(payload).sync_pending()
+            _notice_service(payload).sync_pending()
             return
         request = json.load(sys.stdin)
         result = dispatch(request)

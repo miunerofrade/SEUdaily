@@ -45,6 +45,18 @@
       "content": [
         "wp_articlecontent",
         "Article_Content"
+      ],
+      "list": [
+        "news-list-wrap"
+      ],
+      "listItem": [
+        "news-list-item"
+      ],
+      "listTitle": [
+        "news-item-title"
+      ],
+      "listDate": [
+        "news-item-date-ym"
       ]
     },
     "displayCategories": [
@@ -53,6 +65,9 @@
       "lectures",
       "student_status",
       "practice"
+    ],
+    "singlePageCategories": [
+      "downloads"
     ]
   },
   "cse": {
@@ -111,9 +126,24 @@
       "content": [
         "wp_articlecontent",
         "Article_Content"
+      ],
+      "list": [
+        "col_news_list"
+      ],
+      "listItem": [
+        "news"
+      ],
+      "listTitle": [
+        "news_title"
+      ],
+      "listDate": [
+        "news_meta"
       ]
     },
-    "attachmentLabel": "计软智网站"
+    "attachmentLabel": "计软智网站",
+    "singlePageCategories": [
+      "recruitment"
+    ]
   },
   "news": {
     "name": "东大新闻网",

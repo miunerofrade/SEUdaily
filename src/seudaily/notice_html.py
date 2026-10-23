@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
+from .notice_sources import WebplusSiteConfig
+
 PARSER_VERSION = 2
 
 _VOID_TAGS = frozenset({
@@ -14,10 +16,6 @@ _VOID_TAGS = frozenset({
     'meta', 'param', 'source', 'track', 'wbr',
 })
 _BLOCK_TAGS = frozenset({'div', 'p', 'br', 'li', 'tr', 'td', 'section', 'article', 'h1', 'h2', 'h3'})
-_LIST_CLASSES = frozenset({
-    'news-list-wrap', 'col_news_list', 'wp_article_list_table',
-    'wp_article_list', 'wp_news_list', 'articlelist',
-})
 _DATE = re.compile(r'\b(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?')
 _ERROR = re.compile(
     r'当前\s*ip并非校内|仅(?:允许|限).{0,15}(?:校内|校园网)|'
@@ -89,22 +87,22 @@ class Document(HTMLParser):
         self.stack[-1].comments.append(data)
 
 
-def validate_page(html: str) -> Document:
+def validate_page(html: str, *, recognized_classes=frozenset(), recognized_ids=frozenset(), check_text: bool = True) -> Document:
     doc = Document(html)
     nodes = list(doc.root.walk())
     errors = [node for node in nodes if 'wp_error_msg' in node.classes]
     title = next((node.text for node in nodes if node.tag == 'title'), '')
     text = ' '.join(node.text for node in errors) if errors else doc.root.text
     recognized = any(
-        node.classes & (_LIST_CLASSES | {'wp_articlecontent', 'Article_Content'})
-        or node.attrs.get('id') == 'js_content'
+        node.classes & (recognized_classes | {'wp_articlecontent', 'Article_Content'})
+        or node.attrs.get('id') in recognized_ids
         for node in nodes
     )
     error_title = re.fullmatch(
         r'\s*(提示信息|系统提示|访问限制|访问受限|系统维护(?:中)?|网站维护(?:中)?|Access Denied|Service Unavailable)\s*',
         title, re.I,
     )
-    if errors or error_title or (not recognized and _ERROR.search(text)):
+    if errors or error_title or (check_text and not recognized and _ERROR.search(text)):
         message = re.sub(r'\s+', ' ', text).strip()[:180]
         if re.search('校内|校园网|VPN|登录|无权|拒绝|受限|验证|环境异常', message, re.I):
             raise PermissionError('通知访问受限，需要校园网、校园 VPN 或网页验证：' + message)
@@ -118,21 +116,23 @@ def link_url(base: str, href: str) -> str:
     parsed = urlsplit(url)
     if href.strip().startswith('#') or parsed.scheme not in {'http', 'https'}:
         return ''
+    if parsed.port == (443 if parsed.scheme == 'https' else 80):
+        url = parsed._replace(netloc=parsed.netloc.rsplit(':', 1)[0]).geturl()
     return url
 
 
-def list_items(html: str, base: str) -> list[dict[str, str]]:
+def parse_list(html: str, base: str, config: WebplusSiteConfig, *, single_page: bool = False) -> list[dict[str, str]]:
     """Unknown layouts fail explicitly; only scoped notice links are returned."""
-    doc = validate_page(html)
-    containers = [node for node in doc.root.walk() if node.classes & _LIST_CLASSES]
+    doc = validate_page(html, recognized_classes=config.list_classes | config.content_classes)
+    containers = [node for node in doc.root.walk() if node.classes & config.list_classes]
     if not containers:
         raise ValueError('通知列表结构未识别，学校页面可能已变更；不能当作空栏目')
     result = []
     seen = set()
     for container in containers:
-        static = next((n for n in container.walk() if 'wp_articlecontent' in n.classes), None)
+        static = next((n for n in container.walk() if n.classes & config.content_classes), None)
         # Some registered columns (downloads/recruitment) are single article pages.
-        if static is not None:
+        if single_page and static is not None:
             if not static.text.strip() and not any(
                 n.tag in {'img', 'iframe', 'embed', 'object', 'a'} or 'wp_pdf_player' in n.classes
                 for n in static.walk()
@@ -143,14 +143,15 @@ def list_items(html: str, base: str) -> list[dict[str, str]]:
                 result.append({'url': base, 'title': title, 'publishedAt': ''})
                 seen.add(base)
             continue
-        modern = 'news-list-wrap' in container.classes
-        rows = [n for n in container.walk() if 'news-list-item' in n.classes] if modern else [
+        rows = [n for n in container.walk() if n.classes & config.list_item_classes] if config.list_item_classes else [
             n for n in container.walk() if n.tag in {'li', 'tr'}
         ]
         for row in rows:
-            title_nodes = [n for n in row.walk() if n.classes & {'news-item-title', 'news_title', 'Article_Title'}]
+            title_nodes = [n for n in row.walk() if n.classes & config.list_title_classes]
+            if config.list_item_classes and not title_nodes:
+                raise ValueError('通知条目的标题结构未识别；保留已有缓存')
             anchors = [a for node in (title_nodes or [row]) for a in node.walk() if a.tag == 'a']
-            dates = [n for n in row.walk() if n.classes & {'news-item-date-ym', 'news_meta', 'Article_PublishDate', 'pubdate'}]
+            dates = [n for n in row.walk() if n.classes & config.list_date_classes]
             date = _DATE.search(' '.join(n.text for n in dates) or row.text)
             row_items = 0
             for anchor in anchors:
@@ -158,7 +159,7 @@ def list_items(html: str, base: str) -> list[dict[str, str]]:
                 title = re.sub(r'\s+', ' ', anchor.attrs.get('title', '').strip() or anchor.text).strip()
                 if not url or not title:
                     continue
-                if not title_nodes and not modern and not re.search(r'/c\d+a\d+/page\.', url):
+                if not title_nodes and not config.list_item_classes and not re.search(r'/c\d+a\d+/page\.', url):
                     continue
                 item_date = date or re.search(r'/(\d{4})/(\d{2})(\d{2})/', url)
                 if not item_date:
@@ -170,10 +171,12 @@ def list_items(html: str, base: str) -> list[dict[str, str]]:
                         'url': url, 'title': title,
                         'publishedAt': f'{int(item_date[1]):04}-{int(item_date[2]):02}-{int(item_date[3]):02}',
                     })
-            if modern and not row_items:
+            if config.list_item_classes and not row_items:
                 raise ValueError('通知列表条目缺少有效标题或链接；保留已有缓存')
-        if modern and not rows and any(n.tag == 'a' for n in container.walk()):
+        if config.list_item_classes and not rows and any(n.tag == 'a' for n in container.walk()):
             raise ValueError('通知列表容器存在但条目结构未识别')
+    if single_page and not result:
+        raise ValueError('单页栏目正文结构未识别；保留已有缓存')
     if not result:
         text = ' '.join(n.text for n in containers)
         empty_widget = any(

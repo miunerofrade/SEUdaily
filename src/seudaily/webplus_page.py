@@ -12,17 +12,7 @@ _SPACE = re.compile(r"\s+")
 from .notice_html import _VOID_TAGS, editor_resource, link_url, validate_page
 
 
-from .notice_sources import (
-    _load_notice_sources,
-    _load_notice_categories,
-    _NOTICE_SOURCES,
-    _NOTICE_CATEGORIES,
-    JWC_CATEGORIES,
-    CSE_CATEGORIES,
-    WebplusSiteConfig,
-    JWC_CONFIG,
-    CSE_CONFIG,
-)
+from .notice_sources import WebplusSiteConfig, DEFAULT_WEBPLUS_CONFIG
 
 
 def _clean(text: str) -> str:
@@ -39,10 +29,12 @@ def _article_id(url: str, prefix: str = "seu-jwc") -> str:
 class _PageParser(HTMLParser):
     """Parse article boundaries and resources without relying on nesting depth."""
 
-    def __init__(self, base_url: str, config: WebplusSiteConfig = JWC_CONFIG) -> None:
+    def __init__(self, base_url: str, config: WebplusSiteConfig = DEFAULT_WEBPLUS_CONFIG, *, content_ids=frozenset(), title_ids=frozenset()) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.config = config
+        self.content_ids = content_ids
+        self.title_ids = title_ids
         self.anchors: list[dict[str, str]] = []
         self.embedded_files: list[dict[str, str]] = []
         self.content_seen = False
@@ -56,16 +48,16 @@ class _PageParser(HTMLParser):
         return urljoin(url, values[0].strip()) if values else url
 
     def feed(self, html: str) -> None:
-        doc = validate_page(html)
+        doc = validate_page(html, recognized_classes=self.config.content_classes,
+                            recognized_ids=self.content_ids)
         nodes = list(doc.root.walk())
-        wechat = urlparse(self.base_url).hostname == 'mp.weixin.qq.com'
         contents = [n for n in nodes if n.classes & self.config.content_classes
-                    or (wechat and n.attrs.get('id') == 'js_content')]
+                    or n.attrs.get('id') in self.content_ids]
         inside = {id(n) for root in contents for n in root.walk()}
         self.content_seen = bool(contents)
         self.title = next((
             _clean(n.text) for n in nodes if n.classes & self.config.title_classes
-            or (wechat and n.attrs.get('id') == 'activity-name')
+            or n.attrs.get('id') in self.title_ids
         ), '')
         date = next((_clean(n.text) for n in nodes if n.classes & self.config.date_classes), '')
         match = re.search(r'\d{4}-\d{2}-\d{2}', date)
@@ -92,8 +84,8 @@ class _PageParser(HTMLParser):
             url = link_url(self.base_url, source)
             if not url:
                 continue
-            url = self._unwrap_file_url(url)
-            if editor_resource(url, node.attrs):
+            url = link_url(self.base_url, self._unwrap_file_url(url))
+            if not url or editor_resource(url, node.attrs):
                 continue
             metadata = node.attrs.get('sudyfile-attr', '')
             title = re.search(r"['\"]title['\"]\s*:\s*['\"]([^'\"]+)", metadata)
