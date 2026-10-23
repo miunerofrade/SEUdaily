@@ -15,6 +15,16 @@ function prepareNode(value: unknown, display: boolean): unknown {
   if (next.type === 'sqrt') next.body = {type:'paren', left:'(', right:')', body:next.body};
   if (next.type === 'supsub' && !['symbol','text','paren','opname','bigop'].includes((next.base as MathNode).type))
     next.base = {type:'paren', left:'(', right:')', body:next.base};
+  if (next.type === 'supsub' && next.sub) {
+    const sub = boxToString(renderNode(next.sub as MathNode, {display:false, unicode:true, ansi:false}), {ansi:false, trim:true}).trim();
+    // Letter subscripts such as U+2099 (ₙ) are missing in some terminal fonts.
+    // Expand before layout so fraction bars and alignment use the actual width.
+    if (sub && !sub.includes('\n') && !/^[0-9+\-=() ]+$/.test(sub)) {
+      const label = Array.from(sub).length === 1 ? `_${sub}` : `_(${sub})`;
+      const base = {type:'group', children:[next.base, {type:'text', value:label}]};
+      return next.sup ? {...next, base, sub:undefined} : base;
+    }
+  }
   if (next.type === 'frac') {
     if (display) next.variant = 'display';
     else {

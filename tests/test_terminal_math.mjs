@@ -13,6 +13,17 @@ test('terminal renders inline scripts and Greek symbols with both delimiter styl
     assert.match(answer('公式 '+formula+'，继续。'), /公式 x₁² \+ α，继续。/);
 });
 
+test('Fibonacci letter subscripts use portable labels before fraction layout',()=>{
+  const recurrence=answer(String.raw`关于斐波那契数列，$F_1=1, F_2=1, F_n=F_{n-1}+F_{n-2}$。`);
+  assert.match(recurrence,/F₁ = 1/);assert.match(recurrence,/F_n = F_\(n - 1\) \+ F_\(n - 2\)/);
+  const source=String.raw`\[F_n=\frac{\varphi^n-\psi^n}{\sqrt5},\quad\varphi=\frac{1+\sqrt5}{2},\quad\psi=\frac{1-\sqrt5}{2}\]`;
+  const display=answer(source,160);
+  assert.match(display,/F_n = ─+/);assert.match(display,/φⁿ - ψⁿ/);assert.match(display,/√\(5\)/);
+  assert.match(answer('$a_i+x_n^2+F_{123}$'),/a_i \+ x_n² \+ F₁₂₃/);
+  assert.doesNotMatch(recurrence+display+answer('$a_{ij}+x_{n_i}$'),/[\u2090-\u209c\u1d62-\u1d65\u2c7c\ufffd]/);
+  assert.equal(terminalMath(source,6).text,source);
+});
+
 test('display fraction and radical preserve numerator, denominator, scope and surrounding prose',()=>{
   const text=answer(String.raw`前文\[x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}\]后文`);
   assert.match(text,/前文\n/);

@@ -45,7 +45,7 @@ export async function run() {
     } else {
       yield { type: 'text-delta', payload: { text: '流式中文' } };
       await new Promise(resolve => setTimeout(resolve, 100));
-      yield { type: 'text-delta', payload: { text: '回答完成\n$$\\frac{1}{2}$$\n公式 $x^2$' } };
+      yield { type: 'text-delta', payload: { text: '回答完成\n$$\\frac{1}{2}$$\n公式 $x^2$ 和 $F_n=F_{n-1}+F_{n-2}$' } };
       yield { type: 'finish', payload: {} };
     }
   };
