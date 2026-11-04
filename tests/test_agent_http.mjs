@@ -23,6 +23,17 @@ test('HTTP skill discovery, AGENTS.md settings and bound approval recovery',asyn
  t.after(async()=>{await agentRuntime.shutdown();await agentStore.close();await rm(root,{recursive:true,force:true});});
  assert.equal(await readFile(join(root,'AGENTS.md'),'utf8'),'LEGACY_AGENT_RULE');
  assert.equal((await (await request('/app/settings')).json()).agentInstructions,'LEGACY_AGENT_RULE');
+ const hook='https://open.feishu.cn/open-apis/bot/v2/hook/settings-fixture';
+ const configured=await request('/app/settings',{values:{SEUDAILY_FEISHU_WEBHOOK:hook,SEUDAILY_FEISHU_SECRET:'fixture-signing-key'}});
+ assert.equal(configured.status,200);assert.equal((await configured.json()).restartRequired,false);
+ for(const name of ['SEUDAILY_FEISHU_WEBHOOK','SEUDAILY_FEISHU_SECRET']){
+  const field=(await (await request('/app/settings')).json()).fields.find(f=>f.name===name);
+  assert.equal(field.secret,true);assert.equal(field.configured,true);assert.equal(field.value,'');
+ }
+ await request('/app/settings',{values:{SEUDAILY_FEISHU_WEBHOOK:'',SEUDAILY_FEISHU_SECRET:''}});
+ assert.match(await readFile(join(root,'.env'),'utf8'),/fixture-signing-key/);
+ assert.equal((await request('/app/settings',{values:{SEUDAILY_FEISHU_WEBHOOK:'https://evil.invalid/hook'}})).status,400);
+ assert.equal(process.env.SEUDAILY_FEISHU_WEBHOOK,hook);
  const effortSaved=await request('/app/agent-info',{effort:'low'});assert.equal(effortSaved.status,200);
  assert.equal((await (await request('/app/agent-info')).json()).effort,'low');
  assert.match(await readFile(join(root,'.env'),'utf8'),/DEEPSEEK_REASONING_EFFORT=low/);

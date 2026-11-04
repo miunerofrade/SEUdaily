@@ -1,3 +1,4 @@
+import {validFeishuWebhook} from './deadlines/feishu.js';
 import {reasoningEfforts} from '../shared/reasoning-effort.js';
 import {
   parseEnv,
@@ -179,6 +180,10 @@ export const settingsRoutes = [
         if (typeof value === "string" && value.trim())
           values[name] = value.trim();
       }
+      if (values.SEUDAILY_FEISHU_WEBHOOK) {
+        try { validFeishuWebhook(values.SEUDAILY_FEISHU_WEBHOOK); }
+        catch { return c.json({error:'请填写有效的飞书群机器人 Webhook 地址'},400); }
+      }
       await updateEnvFile(values);
       if (Object.hasOwn(values, "SEUDAILY_FULL_ACCESS")) {
         setFullAccessEnabled(
@@ -206,6 +211,8 @@ export const settingsRoutes = [
       const restartRequired = Object.keys(values).some(
         (name) =>
           ![
+            "SEUDAILY_FEISHU_WEBHOOK",
+            "SEUDAILY_FEISHU_SECRET",
             "SEUDAILY_FULL_ACCESS",
             "SEUDAILY_FULL_ACCESS_EXTRA",
             "DASHSCOPE_API_KEY",

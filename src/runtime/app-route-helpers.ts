@@ -7,6 +7,8 @@ export const FOCUS_RESOURCE_ID = "seudaily-focus-local";
 export const editableEnvironment = [
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_MODEL",
+  "SEUDAILY_FEISHU_WEBHOOK",
+  "SEUDAILY_FEISHU_SECRET",
   "TAVILY_API_KEY",
   "DASHSCOPE_API_KEY",
   "SEUDAILY_EMBEDDING_MODEL",
@@ -23,6 +25,8 @@ export const editableEnvironment = [
 ] as const;
 
 export const secretEnvironment = new Set([
+  "SEUDAILY_FEISHU_WEBHOOK",
+  "SEUDAILY_FEISHU_SECRET",
   "DASHSCOPE_API_KEY",
   "DEEPSEEK_API_KEY",
   "TAVILY_API_KEY",
