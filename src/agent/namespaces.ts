@@ -10,5 +10,6 @@ export function inferToolNamespaces(text: string): string[] {
     if (/校历|节假日|放假|补课安排|https?:\/\/|上网查|网页|互联网|新闻|最新信息|web search|search online/i.test(text)) selected.add('web');
     if (/打开.*网页|浏览器|点击|输入|填写|下拉|页面交互|playwright|browser/i.test(text)) selected.add('browser');
     if (/修改.*文件|编辑.*代码|运行.*命令|终端|项目目录|workspace|terminal/i.test(text)) selected.add('workspace');
+    if (/ddl|deadline|截止|倒计时|飞书.*提醒|提醒.*提交/i.test(text)) selected.add('deadlines');
     return [...selected];
 }

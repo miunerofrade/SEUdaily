@@ -7,6 +7,8 @@ import { stopMessageQueue } from './message-queue.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runtimeRoot } from '../runtime/runtime-paths.js';
+import {startDeadlines,stopDeadlines,deadlineStore} from '../runtime/deadlines/runtime.js';
+import {ensurePersistentRuntime} from './lifecycle.js';
 import { startClientReaper } from './lifecycle.js';
 import { serve } from '@hono/node-server';
 import { app } from './app.js';
@@ -28,6 +30,9 @@ let stopping = false;
 // A saved channel determines service lifetime. Restore it before advertising readiness;
 // reference indexing may be much slower on Windows and must not delay that decision.
 await startWeChatRuntime();
+await deadlineStore.ready;
+if(await deadlineStore.hasPending())ensurePersistentRuntime();
+startDeadlines();
 const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: Number(process.env.SEUDAILY_PORT ?? 4111) }, () => {
     console.log(`SEUdaily API ready at http://127.0.0.1:${process.env.SEUDAILY_PORT ?? 4111}`);
     void agentStore.ready.then(async () => {
@@ -43,6 +48,7 @@ async function shutdown(code = 0) {
         return;
     stopping = true;
     const queueStopped = stopMessageQueue();
+    const deadlinesStopped=stopDeadlines();
     const noticeStopped = noticeAttachments.stop();
     const knowledgeStopped = knowledge.stop();
     stopClientReaper();
@@ -52,7 +58,7 @@ async function shutdown(code = 0) {
     const deadline = setTimeout(() => process.exit(code), 15_000);
     deadline.unref();
     closeApplicationWorkspace();
-    await Promise.allSettled([wechatRuntime.close(), agentRuntime.shutdown(), closePythonWorker(), closeBrowserTools(), queueStopped, knowledgeStopped, noticeStopped]);
+    await Promise.allSettled([wechatRuntime.close(), agentRuntime.shutdown(), closePythonWorker(), closeBrowserTools(), queueStopped, knowledgeStopped, noticeStopped, deadlinesStopped]);
     await agentStore.close();
     clearTimeout(deadline);
     process.exit(code);

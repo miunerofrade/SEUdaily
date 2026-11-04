@@ -15,14 +15,16 @@ import {
 } from "./course-tools.js";
 import { readWebPageTool } from "./web-reader.js";
 import { searchKnowledgeTool } from "./knowledge-tools.js";
+import {manageDeadlinesTool} from './deadlines.js';
 import { webSearchTool } from "./web-search.js";
 
-export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace", "knowledge"]);
+export const toolNamespaceSchema = z.enum(["schedule", "course-materials", "notices", "training-plan", "web", "browser", "local-actions", "workspace", "knowledge", "deadlines"]);
 export type ToolNamespace = z.infer<typeof toolNamespaceSchema>;
 
 type AnyTool = any;
 type Capability = { namespace: ToolNamespace; tool: AnyTool; aliases: string[]; approvalRequired?: boolean };
 const staticCapabilities: Capability[] = [
+  {namespace:"deadlines",tool:manageDeadlinesTool,aliases:["ddl","deadline","截止","倒计时","提醒","飞书","due date"]},
   { namespace: "knowledge", tool: searchKnowledgeTool, aliases: ["知识库", "上传资料", "我的文件", "文档检索", "knowledge", "rag"] },
   { namespace: "schedule", tool: getScheduleTool, aliases: ["课表", "schedule", "timetable", "上课"] },
   { namespace: "local-actions", tool: proposeLocalActionTool, aliases: ["修改课表", "移动课程", "创建关注", "focus", "edit schedule"] },

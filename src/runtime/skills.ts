@@ -7,14 +7,17 @@ import { projectRoot } from './runtime-paths.js';
 
 export type SkillInfo = { name: string; description: string; namespaces: string[] };
 const namePattern = /^[a-z0-9][a-z0-9-]{0,79}$/;
-const namespaces = ['schedule', 'course-materials', 'notices', 'training-plan', 'web', 'browser', 'local-actions', 'workspace'];
+const namespaces = ['schedule', 'course-materials', 'notices', 'training-plan', 'web', 'browser', 'local-actions', 'workspace', 'deadlines'];
 
 export class SkillCatalog {
-    constructor(private root = resolve(projectRoot, '.agent', 'skills')) {}
+    constructor(private root = resolve(projectRoot, '.agent', 'skills'), private bundledRoot = process.env.SEUDAILY_INSTALL_ROOT ? resolve(process.env.SEUDAILY_INSTALL_ROOT, 'dist', 'skills') : undefined) {}
     private async file(name: string, path = 'SKILL.md') {
         if (!namePattern.test(name)) throw new Error('无效 Skill 名称');
         if (path.split(/[\\/]/).includes('..')) throw new Error('Skill 路径不得包含上级目录');
-        const root = await realpath(this.root);
+        let selectedRoot = this.root;
+        try { await realpath(resolve(selectedRoot, name)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || !this.bundledRoot) throw error; selectedRoot = this.bundledRoot; }
+        const root = await realpath(selectedRoot);
         const directory = await realpath(resolve(root, name));
         const target = await realpath(resolve(directory, path));
         for (const [base, child] of [[root, directory], [directory, target]]) {
@@ -27,12 +30,13 @@ export class SkillCatalog {
         return content;
     }
     async list(): Promise<SkillInfo[]> {
-        const entries = await readdir(this.root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-            if (error.code === 'ENOENT') return [];
-            throw error;
-        });
+        const entries = new Map<string, {name:string;isDirectory():boolean}>();
+        for (const root of [this.bundledRoot, this.root].filter((value): value is string => !!value)) {
+            const files = await readdir(root, {withFileTypes:true}).catch((error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return [];throw error;});
+            for(const file of files) entries.set(file.name,file);
+        }
         const skills: SkillInfo[] = [];
-        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        for (const entry of [...entries.values()].sort((a, b) => a.name.localeCompare(b.name))) {
             if (!entry.isDirectory() || !namePattern.test(entry.name)) continue;
             const content = await this.file(entry.name);
             const header = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? '';
