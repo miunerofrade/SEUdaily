@@ -338,24 +338,46 @@ def test_asr_cancel_or_timeout_reaps_only_asr_child(monkeypatch, tmp_path, cance
     monkeypatch.setattr(cloud, "_recognize_file", _slow_recognition)
     worker = cloud.CloudASRWorker({"asr_api_key": "test", "asr_timeout_seconds": 10 if cancel else 0.1}, tmp_path)
     worker.temp_audio_path = str(audio)
-    stopped = []
-    original = cloud._stop_child
-    def stop(process):
-        original(process)
-        stopped.append(not process.is_alive())
-    monkeypatch.setattr(cloud, "_stop_child", stop)
-    timer = threading.Timer(0.15, event.set) if cancel else None
-    if timer:
-        timer.start()
-    started = time.monotonic()
+    # Windows spawn/import and two-stage cleanup have no two-second SLA.
+    # Observe the real process lifecycle instead of benchmarking the CI machine.
+    context = cloud.multiprocessing.get_context("spawn")
+    unrelated = context.Process(target=_slow_recognition, args=(None,), daemon=True)
+    unrelated.start()
+    reaped = []
+
+    class ObservedProcess:
+        def __init__(self, *args, **kwargs):
+            self.child = context.Process(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self.child, name)
+
+        def start(self):
+            self.child.start()
+            if cancel:
+                event.set()
+
+        def close(self):
+            reaped.append(not self.child.is_alive())
+            self.child.close()
+
+    monkeypatch.setattr(cloud.multiprocessing, "get_context", lambda _method: SimpleNamespace(
+        Pipe=context.Pipe, Process=ObservedProcess,
+    ))
     try:
         with pytest.raises(TaskCancelledError if cancel else TimeoutError):
             list(worker.transcribe_and_export("test"))
+        assert reaped == [True]
+        assert unrelated.is_alive(), "ASR cancellation must not terminate other children"
     finally:
-        if timer:
-            timer.join()
-    assert time.monotonic() - started < 2
-    assert stopped == [True]
+        if unrelated.is_alive():
+            unrelated.terminate()
+        unrelated.join(timeout=5)
+        if unrelated.is_alive():
+            unrelated.kill()
+            unrelated.join(timeout=5)
+        assert not unrelated.is_alive()
+        unrelated.close()
     assert audio.read_bytes() == b"owned input"
     assert not (tmp_path / "test_transcript.txt").exists()
 

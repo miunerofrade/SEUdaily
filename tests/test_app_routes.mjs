@@ -1,46 +1,32 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import vm from 'node:vm';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import ts from 'typescript';
-import {redactText} from '../src/agent/redaction.ts';
-import { z } from 'zod';
-import {localActionProposalSchema,localActionExecutionPayload,localOperations} from '../src/runtime/local-action-schema.ts';
-import { atomicWrite } from '../src/runtime/atomic-file.ts';
-const diskSource = await fs.readFile(new URL('../src/shared/disk-size.ts', import.meta.url), 'utf8');
-const diskCompiled = ts.transpileModule(diskSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const { diskSize } = await import(`data:text/javascript;base64,${Buffer.from(diskCompiled).toString('base64')}`);
-
-// Exercise the actual route helpers without initializing agents or API clients.
-const source = (await Promise.all(['app-route-helpers', 'app-routes-conversations', 'app-routes-schedule', 'app-routes-library', 'app-routes-settings', 'app-routes'].map(name => fs.readFile(new URL(`../src/runtime/${name}.ts`, import.meta.url), 'utf8')))).join('\n');
-const ast = ts.createSourceFile('app-routes.ts', source, ts.ScriptTarget.Latest, true);
-const functions = new Set(['isWithinDirectory', 'safeLibraryTarget', 'libraryIdentity', 'walkFiles', 'readEnvFile', 'encodeEnvValue', 'persistEnvFile', 'updateEnvFile']);
-const librarySource = await fs.readFile(new URL('../src/runtime/library-files.ts', import.meta.url), 'utf8');
-const libraryAst = ts.createSourceFile('library-files.ts', librarySource, ts.ScriptTarget.Latest, true);
-const libraryDeclarations = libraryAst.statements.filter(statement=>!ts.isImportDeclaration(statement)).map(statement=>statement.getText(libraryAst)).join('\n');
-const declarations = ast.statements.filter((statement) =>
-  ts.isFunctionDeclaration(statement) && functions.has(statement.name?.text) ||
-  ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ['libraryRoots', 'envWriteQueue', 'FOCUS_RESOURCE_ID', 'conversationsRoutes', 'scheduleRoutes', 'libraryRoutes', 'settingsRoutes', 'appRoutes'].includes(declaration.name.getText(ast)))
-).map((statement) => statement.getText(ast)).join('\n');
-const envSource = await fs.readFile(new URL('../src/runtime/environment-settings.ts', import.meta.url), 'utf8');
-const envAst = ts.createSourceFile('environment-settings.ts', envSource, ts.ScriptTarget.Latest, true);
-const envDeclarations = envAst.statements.filter(statement => !ts.isImportDeclaration(statement)).map(statement => statement.getText(envAst)).join('\n');
-const compiled = ts.transpileModule(envDeclarations + '\n' + libraryDeclarations + '\n' + declarations, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+import {moduleFixture} from './helpers/module-fixture.mjs';
 
 async function fixture(t) {
   const projectRoot = await fs.mkdtemp(path.join(tmpdir(), 'seudaily-routes-'));
-  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
-  const calls = [];
-  const context = vm.createContext({ localActionProposalSchema,localActionExecutionPayload,localOperations, ...fs, ...path, randomUUID, z, diskSize, redactText, atomicWrite, resolveDocumentContexts:()=>[],
-    require: module => {assert.equal(module,"./knowledge/index.js");return {knowledge:{list:async()=>[],sources:async()=>[],enqueue:async(name,bytes,markdown)=>({id:"fixture",state:"queued",duplicate:false})}};},
-    runPythonTool: async (action, payload) => { calls.push({ action, payload }); return { status: 'completed', data: { state: 'connected' } }; },
-    resultResponse: result => result, fullResultData: async result => result.data, process: { platform: process.platform, env: {} }, projectRoot, exports: {}, registerApiRoute: (route, options) => ({ route, ...options }) });
-  vm.runInContext(`${compiled}\nglobalThis.helpers = { safeLibraryTarget, walkFiles, updateEnvFile, routes: exports.appRoutes };`, context);
-  await fs.mkdir(path.join(projectRoot, 'exports'));
-  return { projectRoot, context, calls, ...context.helpers };
+  const key='routeFixture'+randomUUID(),calls=[];
+  const context={process,runPythonTool:async(action,payload)=>{calls.push({action,payload});return {status:'completed',data:{state:'connected'}};},
+    claimActionRequest:async()=>({state:'missing'}),completeActionRequest:async()=>{},failActionRequest:async()=>{},
+    knowledge:{list:async()=>[],sources:async()=>[],enqueue:async()=>({id:'fixture',state:'queued',duplicate:false})}};
+  globalThis[key]=context;
+  const ref=`globalThis[${JSON.stringify(key)}]`;
+  const envNames=['SEUDAILY_TEST_FIRST','SEUDAILY_TEST_SECOND','SEUDAILY_TEST_THIRD','SEUDAILY_TEST_FAILED','SEUDAILY_TEST_RECOVERED'];
+  const previous=Object.fromEntries(envNames.map(name=>[name,process.env[name]]));
+  t.after(async()=>{delete globalThis[key];for(const name of envNames){if(previous[name]===undefined)delete process.env[name];else process.env[name]=previous[name];}await fs.rm(projectRoot,{recursive:true,force:true});});
+  await fs.mkdir(path.join(projectRoot,'exports'));await fs.mkdir(path.join(projectRoot,'.seudaily'));
+  const exports=await moduleFixture(projectRoot,`export {appRoutes} from './src/runtime/app-routes.ts';export {safeLibraryTarget,walkFiles} from './src/runtime/library-files.ts';export {updateEnvFile} from './src/runtime/environment-settings.ts';export {resolveDocumentContexts} from './src/runtime/document-context.ts';`,{
+    '/runtime-paths.js':`export const projectRoot=${JSON.stringify(projectRoot)};export const runtimeRoot=${JSON.stringify(path.join(projectRoot,'.seudaily'))};export const agentInstructionsPath=${JSON.stringify(path.join(projectRoot,'AGENTS.md'))};export const envValue=(name,fallback)=>process.env[name]??fallback;`,
+    '/application.js':'export const agentRuntime={isActive:()=>false};',
+    '/storage.js':'export const agentStore={};',
+    '/tools/python-bridge.js':`export const runPythonTool=(...args)=>${ref}.runPythonTool(...args);`,
+    '/knowledge/index.js':`export const knowledge=${ref}.knowledge;`,
+    '/action-request-store.js':`export const claimActionRequest=(...args)=>${ref}.claimActionRequest(...args);export const completeActionRequest=(...args)=>${ref}.completeActionRequest(...args);export const failActionRequest=(...args)=>${ref}.failActionRequest(...args);export const activateActionRequest=async()=>({});export const listActionRequests=async()=>[];export const getActionRequest=async()=>undefined;export const createActionRequest=async()=>({});`,
+  });
+  return {projectRoot,context,calls,...exports,routes:exports.appRoutes};
 }
 
 test('library preview and listing reject file and directory symlink escapes', async (t) => {
@@ -58,9 +44,9 @@ test('library preview and listing reject file and directory symlink escapes', as
   assert.equal(await f.safeLibraryTarget(hidden), null);
   const escapedPath = path.join(library, 'directory-link', 'hidden.txt');
   const response = (body, status = 200) => ({ body, status });
-  const previewRoute = f.routes.find((route) => route.route === '/app/library/preview');
+  const previewRoute = f.routes.find((route) => route.path === '/app/library/preview');
   assert.equal((await previewRoute.handler({ req: { query: () => escapedPath }, json: response })).status, 403);
-  const deleteRoute = f.routes.find((route) => route.route === '/app/library' && route.method === 'DELETE');
+  const deleteRoute = f.routes.find((route) => route.path === '/app/library' && route.method === 'DELETE');
   assert.equal((await deleteRoute.handler({ req: { json: async () => ({ path: escapedPath }) }, json: response })).status, 403);
 
   assert.equal(await f.safeLibraryTarget(library), null);
@@ -115,12 +101,12 @@ test('failed env persistence does not change process config or poison subsequent
 test('VPN controls use the worker and RAMdisk accepts custom capacity', async (t) => {
   const f = await fixture(t);
   const json = (body) => body;
-  const vpn = f.routes.find(route => route.route === '/app/vpn' && route.method === 'POST');
+  const vpn = f.routes.find(route => route.path === '/app/vpn' && route.method === 'POST');
   const response = await vpn.handler({ req: { json: async () => ({ action: 'connect', port: 12081 }) }, json });
   assert.equal(response.data.state, 'connected');
   assert.equal(f.calls[0].action, 'vpn-connect');
   assert.equal(f.calls[0].payload.port, 12081);
-  const ramdisk = f.routes.find(route => route.route === '/app/ramdisk' && route.method === 'POST');
+  const ramdisk = f.routes.find(route => route.path === '/app/ramdisk' && route.method === 'POST');
   await ramdisk.handler({ req: { json: async () => ({ action: 'mount', size: '1.5 GB' }) }, json });
   assert.equal(f.calls[1].payload.size, '1536M');
 });
@@ -128,10 +114,6 @@ test('VPN controls use the worker and RAMdisk accepts custom capacity', async (t
 test('successful document uploads retain originals while temporary parser inputs are removed', async t => {
   const { createHash } = await import('node:crypto');
   const f = await fixture(t);
-  const contexts = new Map();
-  Object.assign(f.context, { File, Buffer, tmpdir, createHash,
-    supportedDocumentExtensions: new Set(['.pdf']), documentMediaTypes: {'.pdf':'application/pdf'},
-    storeDocumentContext: (ref,name,markdown) => contexts.set(ref,{name,markdown}) });
   const bytes = Buffer.from('%PDF-1.4 fixture');
   let parserPath;
   f.context.runPythonTool = async (action, payload) => {
@@ -139,13 +121,13 @@ test('successful document uploads retain originals while temporary parser inputs
     assert.deepEqual(await fs.readFile(parserPath),bytes);
     return {status:'completed',data:{markdown:'parsed text',filename:payload.filename,charCount:11}};
   };
-  const route = f.routes.find(r => r.route==='/app/documents');
+  const route = f.routes.find(r => r.path==='/app/documents');
   const result = await route.handler({req:{parseBody:async () => ({file:new File([bytes],'课程.pdf')})},json:(body,status=200) => ({body,status})});
   assert.equal(result.status,200);
   assert.equal(result.body.filename,'课程.pdf');
   assert.deepEqual(await fs.readFile(result.body.path),bytes);
   assert.equal(result.body.sha256,createHash('sha256').update(bytes).digest('hex'));
-  assert.equal(contexts.get(result.body.contextRef).markdown,'parsed text');
+  assert.deepEqual(f.resolveDocumentContexts([result.body.contextRef]), [{name:'课程.pdf',markdown:'parsed text'}]);
   await assert.rejects(fs.stat(parserPath),{code:'ENOENT'});
   f.context.runPythonTool = async () => ({status:'failed',summary:'cannot parse'});
   const failed = await route.handler({req:{parseBody:async () => ({file:new File([bytes],'失败.pdf')})},json:(body,status=200) => ({body,status})});
@@ -158,7 +140,7 @@ test('approved schedule payload retains its operation through execution',async t
  f.context.claimActionRequest=async()=>({state:'claimed',request:{id:'action-fixture',attemptId:'attempt',payload:{kind:'set_semester',payload:{operation:'semester',semester:{startDate:'2026-09-21'}}}}});
  f.context.completeActionRequest=async(...args)=>completed.push(args);
  f.context.failActionRequest=async()=>assert.fail('valid approved operation must execute');
- const route=f.routes.find(route=>route.route==='/app/action-requests/:id/execute');
+ const route=f.routes.find(route=>route.path==='/app/action-requests/:id/execute');
  const response=await route.handler({req:{param:()=> 'action-fixture'},json:(body,status)=>({body,status})});
  assert.equal(response.status,200);
  assert.equal(f.calls[0].action,'apply-agent-schedule-change');

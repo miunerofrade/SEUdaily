@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import ts from 'typescript';
-const source = await readFile(new URL('../src/runtime/tools/browser-config.ts', import.meta.url), 'utf8');
-const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const { playwrightBrowserConfig, browserChildEnvironment } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+import {playwrightBrowserConfig,browserChildEnvironment} from '../src/runtime/tools/browser-config.ts';
+
 test('browser subprocess receives the same cache path as the installer',()=>{
  assert.deepEqual(browserChildEnvironment({PLAYWRIGHT_BROWSERS_PATH:'/custom/cache',DEEPSEEK_API_KEY:'private'}),{PLAYWRIGHT_BROWSERS_PATH:'/custom/cache'});
  assert.deepEqual(browserChildEnvironment({}),{});
